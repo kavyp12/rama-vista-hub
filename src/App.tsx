@@ -11,6 +11,11 @@ import Properties from "./pages/Properties";
 import Projects from "./pages/Projects";
 import SiteVisits from "./pages/SiteVisits";
 import Pipeline from "./pages/Pipeline";
+import Telecalling from "./pages/Telecalling";
+import Marketing from "./pages/Marketing";
+import Documents from "./pages/Documents";
+import Payments from "./pages/Payments";
+import Reports from "./pages/Reports";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,10 +37,11 @@ const App = () => (
             <Route path="/site-visits" element={<SiteVisits />} />
             <Route path="/pipeline" element={<Pipeline />} />
             <Route path="/deals" element={<Pipeline />} />
-            <Route path="/marketing" element={<Dashboard />} />
-            <Route path="/documents" element={<Dashboard />} />
-            <Route path="/payments" element={<Dashboard />} />
-            <Route path="/reports" element={<Dashboard />} />
+            <Route path="/telecalling" element={<Telecalling />} />
+            <Route path="/marketing" element={<Marketing />} />
+            <Route path="/documents" element={<Documents />} />
+            <Route path="/payments" element={<Payments />} />
+            <Route path="/reports" element={<Reports />} />
             <Route path="/settings" element={<Dashboard />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
