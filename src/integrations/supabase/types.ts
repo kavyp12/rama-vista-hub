@@ -44,6 +44,62 @@ export type Database = {
         }
         Relationships: []
       }
+      call_logs: {
+        Row: {
+          agent_id: string
+          call_date: string
+          call_duration: number | null
+          call_status: Database["public"]["Enums"]["call_status"]
+          callback_scheduled_at: string | null
+          created_at: string
+          id: string
+          lead_id: string
+          notes: string | null
+          recording_url: string | null
+          rejection_reason: string | null
+          retry_count: number | null
+          updated_at: string
+        }
+        Insert: {
+          agent_id: string
+          call_date?: string
+          call_duration?: number | null
+          call_status: Database["public"]["Enums"]["call_status"]
+          callback_scheduled_at?: string | null
+          created_at?: string
+          id?: string
+          lead_id: string
+          notes?: string | null
+          recording_url?: string | null
+          rejection_reason?: string | null
+          retry_count?: number | null
+          updated_at?: string
+        }
+        Update: {
+          agent_id?: string
+          call_date?: string
+          call_duration?: number | null
+          call_status?: Database["public"]["Enums"]["call_status"]
+          callback_scheduled_at?: string | null
+          created_at?: string
+          id?: string
+          lead_id?: string
+          notes?: string | null
+          recording_url?: string | null
+          rejection_reason?: string | null
+          retry_count?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_logs_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       deals: {
         Row: {
           assigned_to: string | null
@@ -113,6 +169,133 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      documents: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          expires_at: string | null
+          file_url: string | null
+          id: string
+          lead_id: string | null
+          name: string
+          project_id: string | null
+          property_id: string | null
+          signed_at: string | null
+          status: string
+          type: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          expires_at?: string | null
+          file_url?: string | null
+          id?: string
+          lead_id?: string | null
+          name: string
+          project_id?: string | null
+          property_id?: string | null
+          signed_at?: string | null
+          status?: string
+          type?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          expires_at?: string | null
+          file_url?: string | null
+          id?: string
+          lead_id?: string | null
+          name?: string
+          project_id?: string | null
+          property_id?: string | null
+          signed_at?: string | null
+          status?: string
+          type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "documents_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "documents_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "documents_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      follow_up_tasks: {
+        Row: {
+          agent_id: string
+          completed_at: string | null
+          created_at: string
+          id: string
+          lead_id: string
+          notes: string | null
+          related_call_id: string | null
+          scheduled_at: string
+          status: string
+          task_type: string
+          updated_at: string
+        }
+        Insert: {
+          agent_id: string
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          lead_id: string
+          notes?: string | null
+          related_call_id?: string | null
+          scheduled_at: string
+          status?: string
+          task_type?: string
+          updated_at?: string
+        }
+        Update: {
+          agent_id?: string
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          lead_id?: string
+          notes?: string | null
+          related_call_id?: string | null
+          scheduled_at?: string
+          status?: string
+          task_type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "follow_up_tasks_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "follow_up_tasks_related_call_id_fkey"
+            columns: ["related_call_id"]
+            isOneToOne: false
+            referencedRelation: "call_logs"
             referencedColumns: ["id"]
           },
         ]
@@ -201,6 +384,130 @@ export type Database = {
           {
             foreignKeyName: "leads_interested_property_id_fkey"
             columns: ["interested_property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      marketing_campaigns: {
+        Row: {
+          clicked_count: number | null
+          converted_count: number | null
+          created_at: string
+          created_by: string | null
+          id: string
+          message_template: string | null
+          name: string
+          opened_count: number | null
+          scheduled_at: string | null
+          sent_count: number | null
+          status: string
+          target_audience: string | null
+          type: string
+          updated_at: string
+        }
+        Insert: {
+          clicked_count?: number | null
+          converted_count?: number | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          message_template?: string | null
+          name: string
+          opened_count?: number | null
+          scheduled_at?: string | null
+          sent_count?: number | null
+          status?: string
+          target_audience?: string | null
+          type?: string
+          updated_at?: string
+        }
+        Update: {
+          clicked_count?: number | null
+          converted_count?: number | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          message_template?: string | null
+          name?: string
+          opened_count?: number | null
+          scheduled_at?: string | null
+          sent_count?: number | null
+          status?: string
+          target_audience?: string | null
+          type?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      payments: {
+        Row: {
+          amount: number
+          created_at: string
+          deal_id: string | null
+          due_date: string | null
+          id: string
+          lead_id: string | null
+          notes: string | null
+          paid_at: string | null
+          payment_method: string | null
+          payment_type: string
+          property_id: string | null
+          reference_number: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          deal_id?: string | null
+          due_date?: string | null
+          id?: string
+          lead_id?: string | null
+          notes?: string | null
+          paid_at?: string | null
+          payment_method?: string | null
+          payment_type?: string
+          property_id?: string | null
+          reference_number?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          deal_id?: string | null
+          due_date?: string | null
+          id?: string
+          lead_id?: string | null
+          notes?: string | null
+          paid_at?: string | null
+          payment_method?: string | null
+          payment_type?: string
+          property_id?: string | null
+          reference_number?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payments_deal_id_fkey"
+            columns: ["deal_id"]
+            isOneToOne: false
+            referencedRelation: "deals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payments_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payments_property_id_fkey"
+            columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "properties"
             referencedColumns: ["id"]
@@ -463,6 +770,11 @@ export type Database = {
     }
     Enums: {
       app_role: "admin" | "sales_manager" | "sales_agent"
+      call_status:
+        | "connected_positive"
+        | "connected_callback"
+        | "not_connected"
+        | "not_interested"
       lead_stage:
         | "new"
         | "contacted"
@@ -607,6 +919,12 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "sales_manager", "sales_agent"],
+      call_status: [
+        "connected_positive",
+        "connected_callback",
+        "not_connected",
+        "not_interested",
+      ],
       lead_stage: [
         "new",
         "contacted",
