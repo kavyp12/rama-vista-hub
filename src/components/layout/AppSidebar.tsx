@@ -35,6 +35,7 @@ import {
   Handshake,
   CreditCard,
   BarChart3,
+  Phone,
 } from 'lucide-react';
 
 const menuItems = [
@@ -48,6 +49,7 @@ const menuItems = [
     group: 'Sales',
     items: [
       { title: 'Leads', icon: Users, url: '/leads' },
+      { title: 'Telecalling', icon: Phone, url: '/telecalling' },
       { title: 'Site Visits', icon: CalendarDays, url: '/site-visits' },
       { title: 'Pipeline', icon: TrendingUp, url: '/pipeline' },
       { title: 'Deals', icon: Handshake, url: '/deals' },
