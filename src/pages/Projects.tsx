@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
@@ -9,8 +10,10 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Search, MapPin, Building, Home, Filter, Users } from 'lucide-react';
+import { Plus, Search, MapPin, Building, Home, Filter, Users, Eye, Waves, Dumbbell, Car, Trees, Shield, ArrowUp, Zap } from 'lucide-react';
 
 interface Project {
   id: string;
@@ -25,6 +28,7 @@ interface Project {
   max_price: number | null;
   description: string | null;
   amenities: string[] | null;
+  propertyCount?: number;
 }
 
 const projectStatuses = [
@@ -34,7 +38,18 @@ const projectStatuses = [
   { value: 'on_hold', label: 'On Hold' },
 ];
 
+const amenitiesList = [
+  { value: 'swimming_pool', label: 'Swimming Pool', icon: Waves },
+  { value: 'gym', label: 'Gym', icon: Dumbbell },
+  { value: 'parking', label: 'Parking', icon: Car },
+  { value: 'garden', label: 'Garden', icon: Trees },
+  { value: 'security', label: '24/7 Security', icon: Shield },
+  { value: 'elevator', label: 'Elevator', icon: ArrowUp },
+  { value: 'power_backup', label: 'Power Backup', icon: Zap },
+];
+
 export default function Projects() {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,6 +69,7 @@ export default function Projects() {
     min_price: '',
     max_price: '',
     description: '',
+    amenities: [] as string[],
   });
 
   useEffect(() => {
@@ -73,7 +89,17 @@ export default function Projects() {
     const { data, error } = await query;
 
     if (!error && data) {
-      setProjects(data);
+      // Get property counts for each project
+      const { data: properties } = await supabase
+        .from('properties')
+        .select('project_id');
+      
+      const projectsWithCounts = data.map(project => ({
+        ...project,
+        propertyCount: properties?.filter(p => p.project_id === project.id).length || 0,
+      }));
+      
+      setProjects(projectsWithCounts);
     }
     setLoading(false);
   }
@@ -93,6 +119,7 @@ export default function Projects() {
       min_price: newProject.min_price ? parseFloat(newProject.min_price) : null,
       max_price: newProject.max_price ? parseFloat(newProject.max_price) : null,
       description: newProject.description || null,
+      amenities: newProject.amenities.length > 0 ? newProject.amenities : null,
     }]);
 
     setIsSubmitting(false);
@@ -120,9 +147,26 @@ export default function Projects() {
         min_price: '',
         max_price: '',
         description: '',
+        amenities: [],
       });
       fetchProjects();
     }
+  };
+
+  const toggleAmenity = (amenity: string) => {
+    setNewProject(prev => ({
+      ...prev,
+      amenities: prev.amenities.includes(amenity)
+        ? prev.amenities.filter(a => a !== amenity)
+        : [...prev.amenities, amenity]
+    }));
+  };
+
+  const getAmenityIcon = (amenity: string) => {
+    const item = amenitiesList.find(a => a.value === amenity);
+    if (!item) return null;
+    const Icon = item.icon;
+    return <Icon className="h-3 w-3" />;
   };
 
   const getStatusBadge = (status: string) => {
@@ -305,6 +349,22 @@ export default function Projects() {
                       rows={3}
                     />
                   </div>
+                  <div className="col-span-2 space-y-2">
+                    <Label>Amenities</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {amenitiesList.map((amenity) => (
+                        <Badge
+                          key={amenity.value}
+                          variant={newProject.amenities.includes(amenity.value) ? 'default' : 'outline'}
+                          className="cursor-pointer gap-1"
+                          onClick={() => toggleAmenity(amenity.value)}
+                        >
+                          <amenity.icon className="h-3 w-3" />
+                          {amenity.label}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
                 </div>
                 <div className="flex justify-end gap-3">
                   <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
@@ -374,6 +434,20 @@ export default function Projects() {
                     </p>
                   )}
                   
+                  {/* Units Progress Bar */}
+                  {project.total_units && project.total_units > 0 && (
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-xs">
+                        <span>Units Sold</span>
+                        <span>{((project.total_units - (project.available_units || 0)) / project.total_units * 100).toFixed(0)}%</span>
+                      </div>
+                      <Progress 
+                        value={(project.total_units - (project.available_units || 0)) / project.total_units * 100} 
+                        className="h-2"
+                      />
+                    </div>
+                  )}
+                  
                   <div className="grid grid-cols-2 gap-4">
                     <div className="flex items-center gap-2 text-sm">
                       <Home className="h-4 w-4 text-muted-foreground" />
@@ -385,8 +459,25 @@ export default function Projects() {
                     </div>
                   </div>
 
+                  {/* Amenities */}
+                  {project.amenities && project.amenities.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {project.amenities.slice(0, 4).map((amenity) => (
+                        <Badge key={amenity} variant="outline" className="text-xs gap-1">
+                          {getAmenityIcon(amenity)}
+                          {amenitiesList.find(a => a.value === amenity)?.label || amenity}
+                        </Badge>
+                      ))}
+                      {project.amenities.length > 4 && (
+                        <Badge variant="outline" className="text-xs">
+                          +{project.amenities.length - 4} more
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+
                   {(project.min_price || project.max_price) && (
-                    <div className="pt-3 border-t">
+                    <div className="pt-3 border-t flex items-center justify-between">
                       <p className="text-lg font-bold">
                         {project.min_price && project.max_price
                           ? `${formatPrice(project.min_price)} - ${formatPrice(project.max_price)}`
@@ -394,6 +485,14 @@ export default function Projects() {
                           ? `From ${formatPrice(project.min_price)}`
                           : `Up to ${formatPrice(project.max_price!)}`}
                       </p>
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={() => navigate(`/properties?project=${project.id}`)}
+                      >
+                        <Eye className="h-4 w-4 mr-1" />
+                        {project.propertyCount || 0} Properties
+                      </Button>
                     </div>
                   )}
                 </CardContent>
