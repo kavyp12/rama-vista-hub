@@ -186,6 +186,7 @@ export type Database = {
           property_id: string | null
           signed_at: string | null
           status: string
+          template_data: Json | null
           type: string
           updated_at: string
         }
@@ -201,6 +202,7 @@ export type Database = {
           property_id?: string | null
           signed_at?: string | null
           status?: string
+          template_data?: Json | null
           type?: string
           updated_at?: string
         }
@@ -216,6 +218,7 @@ export type Database = {
           property_id?: string | null
           signed_at?: string | null
           status?: string
+          template_data?: Json | null
           type?: string
           updated_at?: string
         }
@@ -665,6 +668,51 @@ export type Database = {
             columns: ["project_id"]
             isOneToOne: false
             referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      property_recommendations: {
+        Row: {
+          created_at: string
+          id: string
+          lead_id: string
+          property_id: string
+          recommended_at: string
+          recommended_by: string | null
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          lead_id: string
+          property_id: string
+          recommended_at?: string
+          recommended_by?: string | null
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          lead_id?: string
+          property_id?: string
+          recommended_at?: string
+          recommended_by?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "property_recommendations_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "property_recommendations_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
             referencedColumns: ["id"]
           },
         ]

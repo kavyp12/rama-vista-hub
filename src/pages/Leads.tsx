@@ -5,15 +5,14 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Plus, Search, Phone, Mail, Calendar, Filter, Flame, Thermometer, Snowflake } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import { LeadCard } from '@/components/leads/LeadCard';
+import { Plus, Search, Filter, Flame, Thermometer, Snowflake, Users, UserCheck, TrendingUp } from 'lucide-react';
 
 interface Lead {
   id: string;
@@ -29,6 +28,14 @@ interface Lead {
   notes: string | null;
   next_followup_at: string | null;
   created_at: string;
+  assigned_to: string | null;
+}
+
+interface Profile {
+  id: string;
+  full_name: string;
+  email: string;
+  avatar_url: string | null;
 }
 
 const stages = [
@@ -52,10 +59,13 @@ export default function Leads() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [stageFilter, setStageFilter] = useState<string>('all');
   const [temperatureFilter, setTemperatureFilter] = useState<string>('all');
+  const [sourceFilter, setSourceFilter] = useState<string>('all');
+  const [agentFilter, setAgentFilter] = useState<string>('all');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -73,10 +83,20 @@ export default function Leads() {
   });
 
   useEffect(() => {
-    fetchLeads();
-  }, [stageFilter, temperatureFilter]);
+    fetchData();
+  }, [stageFilter, temperatureFilter, sourceFilter, agentFilter]);
 
-  async function fetchLeads() {
+  async function fetchData() {
+    setLoading(true);
+    
+    // Fetch profiles first
+    const { data: profilesData } = await supabase
+      .from('profiles')
+      .select('id, full_name, email, avatar_url');
+    
+    if (profilesData) setProfiles(profilesData);
+
+    // Fetch leads with filters
     let query = supabase
       .from('leads')
       .select('*')
@@ -87,6 +107,12 @@ export default function Leads() {
     }
     if (temperatureFilter !== 'all') {
       query = query.eq('temperature', temperatureFilter as 'hot' | 'warm' | 'cold');
+    }
+    if (sourceFilter !== 'all') {
+      query = query.eq('source', sourceFilter);
+    }
+    if (agentFilter !== 'all') {
+      query = query.eq('assigned_to', agentFilter);
     }
 
     const { data, error } = await query;
@@ -111,7 +137,7 @@ export default function Leads() {
       budget_max: newLead.budget_max ? parseFloat(newLead.budget_max) : null,
       preferred_location: newLead.preferred_location || null,
       notes: newLead.notes || null,
-      assigned_to: user?.id,
+      assigned_to: user?.id, // Auto-assign to current user
     }]);
 
     setIsSubmitting(false);
@@ -139,54 +165,8 @@ export default function Leads() {
         preferred_location: '',
         notes: '',
       });
-      fetchLeads();
+      fetchData();
     }
-  };
-
-  const getTemperatureIcon = (temp: string) => {
-    switch (temp) {
-      case 'hot':
-        return <Flame className="h-4 w-4 text-red-500" />;
-      case 'warm':
-        return <Thermometer className="h-4 w-4 text-amber-500" />;
-      case 'cold':
-        return <Snowflake className="h-4 w-4 text-blue-500" />;
-      default:
-        return null;
-    }
-  };
-
-  const getStageBadge = (stage: string) => {
-    const stageConfig: Record<string, string> = {
-      new: 'stage-new',
-      contacted: 'stage-contacted',
-      site_visit: 'stage-site-visit',
-      negotiation: 'stage-negotiation',
-      token: 'stage-token',
-      closed: 'stage-closed',
-    };
-    const stageLabels: Record<string, string> = {
-      new: 'New',
-      contacted: 'Contacted',
-      site_visit: 'Site Visit',
-      negotiation: 'Negotiation',
-      token: 'Token',
-      closed: 'Closed',
-    };
-    return (
-      <Badge variant="outline" className={stageConfig[stage]}>
-        {stageLabels[stage] || stage}
-      </Badge>
-    );
-  };
-
-  const getInitials = (name: string) => {
-    return name
-      .split(' ')
-      .map((n) => n[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2);
   };
 
   const filteredLeads = leads.filter((lead) => {
@@ -198,13 +178,42 @@ export default function Leads() {
     );
   });
 
+  // Quick stats
+  const hotLeads = leads.filter(l => l.temperature === 'hot').length;
+  const warmLeads = leads.filter(l => l.temperature === 'warm').length;
+  const coldLeads = leads.filter(l => l.temperature === 'cold').length;
+  const todayLeads = leads.filter(l => {
+    const today = new Date().toISOString().split('T')[0];
+    return l.created_at.startsWith(today);
+  }).length;
+
   return (
     <DashboardLayout title="Leads" description="Manage and track your leads">
       <div className="space-y-6">
+        {/* Quick Stats Badges */}
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="outline" className="gap-1 py-1 px-3 bg-red-500/10 text-red-500 border-red-500/20">
+            <Flame className="h-3.5 w-3.5" />
+            {hotLeads} Hot
+          </Badge>
+          <Badge variant="outline" className="gap-1 py-1 px-3 bg-amber-500/10 text-amber-500 border-amber-500/20">
+            <Thermometer className="h-3.5 w-3.5" />
+            {warmLeads} Warm
+          </Badge>
+          <Badge variant="outline" className="gap-1 py-1 px-3 bg-blue-500/10 text-blue-500 border-blue-500/20">
+            <Snowflake className="h-3.5 w-3.5" />
+            {coldLeads} Cold
+          </Badge>
+          <Badge variant="outline" className="gap-1 py-1 px-3 bg-success/10 text-success border-success/20">
+            <TrendingUp className="h-3.5 w-3.5" />
+            {todayLeads} Today
+          </Badge>
+        </div>
+
         {/* Header Actions */}
-        <div className="flex flex-col sm:flex-row gap-4 justify-between">
-          <div className="flex flex-1 gap-4">
-            <div className="relative flex-1 max-w-md">
+        <div className="flex flex-col lg:flex-row gap-4 justify-between">
+          <div className="flex flex-1 flex-wrap gap-3">
+            <div className="relative flex-1 min-w-[200px] max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search leads..."
@@ -214,7 +223,7 @@ export default function Leads() {
               />
             </div>
             <Select value={stageFilter} onValueChange={setStageFilter}>
-              <SelectTrigger className="w-[140px]">
+              <SelectTrigger className="w-[130px]">
                 <Filter className="h-4 w-4 mr-2" />
                 <SelectValue placeholder="Stage" />
               </SelectTrigger>
@@ -228,14 +237,41 @@ export default function Leads() {
               </SelectContent>
             </Select>
             <Select value={temperatureFilter} onValueChange={setTemperatureFilter}>
-              <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder="Temperature" />
+              <SelectTrigger className="w-[130px]">
+                <SelectValue placeholder="Temp" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Temps</SelectItem>
                 {temperatures.map((temp) => (
                   <SelectItem key={temp.value} value={temp.value}>
                     {temp.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={sourceFilter} onValueChange={setSourceFilter}>
+              <SelectTrigger className="w-[130px]">
+                <SelectValue placeholder="Source" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Sources</SelectItem>
+                {sources.map((source) => (
+                  <SelectItem key={source} value={source}>
+                    {source}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={agentFilter} onValueChange={setAgentFilter}>
+              <SelectTrigger className="w-[150px]">
+                <UserCheck className="h-4 w-4 mr-2" />
+                <SelectValue placeholder="Agent" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Agents</SelectItem>
+                {profiles.map((profile) => (
+                  <SelectItem key={profile.id} value={profile.id}>
+                    {profile.full_name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -402,46 +438,12 @@ export default function Leads() {
         ) : (
           <div className="grid gap-4">
             {filteredLeads.map((lead) => (
-              <Card key={lead.id} className="hover-lift cursor-pointer">
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-4">
-                    <Avatar className="h-12 w-12 border">
-                      <AvatarFallback className="bg-primary/10 text-primary font-medium">
-                        {getInitials(lead.name)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="font-semibold truncate">{lead.name}</h3>
-                        {getTemperatureIcon(lead.temperature)}
-                        {getStageBadge(lead.stage)}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-                        <span className="flex items-center gap-1">
-                          <Phone className="h-3.5 w-3.5" />
-                          {lead.phone}
-                        </span>
-                        {lead.email && (
-                          <span className="flex items-center gap-1">
-                            <Mail className="h-3.5 w-3.5" />
-                            {lead.email}
-                          </span>
-                        )}
-                        <span className="flex items-center gap-1">
-                          <Calendar className="h-3.5 w-3.5" />
-                          {formatDistanceToNow(new Date(lead.created_at), { addSuffix: true })}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="hidden sm:block text-right">
-                      <Badge variant="outline">{lead.source}</Badge>
-                      {lead.preferred_location && (
-                        <p className="text-xs text-muted-foreground mt-1">{lead.preferred_location}</p>
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+              <LeadCard 
+                key={lead.id} 
+                lead={lead} 
+                profiles={profiles}
+                onUpdate={fetchData}
+              />
             ))}
           </div>
         )}
@@ -449,6 +451,3 @@ export default function Leads() {
     </DashboardLayout>
   );
 }
-
-// Add Users icon import
-import { Users } from 'lucide-react';
