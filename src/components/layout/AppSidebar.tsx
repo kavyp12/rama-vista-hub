@@ -1,5 +1,5 @@
 import { useLocation, Link } from 'react-router-dom';
-import { useAuth } from '@/lib/auth-context';
+import { useAuth, usePermissions } from '@/lib/auth-context';
 import {
   Sidebar,
   SidebarContent,
@@ -36,46 +36,86 @@ import {
   CreditCard,
   BarChart3,
   Phone,
+  UserCog,
 } from 'lucide-react';
-
-const menuItems = [
-  {
-    group: 'Overview',
-    items: [
-      { title: 'Dashboard', icon: LayoutDashboard, url: '/dashboard' },
-    ],
-  },
-  {
-    group: 'Sales',
-    items: [
-      { title: 'Leads', icon: Users, url: '/leads' },
-      { title: 'Telecalling', icon: Phone, url: '/telecalling' },
-      { title: 'Site Visits', icon: CalendarDays, url: '/site-visits' },
-      { title: 'Pipeline', icon: TrendingUp, url: '/pipeline' },
-      { title: 'Deals', icon: Handshake, url: '/deals' },
-    ],
-  },
-  {
-    group: 'Inventory',
-    items: [
-      { title: 'Projects', icon: Building2, url: '/projects' },
-      { title: 'Properties', icon: Home, url: '/properties' },
-    ],
-  },
-  {
-    group: 'Operations',
-    items: [
-      { title: 'Marketing', icon: Megaphone, url: '/marketing' },
-      { title: 'Documents', icon: FileText, url: '/documents' },
-      { title: 'Payments', icon: CreditCard, url: '/payments' },
-      { title: 'Reports', icon: BarChart3, url: '/reports' },
-    ],
-  },
-];
 
 export function AppSidebar() {
   const location = useLocation();
-  const { user, role, signOut } = useAuth();
+  const { user, role, logout } = useAuth();
+  const permissions = usePermissions();
+
+  // ✅ Dynamic menu based on role
+  const getMenuItems = () => {
+    const baseItems = {
+      group: 'Overview',
+      items: [
+        { title: 'Dashboard', icon: LayoutDashboard, url: '/dashboard' },
+      ],
+    };
+
+    // ✅ AGENT: Basic sales tools only
+    const agentSalesItems = {
+      group: 'My Work',
+      items: [
+        { title: 'Telecalling', icon: Phone, url: '/telecalling' }, // Prioritized for agents
+        { title: 'Site Visits', icon: CalendarDays, url: '/site-visits' },
+        { title: 'Properties', icon: Home, url: '/properties' },
+      ],
+    };
+
+    // ✅ MANAGER/ADMIN: Full sales pipeline
+    const advancedSalesItems = {
+      group: 'Sales',
+      items: [
+        { title: 'Leads', icon: Users, url: '/leads' },
+        { title: 'Telecalling', icon: Phone, url: '/telecalling' },
+        { title: 'Site Visits', icon: CalendarDays, url: '/site-visits' },
+        { title: 'Pipeline', icon: TrendingUp, url: '/pipeline' },
+      ],
+    };
+
+    const inventoryItems = {
+      group: 'Inventory',
+      items: [
+        { title: 'Projects', icon: Building2, url: '/projects' },
+        { title: 'Properties', icon: Home, url: '/properties' },
+      ],
+    };
+
+    // ✅ MANAGER Operations
+    const managerOperations = {
+      group: 'Operations',
+      items: [
+        { title: 'Channel Partners', icon: Handshake, url: '/brokers' },
+        { title: 'Reports', icon: BarChart3, url: '/reports' },
+      ],
+    };
+
+    // ✅ ADMIN Operations
+    const adminOperations = {
+      group: 'Operations',
+      items: [
+        { title: 'Team', icon: UserCog, url: '/team' },
+        { title: 'Channel Partners', icon: Handshake, url: '/brokers' },
+        { title: 'Marketing', icon: Megaphone, url: '/marketing' },
+        { title: 'Documents', icon: FileText, url: '/documents' },
+        { title: 'Payments', icon: CreditCard, url: '/payments' },
+        { title: 'Reports', icon: BarChart3, url: '/reports' },
+      ],
+    };
+
+    // ✅ Build menu based on role
+    if (permissions.isAdmin) {
+      return [baseItems, advancedSalesItems, inventoryItems, adminOperations];
+    } else if (permissions.isManager) {
+      return [baseItems, advancedSalesItems, inventoryItems, managerOperations];
+    } else {
+      // ✅ AGENT - simplified menu
+      return [baseItems, agentSalesItems];
+    }
+  };
+
+  const menuItems = getMenuItems();
 
   const getInitials = (email: string) => {
     return email.slice(0, 2).toUpperCase();
@@ -120,7 +160,7 @@ export function AppSidebar() {
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton
                       asChild
-                      isActive={location.pathname === item.url}
+                      isActive={location.pathname === item.url || (item.url === '/telecalling' && location.pathname.startsWith('/telecalling'))}
                       className="gap-3 px-3 py-2.5 text-sm font-medium transition-colors"
                     >
                       <Link to={item.url}>
@@ -141,14 +181,14 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <SidebarMenuButton className="w-full gap-3 px-3 py-3">
+                <SidebarMenuButton className="w-full gap-3 px-3 py-3 hover:bg-sidebar-accent/50">
                   <Avatar className="h-8 w-8 border border-sidebar-border">
                     <AvatarFallback className="bg-sidebar-accent text-sidebar-accent-foreground text-xs font-medium">
                       {user?.email ? getInitials(user.email) : 'U'}
                     </AvatarFallback>
                   </Avatar>
-                  <div className="flex flex-1 flex-col items-start text-left">
-                    <span className="text-sm font-medium text-sidebar-foreground truncate max-w-[140px]">
+                  <div className="flex flex-1 flex-col items-start text-left overflow-hidden">
+                    <span className="text-sm font-medium text-sidebar-foreground truncate w-full">
                       {user?.email}
                     </span>
                     <span className="text-xs text-sidebar-muted">{getRoleLabel(role)}</span>
@@ -156,15 +196,15 @@ export function AppSidebar() {
                   <ChevronUp className="h-4 w-4 text-sidebar-muted" />
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="start" className="w-[--radix-dropdown-menu-trigger-width]">
+              <DropdownMenuContent side="top" align="start" className="w-[200px]">
                 <DropdownMenuItem asChild>
-                  <Link to="/settings" className="flex items-center gap-2">
+                  <Link to="/settings" className="flex items-center gap-2 cursor-pointer">
                     <Settings className="h-4 w-4" />
                     Settings
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={signOut} className="text-destructive focus:text-destructive">
+                <DropdownMenuItem onClick={logout} className="text-destructive focus:text-destructive cursor-pointer">
                   <LogOut className="h-4 w-4 mr-2" />
                   Sign Out
                 </DropdownMenuItem>

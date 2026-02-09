@@ -1,6 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,17 +8,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { Building2, Shield, Users, TrendingUp } from 'lucide-react';
-import { z } from 'zod';
 
-const emailSchema = z.string().email('Please enter a valid email address');
-const passwordSchema = z.string().min(6, 'Password must be at least 6 characters');
-const nameSchema = z.string().min(2, 'Name must be at least 2 characters');
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 type AppRole = 'admin' | 'sales_manager' | 'sales_agent';
 
 export default function Auth() {
   const navigate = useNavigate();
-  const { signIn, signUp, user, loading } = useAuth();
   const { toast } = useToast();
   
   const [isLoading, setIsLoading] = useState(false);
@@ -28,34 +23,32 @@ export default function Auth() {
   const [fullName, setFullName] = useState('');
   const [selectedRole, setSelectedRole] = useState<AppRole>('sales_agent');
 
-  useEffect(() => {
-    if (!loading && user) {
-      navigate('/dashboard');
-    }
-  }, [user, loading, navigate]);
-
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    try {
-      emailSchema.parse(email);
-      passwordSchema.parse(password);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        toast({
-          title: 'Validation Error',
-          description: err.errors[0].message,
-          variant: 'destructive',
-        });
-        return;
-      }
-    }
-
     setIsLoading(true);
-    const { error } = await signIn(email, password);
-    setIsLoading(false);
 
-    if (error) {
+    try {
+      const response = await fetch(`${API_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Login failed');
+      }
+
+      localStorage.setItem('accessToken', data.accessToken);
+      
+      toast({
+        title: 'Welcome back!',
+        description: 'You have successfully signed in.',
+      });
+      
+      window.location.href = '/dashboard';
+    } catch (error: any) {
       toast({
         title: 'Sign In Failed',
         description: error.message === 'Invalid login credentials' 
@@ -63,38 +56,42 @@ export default function Auth() {
           : error.message,
         variant: 'destructive',
       });
-    } else {
-      toast({
-        title: 'Welcome back!',
-        description: 'You have successfully signed in.',
-      });
-      navigate('/dashboard');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    try {
-      emailSchema.parse(email);
-      passwordSchema.parse(password);
-      nameSchema.parse(fullName);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        toast({
-          title: 'Validation Error',
-          description: err.errors[0].message,
-          variant: 'destructive',
-        });
-        return;
-      }
-    }
-
     setIsLoading(true);
-    const { error } = await signUp(email, password, fullName, selectedRole);
-    setIsLoading(false);
 
-    if (error) {
+    try {
+      const response = await fetch(`${API_URL}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          email, 
+          password, 
+          fullName, 
+          role: selectedRole 
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Registration failed');
+      }
+
+      localStorage.setItem('accessToken', data.accessToken);
+      
+      toast({
+        title: 'Account Created',
+        description: 'Welcome to Rama Realty CRM!',
+      });
+      
+      window.location.href = '/dashboard';
+    } catch (error: any) {
       const errorMessage = error.message.includes('already registered')
         ? 'This email is already registered. Please sign in instead.'
         : error.message;
@@ -104,22 +101,10 @@ export default function Auth() {
         description: errorMessage,
         variant: 'destructive',
       });
-    } else {
-      toast({
-        title: 'Account Created',
-        description: 'Welcome to Rama Realty CRM!',
-      });
-      navigate('/dashboard');
+    } finally {
+      setIsLoading(false);
     }
   };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-pulse-soft">Loading...</div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen flex">

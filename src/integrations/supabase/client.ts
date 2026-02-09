@@ -7,11 +7,22 @@ const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
-
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+export const supabase = {
+  from: () => {
+    console.warn("Supabase client is disabled. Please use the new API endpoints.");
+    return {
+      select: () => Promise.resolve({ data: [], error: null }),
+      insert: () => Promise.resolve({ data: [], error: null }),
+      update: () => Promise.resolve({ data: [], error: null }),
+      delete: () => Promise.resolve({ data: [], error: null }),
+      eq: () => ({ single: () => Promise.resolve({ data: null, error: null }) }),
+    };
+  },
   auth: {
-    storage: localStorage,
-    persistSession: true,
-    autoRefreshToken: true,
+    getSession: () => Promise.resolve({ data: { session: null }, error: null }),
+    onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    signUp: () => Promise.resolve({ data: {}, error: null }),
+    signInWithPassword: () => Promise.resolve({ data: {}, error: null }),
+    signOut: () => Promise.resolve({ error: null }),
   }
-});
+} as any;

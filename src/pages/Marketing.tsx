@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/lib/auth-context';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { usePermissions } from '@/lib/auth-context';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -19,7 +19,6 @@ import {
   MessageSquare, 
   Send,
   Plus,
-  Users,
   Eye,
   MousePointer,
   TrendingUp,
@@ -30,19 +29,21 @@ import {
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+
 interface Campaign {
   id: string;
   name: string;
   type: string;
   status: string;
-  target_audience: string | null;
-  message_template: string | null;
-  scheduled_at: string | null;
-  sent_count: number;
-  opened_count: number;
-  clicked_count: number;
-  converted_count: number;
-  created_at: string;
+  targetAudience: string | null;
+  messageTemplate: string | null;
+  scheduledAt: string | null;
+  sentCount: number;
+  openedCount: number;
+  clickedCount: number;
+  convertedCount: number;
+  createdAt: string;
 }
 
 const campaignTypes = [
@@ -60,7 +61,9 @@ const campaignStatuses = [
 ];
 
 export default function Marketing() {
-  const { user } = useAuth();
+  const { token } = useAuth();
+    const { canManageMarketing } = usePermissions(); // ✅ ADD THIS
+
   const { toast } = useToast();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,44 +79,58 @@ export default function Marketing() {
   const [scheduledAt, setScheduledAt] = useState('');
 
   useEffect(() => {
-    fetchCampaigns();
-  }, []);
+    if (token) fetchCampaigns();
+  }, [token]);
 
   async function fetchCampaigns() {
-    const { data, error } = await supabase
-      .from('marketing_campaigns')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (!error && data) {
-      setCampaigns(data as Campaign[]);
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/campaigns`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (Array.isArray(data)) setCampaigns(data);
+    } catch (error) {
+      console.error(error);
+      toast({ title: 'Error', description: 'Failed to load campaigns', variant: 'destructive' });
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   async function handleCreateCampaign() {
-    if (!name || !user) return;
+    if (!name) return;
     
     setIsSubmitting(true);
     
-    const { error } = await supabase.from('marketing_campaigns').insert({
-      name,
-      type,
-      target_audience: targetAudience || null,
-      message_template: messageTemplate || null,
-      scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
-      created_by: user.id,
-    });
+    try {
+      const payload = {
+        name,
+        type,
+        targetAudience: targetAudience || null,
+        messageTemplate: messageTemplate || null,
+        scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+      };
 
-    if (error) {
-      toast({ title: 'Error', description: 'Failed to create campaign', variant: 'destructive' });
-    } else {
+      const res = await fetch(`${API_URL}/campaigns`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) throw new Error('Failed to create campaign');
+
       toast({ title: 'Success', description: 'Campaign created successfully' });
       resetForm();
       fetchCampaigns();
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to create campaign', variant: 'destructive' });
+    } finally {
+      setIsSubmitting(false);
     }
-    
-    setIsSubmitting(false);
   }
 
   function resetForm() {
@@ -139,10 +156,10 @@ export default function Marketing() {
   }
 
   // Calculate stats
-  const totalSent = campaigns.reduce((sum, c) => sum + c.sent_count, 0);
-  const totalOpened = campaigns.reduce((sum, c) => sum + c.opened_count, 0);
-  const totalClicked = campaigns.reduce((sum, c) => sum + c.clicked_count, 0);
-  const totalConverted = campaigns.reduce((sum, c) => sum + c.converted_count, 0);
+  const totalSent = campaigns.reduce((sum, c) => sum + (c.sentCount || 0), 0);
+  const totalOpened = campaigns.reduce((sum, c) => sum + (c.openedCount || 0), 0);
+  const totalClicked = campaigns.reduce((sum, c) => sum + (c.clickedCount || 0), 0);
+  const totalConverted = campaigns.reduce((sum, c) => sum + (c.convertedCount || 0), 0);
   const openRate = totalSent > 0 ? Math.round((totalOpened / totalSent) * 100) : 0;
   const clickRate = totalOpened > 0 ? Math.round((totalClicked / totalOpened) * 100) : 0;
 
@@ -333,27 +350,27 @@ export default function Marketing() {
                                   {getStatusBadge(campaign.status)}
                                 </div>
                                 <p className="text-sm text-muted-foreground">
-                                  {campaign.target_audience || 'All leads'} • Created {format(parseISO(campaign.created_at), 'MMM d, yyyy')}
+                                  {campaign.targetAudience || 'All leads'} • Created {format(parseISO(campaign.createdAt), 'MMM d, yyyy')}
                                 </p>
-                                {campaign.scheduled_at && (
+                                {campaign.scheduledAt && (
                                   <p className="text-sm text-info mt-1 flex items-center gap-1">
                                     <Calendar className="h-3 w-3" />
-                                    Scheduled: {format(parseISO(campaign.scheduled_at), 'MMM d, yyyy h:mm a')}
+                                    Scheduled: {format(parseISO(campaign.scheduledAt), 'MMM d, yyyy h:mm a')}
                                   </p>
                                 )}
                               </div>
                             </div>
                             <div className="flex items-center gap-6">
                               <div className="text-center">
-                                <p className="text-lg font-bold">{campaign.sent_count}</p>
+                                <p className="text-lg font-bold">{campaign.sentCount || 0}</p>
                                 <p className="text-xs text-muted-foreground">Sent</p>
                               </div>
                               <div className="text-center">
-                                <p className="text-lg font-bold">{campaign.opened_count}</p>
+                                <p className="text-lg font-bold">{campaign.openedCount || 0}</p>
                                 <p className="text-xs text-muted-foreground">Opened</p>
                               </div>
                               <div className="text-center">
-                                <p className="text-lg font-bold">{campaign.clicked_count}</p>
+                                <p className="text-lg font-bold">{campaign.clickedCount || 0}</p>
                                 <p className="text-xs text-muted-foreground">Clicked</p>
                               </div>
                               <div className="flex gap-2">
@@ -375,22 +392,22 @@ export default function Marketing() {
                               </div>
                             </div>
                           </div>
-                          {campaign.sent_count > 0 && (
+                          {campaign.sentCount > 0 && (
                             <div className="mt-4 pt-4 border-t">
                               <div className="flex items-center gap-4">
                                 <div className="flex-1">
                                   <div className="flex justify-between text-xs mb-1">
                                     <span>Open Rate</span>
-                                    <span>{campaign.sent_count > 0 ? Math.round((campaign.opened_count / campaign.sent_count) * 100) : 0}%</span>
+                                    <span>{Math.round((campaign.openedCount / campaign.sentCount) * 100)}%</span>
                                   </div>
-                                  <Progress value={campaign.sent_count > 0 ? (campaign.opened_count / campaign.sent_count) * 100 : 0} className="h-2" />
+                                  <Progress value={(campaign.openedCount / campaign.sentCount) * 100} className="h-2" />
                                 </div>
                                 <div className="flex-1">
                                   <div className="flex justify-between text-xs mb-1">
                                     <span>Click Rate</span>
-                                    <span>{campaign.opened_count > 0 ? Math.round((campaign.clicked_count / campaign.opened_count) * 100) : 0}%</span>
+                                    <span>{campaign.openedCount > 0 ? Math.round((campaign.clickedCount / campaign.openedCount) * 100) : 0}%</span>
                                   </div>
-                                  <Progress value={campaign.opened_count > 0 ? (campaign.clicked_count / campaign.opened_count) * 100 : 0} className="h-2" />
+                                  <Progress value={campaign.openedCount > 0 ? (campaign.clickedCount / campaign.openedCount) * 100 : 0} className="h-2" />
                                 </div>
                               </div>
                             </div>

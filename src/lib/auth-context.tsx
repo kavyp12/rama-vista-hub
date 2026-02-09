@@ -1,118 +1,105 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+
+// API URL Configuration
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 type AppRole = 'admin' | 'sales_manager' | 'sales_agent';
 
+interface User {
+  id: string;
+  email: string;
+  fullName: string;
+  role: AppRole;
+  avatarUrl?: string;
+}
+
 interface AuthContextType {
   user: User | null;
-  session: Session | null;
+  token: string | null;
   loading: boolean;
   role: AppRole | null;
-  signUp: (email: string, password: string, fullName: string, role: AppRole) => Promise<{ error: Error | null }>;
-  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signOut: () => Promise<void>;
+  login: (token: string, userData: User) => void;
+  logout: () => void;
+}
+
+interface Permissions {
+  isAdmin: boolean;
+  isManager: boolean;
+  isAgent: boolean;
+  canManageTeam: boolean;
+  canAssignLeads: boolean;
+  canDeleteRecords: boolean;
+  canViewAllLeads: boolean;
+  canCreateProjects: boolean;
+  canManagePayments: boolean;
+  canManageMarketing: boolean;
+  canViewReports: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const [token, setToken] = useState<string | null>(localStorage.getItem('accessToken'));
   const [loading, setLoading] = useState(true);
-  const [role, setRole] = useState<AppRole | null>(null);
+
+  const role = user?.role || null;
 
   useEffect(() => {
-    // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        
-        // Defer role fetch with setTimeout to prevent deadlock
-        if (session?.user) {
-          setTimeout(() => {
-            fetchUserRole(session.user.id);
-          }, 0);
+    const initAuth = async () => {
+      const storedToken = localStorage.getItem('accessToken');
+      if (!storedToken) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_URL}/auth/me`, {
+          headers: {
+            'Authorization': `Bearer ${storedToken}`
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setUser(data.user);
+          setToken(storedToken);
         } else {
-          setRole(null);
+          logout();
         }
+      } catch (error) {
+        console.error("Auth initialization failed:", error);
+        logout();
+      } finally {
+        setLoading(false);
       }
-    );
+    };
 
-    // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchUserRole(session.user.id);
-      }
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    initAuth();
   }, []);
 
-  const fetchUserRole = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (!error && data) {
-      setRole(data.role as AppRole);
-    }
+  const login = (newToken: string, userData: User) => {
+    localStorage.setItem('accessToken', newToken);
+    setToken(newToken);
+    setUser(userData);
   };
 
-  const signUp = async (email: string, password: string, fullName: string, selectedRole: AppRole) => {
-    const redirectUrl = `${window.location.origin}/`;
-    
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: redirectUrl,
-        data: {
-          full_name: fullName,
-        },
-      },
-    });
-
-    if (error) {
-      return { error };
-    }
-
-    // Insert the user role
-    if (data.user) {
-      const { error: roleError } = await supabase
-        .from('user_roles')
-        .insert({ user_id: data.user.id, role: selectedRole });
-
-      if (roleError) {
-        console.error('Error setting user role:', roleError);
-      }
-    }
-
-    return { error: null };
-  };
-
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    return { error };
-  };
-
-  const signOut = async () => {
-    await supabase.auth.signOut();
-    setRole(null);
+  const logout = () => {
+    localStorage.removeItem('accessToken');
+    setToken(null);
+    setUser(null);
+    window.location.href = '/auth';
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, role, signUp, signIn, signOut }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      token, 
+      loading, 
+      role, 
+      login, 
+      logout 
+    }}>
       {children}
     </AuthContext.Provider>
   );
@@ -124,4 +111,41 @@ export function useAuth() {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
+}
+
+// ✅ NEW: Permission Helper Hook
+export function usePermissions(): Permissions {
+  const { user } = useAuth();
+  
+  const isAdmin = user?.role === 'admin';
+  const isManager = user?.role === 'sales_manager';
+  const isAgent = user?.role === 'sales_agent';
+  
+  return {
+    isAdmin,
+    isManager,
+    isAgent,
+    
+    // Team Management
+    canManageTeam: isAdmin || isManager,
+    
+    // Lead Management
+    canAssignLeads: isAdmin || isManager,
+    canViewAllLeads: isAdmin || isManager,
+    
+    // Records Management
+    canDeleteRecords: isAdmin,
+    
+    // Projects & Properties
+    canCreateProjects: isAdmin || isManager,
+    
+    // Financial
+    canManagePayments: isAdmin || isManager,
+    
+    // Marketing
+    canManageMarketing: isAdmin || isManager,
+    
+    // Reports
+    canViewReports: isAdmin || isManager,
+  };
 }

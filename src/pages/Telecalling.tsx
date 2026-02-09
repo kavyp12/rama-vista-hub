@@ -1,598 +1,612 @@
-import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/lib/auth-context';
+import { useSearchParams } from 'react-router-dom';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { 
   Phone, 
   PhoneCall, 
   PhoneMissed, 
-  PhoneOff,
   Clock,
   CheckCircle2,
-  XCircle,
-  Calendar,
-  User,
   ThumbsUp,
   ThumbsDown,
-  Timer,
-  TrendingUp,
+  Archive,
+  Trash2,
+  Users,
+  BarChart3,
+  Search,
+  MoreVertical,
+  Loader2,
+  Globe,
+  ArrowRightCircle,
   AlertCircle
 } from 'lucide-react';
-import { format, formatDistanceToNow, parseISO, isToday, addHours } from 'date-fns';
+import { format, parseISO } from 'date-fns';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+  } from "@/components/ui/table";
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+
+// --- TYPES ---
 interface Lead {
-  id: string;
-  name: string;
-  phone: string;
-  email?: string | null;
-  stage: string;
-  temperature?: string | null;
-  assigned_to?: string | null;
+    id: string;
+    name: string;
+    phone: string;
+    stage: string;
+    temperature: string;
+    source?: string;
+    createdAt?: string;
 }
 
-interface CallLog {
-  id: string;
-  lead_id: string;
-  agent_id: string;
-  call_status: string;
-  call_date: string;
-  call_duration?: number | null;
-  notes?: string | null;
-  callback_scheduled_at?: string | null;
-  rejection_reason?: string | null;
-  retry_count?: number;
-  lead?: Partial<Lead>;
-  profile?: { full_name: string };
+interface Agent {
+    id: string;
+    fullName: string;
 }
 
-interface FollowUpTask {
-  id: string;
-  lead_id: string;
-  agent_id: string;
-  task_type: string;
-  scheduled_at: string;
-  status: string;
-  notes?: string | null;
-  lead?: Partial<Lead>;
+interface TableRowData {
+    id: string; 
+    isLeadRow: boolean; 
+    leadId: string;
+    agentId?: string;
+    callStatus: string; 
+    displayDate: string; 
+    duration: number | null;
+    notes: string | null;
+    lead: Lead;
+    agent?: Agent;
+    isArchived?: boolean;
+    deletedAt?: string | null;
 }
 
-const callOutcomes = [
-  { value: 'connected_positive', label: 'Connected - Positive Response', icon: ThumbsUp, color: 'bg-success text-success-foreground' },
-  { value: 'connected_callback', label: 'Connected - Callback Requested', icon: Calendar, color: 'bg-info text-info-foreground' },
-  { value: 'not_connected', label: 'Not Connected / No Answer', icon: PhoneMissed, color: 'bg-warning text-warning-foreground' },
-  { value: 'not_interested', label: 'Not Interested', icon: ThumbsDown, color: 'bg-destructive text-destructive-foreground' },
-];
+interface CallStats {
+    totalCalls: number;
+    connectedCalls: number;
+    notAnswered: number;
+    positive: number;
+    negative: number;
+    connectRate: number;
+}
 
 export default function Telecalling() {
-  const { user, role } = useAuth();
+  const { token } = useAuth();
   const { toast } = useToast();
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [callLogs, setCallLogs] = useState<CallLog[]>([]);
-  const [tasks, setTasks] = useState<FollowUpTask[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
-  const [isCallDialogOpen, setIsCallDialogOpen] = useState(false);
-  const [callOutcome, setCallOutcome] = useState('');
-  const [callNotes, setCallNotes] = useState('');
-  const [callDuration, setCallDuration] = useState('');
-  const [callbackDate, setCallbackDate] = useState('');
-  const [rejectionReason, setRejectionReason] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [activeTab, setActiveTab] = useState('pending');
+  const [searchParams, setSearchParams] = useSearchParams();
+  
+  // State for Data
+  const [activeView, setActiveView] = useState(searchParams.get('view') || 'reports');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [tableData, setTableData] = useState<TableRowData[]>([]);
+  const [stats, setStats] = useState<CallStats | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
+  // State for Modals
+  const [selectedItem, setSelectedItem] = useState<TableRowData | null>(null);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<string | null>(null);
+
+  // Sync state to URL
   useEffect(() => {
-    fetchData();
-  }, [user]);
+    setSearchParams({ view: activeView });
+  }, [activeView, setSearchParams]);
 
-  async function fetchData() {
-    if (!user) return;
+  // --- FETCH DATA STRATEGY ---
+  const fetchData = useCallback(async () => {
+    if (activeView === 'reports') return;
     
-    setLoading(true);
-    
-    // Fetch leads assigned to agent or all if admin
-    const leadsQuery = supabase.from('leads').select('*').order('created_at', { ascending: false });
-    
-    if (role === 'sales_agent') {
-      leadsQuery.eq('assigned_to', user.id);
-    }
-    
-    const [leadsRes, callLogsRes, tasksRes] = await Promise.all([
-      leadsQuery,
-      supabase
-        .from('call_logs')
-        .select('*, lead:leads(id, name, phone, email, stage, temperature)')
-        .order('call_date', { ascending: false })
-        .limit(100),
-      supabase
-        .from('follow_up_tasks')
-        .select('*, lead:leads(id, name, phone, email, stage, temperature)')
-        .eq('status', 'pending')
-        .order('scheduled_at', { ascending: true })
-    ]);
+    setIsLoading(true);
+    setTableData([]); 
 
-    if (leadsRes.data) setLeads(leadsRes.data as unknown as Lead[]);
-    if (callLogsRes.data) setCallLogs(callLogsRes.data as unknown as CallLog[]);
-    if (tasksRes.data) setTasks(tasksRes.data as unknown as FollowUpTask[]);
-    
-    setLoading(false);
-  }
-
-  async function handleLogCall() {
-    if (!selectedLead || !callOutcome || !user) return;
-    
-    setIsSubmitting(true);
-    
     try {
-      // Create call log
-      const callLogData = {
-        lead_id: selectedLead.id,
-        agent_id: user.id,
-        call_status: callOutcome as 'connected_positive' | 'connected_callback' | 'not_connected' | 'not_interested',
-        call_duration: callDuration ? parseInt(callDuration) : null,
-        notes: callNotes || null,
-        callback_scheduled_at: callbackDate ? new Date(callbackDate).toISOString() : null,
-        rejection_reason: rejectionReason || null,
-      };
+        if (activeView === 'new_leads') {
+            // --- FETCH NEW LEADS ---
+            const query = new URLSearchParams({ stage: 'new' });
+            if (searchQuery) query.append('phone', searchQuery);
 
-      const { error: callError } = await supabase.from('call_logs').insert(callLogData);
-      
-      if (callError) throw callError;
+            const res = await fetch(`${API_URL}/leads?${query.toString()}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const leads: Lead[] = await res.json();
+            
+            const rows: TableRowData[] = leads.map(lead => ({
+                id: lead.id,
+                isLeadRow: true,
+                leadId: lead.id,
+                callStatus: 'pending',
+                displayDate: lead.createdAt || new Date().toISOString(),
+                duration: null,
+                notes: 'New lead awaiting connection',
+                lead: lead
+            }));
+            setTableData(rows);
 
-      // Handle outcome-specific actions
-      if (callOutcome === 'connected_positive') {
-        // Move lead to next stage
-        const nextStage = getNextStage(selectedLead.stage) as 'new' | 'contacted' | 'site_visit' | 'negotiation' | 'token' | 'closed';
-        await supabase.from('leads').update({ 
-          stage: nextStage,
-          temperature: 'hot' as const
-        }).eq('id', selectedLead.id);
-        
-        toast({ title: 'Call logged', description: 'Lead marked as interested and moved to next stage.' });
-      } else if (callOutcome === 'connected_callback') {
-        // Create follow-up task
-        if (callbackDate) {
-          await supabase.from('follow_up_tasks').insert({
-            lead_id: selectedLead.id,
-            agent_id: user.id,
-            task_type: 'callback',
-            scheduled_at: new Date(callbackDate).toISOString(),
-            notes: callNotes,
-          });
+        } else {
+            // --- FETCH CALL LOGS ---
+            const query = new URLSearchParams({
+                view: activeView,
+                search: searchQuery
+            });
+
+            const res = await fetch(`${API_URL}/call-logs?${query.toString()}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            
+            if (!res.ok) throw new Error("Failed to fetch logs");
+            
+            const logs = await res.json();
+            
+            const rows: TableRowData[] = logs.map((log: any) => ({
+                id: log.id,
+                isLeadRow: false,
+                leadId: log.leadId,
+                agentId: log.agentId,
+                callStatus: log.callStatus,
+                displayDate: log.callDate,
+                duration: log.callDuration,
+                notes: log.notes,
+                lead: log.lead,
+                agent: log.agent,
+                isArchived: log.isArchived,
+                deletedAt: log.deletedAt
+            }));
+            setTableData(rows);
         }
-        toast({ title: 'Call logged', description: 'Callback scheduled successfully.' });
-      } else if (callOutcome === 'not_connected') {
-        // Schedule retry call
-        await supabase.from('follow_up_tasks').insert({
-          lead_id: selectedLead.id,
-          agent_id: user.id,
-          task_type: 'retry_call',
-          scheduled_at: addHours(new Date(), 2).toISOString(),
-          notes: 'Auto-scheduled retry call',
-        });
-        
-        // Update retry count
-        const currentLog = callLogs.find(c => c.lead_id === selectedLead.id);
-        const retryCount = (currentLog?.retry_count || 0) + 1;
-        await supabase.from('call_logs').update({ retry_count: retryCount }).eq('lead_id', selectedLead.id);
-        
-        toast({ title: 'Call logged', description: 'Retry call scheduled in 2 hours.' });
-      } else if (callOutcome === 'not_interested') {
-        // Close lead
-        await supabase.from('leads').update({ 
-          stage: 'closed',
-          notes: `Closed - Reason: ${rejectionReason || 'Not interested'}`
-        }).eq('id', selectedLead.id);
-        
-        toast({ title: 'Call logged', description: 'Lead marked as closed.' });
-      }
-
-      // Log activity
-      await supabase.from('activity_logs').insert({
-        user_id: user.id,
-        action: 'call_logged',
-        entity_type: 'lead',
-        entity_id: selectedLead.id,
-        details: { call_status: callOutcome, lead_name: selectedLead.name }
-      });
-
-      // Reset and refresh
-      resetForm();
-      fetchData();
-      
     } catch (error) {
-      toast({ title: 'Error', description: 'Failed to log call', variant: 'destructive' });
+        console.error(error);
+        toast({ title: "Error", description: "Failed to load data", variant: "destructive" });
     } finally {
-      setIsSubmitting(false);
+        setIsLoading(false);
     }
-  }
+  }, [activeView, searchQuery, token, toast]);
 
-  function getNextStage(currentStage: string): string {
-    const stages = ['new', 'contacted', 'site_visit', 'negotiation', 'token', 'closed'];
-    const currentIndex = stages.indexOf(currentStage);
-    if (currentIndex < stages.length - 2) {
-      return stages[currentIndex + 1];
+  const fetchStats = useCallback(async () => {
+      try {
+          const res = await fetch(`${API_URL}/call-logs/stats`, {
+              headers: { 'Authorization': `Bearer ${token}` }
+          });
+          const data = await res.json();
+          setStats(data);
+      } catch (error) {
+          console.error("Failed to fetch stats", error);
+      }
+  }, [token]);
+
+  useEffect(() => { fetchStats(); }, [fetchStats]);
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // --- MENU CONFIGURATION ---
+  const menuItems = [
+    { id: 'reports', label: 'Reports', icon: BarChart3 },
+    { type: 'separator' },
+    { id: 'new_leads', label: 'New Web Leads', icon: Globe, className: 'text-blue-600 font-medium bg-blue-50/50' },
+    { type: 'separator' },
+    { id: 'all', label: 'All Calls', icon: Phone },
+    { id: 'attended', label: 'Attended Calls', icon: PhoneCall },
+    { id: 'active', label: 'Active (Today)', icon: CheckCircle2 },
+    { id: 'missed', label: 'Missed Calls', icon: PhoneMissed, className: 'text-red-600 font-medium' },
+    { id: 'qualified', label: 'Qualified Calls', icon: ThumbsUp },
+    { id: 'unqualified', label: 'Unqualified Calls', icon: ThumbsDown },
+    { id: 'analytics', label: 'Call Analysis', icon: BarChart3 },
+    { id: 'connect_group', label: 'Connect to Group', icon: Users },
+    { type: 'separator' },
+    { id: 'archive', label: 'Call Archive', icon: Archive },
+    { id: 'deleted', label: 'Deleted Calls', icon: Trash2 },
+  ];
+
+  // --- ACTION HANDLERS ---
+  const handleViewDetails = (item: TableRowData) => {
+    setSelectedItem(item);
+    setIsEditOpen(true);
+  };
+
+  const handleCallAction = (item: TableRowData) => {
+      toast({ title: "Dialing...", description: `Calling ${item.lead.name} (${item.lead.phone})` });
+  };
+
+  // ✅ ARCHIVE FUNCTION
+  const handleArchive = async (id: string) => {
+    try {
+        const res = await fetch(`${API_URL}/call-logs/${id}`, {
+            method: 'PATCH',
+            headers: { 
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ isArchived: true })
+        });
+
+        if (!res.ok) throw new Error('Failed to archive');
+
+        toast({ title: "Archived", description: "Call log moved to archive." });
+        
+        // Remove from current view locally to avoid reload
+        setTableData(prev => prev.filter(row => row.id !== id));
+        fetchStats(); // Update counts
+    } catch (error) {
+        toast({ title: "Error", description: "Could not archive call log.", variant: "destructive" });
     }
-    return currentStage;
-  }
+  };
 
-  function resetForm() {
-    setSelectedLead(null);
-    setCallOutcome('');
-    setCallNotes('');
-    setCallDuration('');
-    setCallbackDate('');
-    setRejectionReason('');
-    setIsCallDialogOpen(false);
-  }
+  // ✅ DELETE FUNCTION
+  const confirmDelete = (id: string) => {
+      setItemToDelete(id);
+      setIsDeleteAlertOpen(true);
+  };
 
-  function getInitials(name: string) {
-    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-  }
+  const handleDelete = async () => {
+    if (!itemToDelete) return;
 
-  function getOutcomeIcon(status: string) {
-    const outcome = callOutcomes.find(o => o.value === status);
-    if (!outcome) return <Phone className="h-4 w-4" />;
-    const Icon = outcome.icon;
-    return <Icon className="h-4 w-4" />;
-  }
+    try {
+        const res = await fetch(`${API_URL}/call-logs/${itemToDelete}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
 
-  function getOutcomeBadge(status: string) {
-    const outcome = callOutcomes.find(o => o.value === status);
-    if (!outcome) return <Badge variant="secondary">{status}</Badge>;
-    return <Badge className={outcome.color}>{outcome.label}</Badge>;
-  }
+        if (!res.ok) throw new Error('Failed to delete');
 
-  // Calculate stats
-  const todayCalls = callLogs.filter(c => isToday(parseISO(c.call_date)));
-  const connectedCalls = todayCalls.filter(c => c.call_status.startsWith('connected'));
-  const missedCalls = todayCalls.filter(c => c.call_status === 'not_connected');
-  const pendingCallbacks = tasks.filter(t => t.task_type === 'callback');
-  const pendingRetries = tasks.filter(t => t.task_type === 'retry_call');
+        toast({ title: "Deleted", description: "Call log moved to trash." });
+        
+        // Remove from current view locally
+        setTableData(prev => prev.filter(row => row.id !== itemToDelete));
+        setIsDeleteAlertOpen(false);
+        fetchStats();
+    } catch (error) {
+        toast({ title: "Error", description: "Could not delete call log.", variant: "destructive" });
+    }
+  };
 
   return (
-    <DashboardLayout title="IVR & Telecalling" description="Manage calls and follow-ups">
-      <div className="space-y-6">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Today's Calls</p>
-                  <p className="text-2xl font-bold">{todayCalls.length}</p>
-                </div>
-                <PhoneCall className="h-8 w-8 text-primary" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Connected</p>
-                  <p className="text-2xl font-bold">{connectedCalls.length}</p>
-                </div>
-                <CheckCircle2 className="h-8 w-8 text-success" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Missed/No Answer</p>
-                  <p className="text-2xl font-bold">{missedCalls.length}</p>
-                </div>
-                <PhoneMissed className="h-8 w-8 text-warning" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Pending Callbacks</p>
-                  <p className="text-2xl font-bold">{pendingCallbacks.length}</p>
-                </div>
-                <Calendar className="h-8 w-8 text-info" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+    <DashboardLayout title="Telecalling Center" description="Manage your call operations">
+      <div className="flex flex-col lg:flex-row h-[calc(100vh-140px)] gap-4 lg:gap-6">
+        
+        {/* --- SIDEBAR NAVIGATION --- */}
+        <Card className="w-full lg:w-64 flex-shrink-0 h-auto lg:h-full overflow-hidden flex flex-col border-r bg-card">
+          <CardHeader className="pb-2 pt-4 px-4">
+            <CardTitle className="text-sm uppercase text-muted-foreground font-bold tracking-wider">Filters</CardTitle>
+          </CardHeader>
+          <ScrollArea className="flex-1">
+            <div className="p-2 space-y-1">
+              {menuItems.map((item, idx) => (
+                item.type === 'separator' ? (
+                  <Separator key={idx} className="my-2" />
+                ) : (
+                  <Button
+                    key={item.id}
+                    variant={activeView === item.id ? "secondary" : "ghost"}
+                    className={`w-full justify-start gap-3 h-10 ${item.className || ''} ${activeView === item.id ? 'bg-primary/10 text-primary font-semibold' : ''}`}
+                    onClick={() => setActiveView(item.id || 'reports')}
+                  >
+                    {item.icon && <item.icon className="h-4 w-4" />}
+                    <span className="truncate">{item.label}</span>
+                    
+                    {item.id === 'missed' && stats?.notAnswered ? (
+                        <span className="ml-auto text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold">{stats.notAnswered}</span>
+                    ) : null}
+                  </Button>
+                )
+              ))}
+            </div>
+          </ScrollArea>
+        </Card>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Leads to Call */}
-          <Card className="lg:col-span-2">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-lg">Leads to Call</CardTitle>
-              <Badge variant="secondary">{leads.length} leads</Badge>
-            </CardHeader>
-            <CardContent>
-              <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="mb-4">
-                  <TabsTrigger value="pending">All Leads</TabsTrigger>
-                  <TabsTrigger value="callbacks">Callbacks ({pendingCallbacks.length})</TabsTrigger>
-                  <TabsTrigger value="retries">Retries ({pendingRetries.length})</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="pending" className="space-y-3 max-h-[400px] overflow-y-auto">
-                  {loading ? (
-                    [...Array(3)].map((_, i) => (
-                      <div key={i} className="animate-pulse flex items-center gap-4 p-3 rounded-lg bg-muted/30">
-                        <div className="h-10 w-10 rounded-full bg-muted" />
-                        <div className="flex-1 space-y-2">
-                          <div className="h-4 w-1/3 rounded bg-muted" />
-                          <div className="h-3 w-1/4 rounded bg-muted" />
-                        </div>
-                      </div>
-                    ))
-                  ) : leads.length === 0 ? (
-                    <p className="text-center text-muted-foreground py-8">No leads assigned</p>
-                  ) : (
-                    leads.slice(0, 10).map((lead) => (
-                      <div key={lead.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/30 transition-colors">
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-10 w-10">
-                            <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                              {getInitials(lead.name)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div>
-                            <p className="font-medium">{lead.name}</p>
-                            <p className="text-sm text-muted-foreground">{lead.phone}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="text-xs">{lead.stage}</Badge>
-                          <Dialog open={isCallDialogOpen && selectedLead?.id === lead.id} onOpenChange={(open) => {
-                            setIsCallDialogOpen(open);
-                            if (open) setSelectedLead(lead);
-                            else resetForm();
-                          }}>
-                            <DialogTrigger asChild>
-                              <Button size="sm" className="gap-2">
-                                <Phone className="h-4 w-4" />
-                                Call
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent className="sm:max-w-md">
-                              <DialogHeader>
-                                <DialogTitle>Log Call - {lead.name}</DialogTitle>
-                              </DialogHeader>
-                              <div className="space-y-4 py-4">
-                                <div className="space-y-2">
-                                  <Label>Call Outcome *</Label>
-                                  <Select value={callOutcome} onValueChange={setCallOutcome}>
-                                    <SelectTrigger>
-                                      <SelectValue placeholder="Select outcome" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {callOutcomes.map((outcome) => (
-                                        <SelectItem key={outcome.value} value={outcome.value}>
-                                          <div className="flex items-center gap-2">
-                                            <outcome.icon className="h-4 w-4" />
-                                            {outcome.label}
-                                          </div>
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-
-                                <div className="space-y-2">
-                                  <Label>Call Duration (seconds)</Label>
-                                  <Input 
-                                    type="number" 
-                                    placeholder="e.g. 120"
-                                    value={callDuration}
-                                    onChange={(e) => setCallDuration(e.target.value)}
-                                  />
-                                </div>
-
-                                {callOutcome === 'connected_callback' && (
-                                  <div className="space-y-2">
-                                    <Label>Callback Date & Time *</Label>
-                                    <Input 
-                                      type="datetime-local"
-                                      value={callbackDate}
-                                      onChange={(e) => setCallbackDate(e.target.value)}
-                                    />
-                                  </div>
-                                )}
-
-                                {callOutcome === 'not_interested' && (
-                                  <div className="space-y-2">
-                                    <Label>Rejection Reason</Label>
-                                    <Select value={rejectionReason} onValueChange={setRejectionReason}>
-                                      <SelectTrigger>
-                                        <SelectValue placeholder="Select reason" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="budget">Budget constraints</SelectItem>
-                                        <SelectItem value="location">Location not suitable</SelectItem>
-                                        <SelectItem value="timing">Not the right time</SelectItem>
-                                        <SelectItem value="competitor">Chose competitor</SelectItem>
-                                        <SelectItem value="other">Other</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-                                )}
-
-                                <div className="space-y-2">
-                                  <Label>Notes</Label>
-                                  <Textarea 
-                                    placeholder="Add call notes..."
-                                    value={callNotes}
-                                    onChange={(e) => setCallNotes(e.target.value)}
-                                    rows={3}
-                                  />
-                                </div>
-                              </div>
-                              <DialogFooter>
-                                <Button variant="outline" onClick={resetForm}>Cancel</Button>
-                                <Button onClick={handleLogCall} disabled={!callOutcome || isSubmitting}>
-                                  {isSubmitting ? 'Saving...' : 'Log Call'}
-                                </Button>
-                              </DialogFooter>
-                            </DialogContent>
-                          </Dialog>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </TabsContent>
-
-                <TabsContent value="callbacks" className="space-y-3 max-h-[400px] overflow-y-auto">
-                  {pendingCallbacks.length === 0 ? (
-                    <p className="text-center text-muted-foreground py-8">No pending callbacks</p>
-                  ) : (
-                    pendingCallbacks.map((task) => (
-                      <div key={task.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/30 transition-colors">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-full bg-info/10 flex items-center justify-center">
-                            <Calendar className="h-5 w-5 text-info" />
-                          </div>
-                          <div>
-                            <p className="font-medium">{task.lead?.name}</p>
-                            <p className="text-sm text-muted-foreground">
-                              {format(parseISO(task.scheduled_at), 'MMM d, h:mm a')}
-                            </p>
-                          </div>
-                        </div>
-                        <Button size="sm" variant="outline" className="gap-2" onClick={() => {
-                          const lead = leads.find(l => l.id === task.lead_id);
-                          if (lead) {
-                            setSelectedLead(lead);
-                            setIsCallDialogOpen(true);
-                          }
-                        }}>
-                          <Phone className="h-4 w-4" />
-                          Call Now
-                        </Button>
-                      </div>
-                    ))
-                  )}
-                </TabsContent>
-
-                <TabsContent value="retries" className="space-y-3 max-h-[400px] overflow-y-auto">
-                  {pendingRetries.length === 0 ? (
-                    <p className="text-center text-muted-foreground py-8">No pending retries</p>
-                  ) : (
-                    pendingRetries.map((task) => (
-                      <div key={task.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/30 transition-colors">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-full bg-warning/10 flex items-center justify-center">
-                            <PhoneMissed className="h-5 w-5 text-warning" />
-                          </div>
-                          <div>
-                            <p className="font-medium">{task.lead?.name}</p>
-                            <p className="text-sm text-muted-foreground">
-                              Scheduled: {format(parseISO(task.scheduled_at), 'MMM d, h:mm a')}
-                            </p>
-                          </div>
-                        </div>
-                        <Button size="sm" variant="outline" className="gap-2" onClick={() => {
-                          const lead = leads.find(l => l.id === task.lead_id);
-                          if (lead) {
-                            setSelectedLead(lead);
-                            setIsCallDialogOpen(true);
-                          }
-                        }}>
-                          <Phone className="h-4 w-4" />
-                          Retry
-                        </Button>
-                      </div>
-                    ))
-                  )}
-                </TabsContent>
-              </Tabs>
-            </CardContent>
-          </Card>
-
-          {/* Recent Call History */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Recent Calls</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 max-h-[450px] overflow-y-auto">
-              {loading ? (
-                [...Array(5)].map((_, i) => (
-                  <div key={i} className="animate-pulse flex items-center gap-3 p-2">
-                    <div className="h-8 w-8 rounded-full bg-muted" />
-                    <div className="flex-1 space-y-1">
-                      <div className="h-3 w-2/3 rounded bg-muted" />
-                      <div className="h-2 w-1/2 rounded bg-muted" />
+        {/* --- MAIN CONTENT AREA --- */}
+        <div className="flex-1 h-full flex flex-col min-w-0">
+          
+          {activeView === 'reports' ? (
+             <ReportsView stats={stats} />
+          ) : (
+             <Card className="h-full flex flex-col border shadow-sm">
+               {/* Header Toolbar */}
+               <div className="p-4 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-card/50">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 bg-primary/10 rounded-md">
+                        {(() => {
+                            const menuItem = menuItems.find(m => m.id === activeView);
+                            const Icon = menuItem?.icon || Phone;
+                            return <Icon className="h-5 w-5 text-primary" />;
+                        })()}
                     </div>
+                    <h2 className="text-xl font-bold tracking-tight capitalize">
+                      {menuItems.find(m => m.id === activeView)?.label || 'Calls'}
+                    </h2>
                   </div>
-                ))
-              ) : callLogs.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">No call history</p>
-              ) : (
-                callLogs.slice(0, 15).map((call) => (
-                  <div key={call.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/30 transition-colors">
-                    <div className="mt-0.5">{getOutcomeIcon(call.call_status)}</div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm truncate">{call.lead?.name || 'Unknown'}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatDistanceToNow(parseISO(call.call_date), { addSuffix: true })}
-                        {call.call_duration && ` • ${Math.floor(call.call_duration / 60)}m ${call.call_duration % 60}s`}
-                      </p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
-        </div>
 
-        {/* Admin/Manager View - Agent Performance */}
-        {(role === 'admin' || role === 'sales_manager') && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Agent Call Performance</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="p-4 rounded-lg bg-muted/30 text-center">
-                  <p className="text-3xl font-bold">{callLogs.length}</p>
-                  <p className="text-sm text-muted-foreground">Total Calls</p>
-                </div>
-                <div className="p-4 rounded-lg bg-success/10 text-center">
-                  <p className="text-3xl font-bold text-success">
-                    {callLogs.filter(c => c.call_status === 'connected_positive').length}
-                  </p>
-                  <p className="text-sm text-muted-foreground">Positive Responses</p>
-                </div>
-                <div className="p-4 rounded-lg bg-warning/10 text-center">
-                  <p className="text-3xl font-bold text-warning">
-                    {callLogs.filter(c => c.call_status === 'not_connected').length}
-                  </p>
-                  <p className="text-sm text-muted-foreground">Not Connected</p>
-                </div>
-                <div className="p-4 rounded-lg bg-info/10 text-center">
-                  <p className="text-3xl font-bold text-info">
-                    {callLogs.length > 0 
-                      ? Math.round((callLogs.filter(c => c.call_status.startsWith('connected')).length / callLogs.length) * 100)
-                      : 0}%
-                  </p>
-                  <p className="text-sm text-muted-foreground">Connect Rate</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+                  <div className="relative w-full sm:w-72">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input 
+                      placeholder="Search name or phone..." 
+                      className="pl-10 bg-background"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                  </div>
+               </div>
+
+               {/* Table Content */}
+               <div className="flex-1 overflow-hidden relative">
+                 <ScrollArea className="h-full w-full">
+                   <div className="min-w-[800px]">
+                   <Table>
+                     <TableHeader className="bg-muted/50 sticky top-0 z-10">
+                       <TableRow>
+                         <TableHead className="w-[180px]">Date & Time</TableHead>
+                         <TableHead>Client Name</TableHead>
+                         <TableHead>Phone Number</TableHead>
+                         <TableHead>Agent</TableHead>
+                         <TableHead>Status</TableHead>
+                         <TableHead>Duration</TableHead>
+                         <TableHead className="text-right pr-6">Actions</TableHead>
+                       </TableRow>
+                     </TableHeader>
+                     <TableBody>
+                       {isLoading ? (
+                           <TableRow>
+                             <TableCell colSpan={7} className="h-64 text-center">
+                               <div className="flex items-center justify-center gap-2 text-muted-foreground">
+                                   <Loader2 className="h-6 w-6 animate-spin" />
+                                   Loading data...
+                               </div>
+                             </TableCell>
+                           </TableRow>
+                       ) : tableData.length === 0 ? (
+                         <TableRow>
+                           <TableCell colSpan={7} className="h-64 text-center">
+                             <div className="flex flex-col items-center justify-center text-muted-foreground">
+                                <Search className="h-10 w-10 mb-2 opacity-20" />
+                                <p>No records found in this view.</p>
+                             </div>
+                           </TableCell>
+                         </TableRow>
+                       ) : (
+                         tableData.map((row) => (
+                           <TableRow key={row.id} className="hover:bg-muted/50 transition-colors group">
+                             <TableCell className="font-medium text-xs text-muted-foreground whitespace-nowrap">
+                               <div className="flex flex-col">
+                                   <span className="text-foreground">{format(parseISO(row.displayDate), 'MMM dd, yyyy')}</span>
+                                   <span className="text-[10px]">{format(parseISO(row.displayDate), 'hh:mm a')}</span>
+                               </div>
+                             </TableCell>
+                             <TableCell>
+                               <div className="flex items-center gap-2">
+                                 <Avatar className="h-8 w-8 border bg-background">
+                                   <AvatarFallback className="text-[10px] bg-primary/5 text-primary">
+                                     {row.lead?.name?.substring(0,2).toUpperCase() || 'NA'}
+                                   </AvatarFallback>
+                                 </Avatar>
+                                 <div>
+                                    <span className="font-semibold text-sm block">{row.lead?.name || 'Unknown Lead'}</span>
+                                    {row.isLeadRow ? (
+                                        <span className="text-[10px] text-blue-600 font-medium">New Website Lead</span>
+                                    ) : (
+                                        <span className="text-[10px] text-muted-foreground uppercase">{row.lead?.stage}</span>
+                                    )}
+                                 </div>
+                               </div>
+                             </TableCell>
+                             <TableCell>
+                               <div className="flex items-center gap-1">
+                                    <span className={`font-mono text-sm ${row.callStatus === 'not_connected' ? 'text-red-600 font-bold bg-red-50 px-2 py-0.5 rounded border border-red-100' : ''}`}>
+                                        {row.lead?.phone}
+                                    </span>
+                               </div>
+                             </TableCell>
+                             <TableCell className="text-sm">
+                                {row.agent?.fullName || <span className="text-muted-foreground italic">Unassigned</span>}
+                             </TableCell>
+                             <TableCell>
+                               <StatusBadge status={row.callStatus} />
+                             </TableCell>
+                             <TableCell className="text-xs font-mono">
+                               {row.duration ? `${Math.floor(row.duration / 60)}m ${row.duration % 60}s` : '--'}
+                             </TableCell>
+                             <TableCell className="text-right pr-4">
+                               <DropdownMenu>
+                                 <DropdownMenuTrigger asChild>
+                                   <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
+                                     <MoreVertical className="h-4 w-4" />
+                                   </Button>
+                                 </DropdownMenuTrigger>
+                                 <DropdownMenuContent align="end" className="w-48">
+                                   {row.isLeadRow ? (
+                                       <DropdownMenuItem onClick={() => handleCallAction(row)} className="text-blue-600 font-medium">
+                                          <Phone className="h-4 w-4 mr-2" />
+                                          Call Now
+                                       </DropdownMenuItem>
+                                   ) : null}
+                                   
+                                   <DropdownMenuItem onClick={() => handleViewDetails(row)}>
+                                     View Details
+                                   </DropdownMenuItem>
+                                   
+                                   {!row.isLeadRow && (
+                                       <>
+                                       <DropdownMenuItem onClick={() => handleArchive(row.id)}>
+                                         <Archive className="h-4 w-4 mr-2" />
+                                         Archive
+                                       </DropdownMenuItem>
+                                       <DropdownMenuItem className="text-red-600 focus:text-red-600 focus:bg-red-50" onClick={() => confirmDelete(row.id)}>
+                                         <Trash2 className="h-4 w-4 mr-2" />
+                                         Delete
+                                       </DropdownMenuItem>
+                                       </>
+                                   )}
+                                 </DropdownMenuContent>
+                               </DropdownMenu>
+                             </TableCell>
+                           </TableRow>
+                         ))
+                       )}
+                     </TableBody>
+                   </Table>
+                   </div>
+                 </ScrollArea>
+               </div>
+             </Card>
+          )}
+
+        </div>
       </div>
+
+      {/* VIEW DIALOG */}
+      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{selectedItem?.isLeadRow ? 'Lead Details' : 'Call Log Details'}</DialogTitle>
+          </DialogHeader>
+          {selectedItem && (
+            <div className="space-y-4 py-2">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Client Name</label>
+                  <Input defaultValue={selectedItem.lead?.name} readOnly className="bg-muted" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Phone</label>
+                  <Input defaultValue={selectedItem.lead?.phone} readOnly className="bg-muted" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Notes</label>
+                <Input defaultValue={selectedItem.notes || ''} readOnly className="bg-muted" />
+              </div>
+              
+              {selectedItem.isLeadRow && (
+                  <Button className="w-full gap-2 mt-4" onClick={() => handleCallAction(selectedItem)}>
+                      <Phone className="h-4 w-4" />
+                      Initiate Call
+                  </Button>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* CONFIRM DELETE DIALOG */}
+      <Dialog open={isDeleteAlertOpen} onOpenChange={setIsDeleteAlertOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-red-600">
+                    <AlertCircle className="h-5 w-5" />
+                    Confirm Deletion
+                </DialogTitle>
+            </DialogHeader>
+            <div className="py-2">
+                <p className="text-sm text-muted-foreground">
+                    Are you sure you want to move this call log to trash? 
+                    It will be hidden from active views.
+                </p>
+            </div>
+            <DialogFooter className="gap-2 sm:gap-0">
+                <Button variant="ghost" onClick={() => setIsDeleteAlertOpen(false)}>Cancel</Button>
+                <Button variant="destructive" onClick={handleDelete}>Delete</Button>
+            </DialogFooter>
+          </DialogContent>
+      </Dialog>
+
     </DashboardLayout>
+  );
+}
+
+// --- SUB-COMPONENTS ---
+
+function StatusBadge({ status }: { status: string }) {
+  const configs: Record<string, { label: string; className: string; icon: any }> = {
+    pending: { label: 'To Call', className: 'bg-orange-100 text-orange-700 hover:bg-orange-200 border-orange-200', icon: ArrowRightCircle },
+    connected_positive: { label: 'Qualified', className: 'bg-green-100 text-green-700 hover:bg-green-200 border-green-200', icon: ThumbsUp },
+    connected_callback: { label: 'Callback', className: 'bg-blue-100 text-blue-700 hover:bg-blue-200 border-blue-200', icon: Clock },
+    not_connected: { label: 'Missed', className: 'bg-red-100 text-red-700 hover:bg-red-200 border-red-200', icon: PhoneMissed },
+    not_interested: { label: 'Unqualified', className: 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-gray-200', icon: ThumbsDown },
+  };
+
+  const config = configs[status] || { label: status, className: 'bg-gray-100 border-gray-200', icon: Phone };
+  const Icon = config.icon;
+
+  return (
+    <Badge variant="outline" className={`${config.className} flex w-fit items-center gap-1.5 px-2 py-0.5 shadow-sm`}>
+      <Icon className="h-3 w-3" />
+      {config.label}
+    </Badge>
+  );
+}
+
+function ReportsView({ stats }: { stats: CallStats | null }) {
+  if (!stats) return <div className="p-8 flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>;
+
+  return (
+    <ScrollArea className="h-full">
+    <div className="space-y-6 p-1">
+       <div className="flex items-center justify-between">
+          <h2 className="text-2xl font-bold tracking-tight">Dashboard Overview</h2>
+          <Button variant="outline" size="sm">
+            <BarChart3 className="h-4 w-4 mr-2" />
+            Refresh Stats
+          </Button>
+       </div>
+       
+       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+         <StatsCard title="Total Calls" value={stats.totalCalls} icon={Phone} className="bg-blue-50 border-blue-200" />
+         <StatsCard title="Qualified" value={stats.positive} icon={ThumbsUp} className="bg-green-50 border-green-200" textClass="text-green-700" />
+         <StatsCard title="Missed" value={stats.notAnswered} icon={PhoneMissed} className="bg-red-50 border-red-200" textClass="text-red-700" />
+         <StatsCard title="Unqualified" value={stats.negative} icon={ThumbsDown} className="bg-gray-50 border-gray-200" />
+       </div>
+
+       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+         <Card className="h-[400px]">
+           <CardHeader>
+             <CardTitle>Missed Call Analysis</CardTitle>
+           </CardHeader>
+           <CardContent className="h-[320px] flex items-center justify-center">
+             <div className="flex flex-col items-center justify-center text-center p-8 bg-muted/20 rounded-lg border border-dashed w-full h-full">
+                <BarChart3 className="h-12 w-12 text-muted-foreground mb-4 opacity-50" />
+                <h3 className="text-lg font-medium">Analytics Visualization</h3>
+                <p className="text-sm text-muted-foreground max-w-sm mt-2">
+                  Call connect rate: <span className="font-bold text-foreground">{stats.connectRate}%</span>.
+                </p>
+             </div>
+           </CardContent>
+         </Card>
+       </div>
+    </div>
+    </ScrollArea>
+  );
+}
+
+function StatsCard({ title, value, icon: Icon, className, textClass }: any) {
+  return (
+    <Card className={`${className} shadow-sm`}>
+      <CardContent className="p-6 flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-muted-foreground">{title}</p>
+          <p className={`text-3xl font-bold ${textClass} mt-1`}>{value}</p>
+        </div>
+        <div className="p-3 bg-white/60 rounded-xl shadow-sm">
+          <Icon className={`h-6 w-6 ${textClass}`} />
+        </div>
+      </CardContent>
+    </Card>
   );
 }

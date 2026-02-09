@@ -1,252 +1,216 @@
 import { useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/lib/auth-context';
-import { Card, CardContent } from '@/components/ui/card';
+import { useAuth, usePermissions } from '@/lib/auth-context';
+import { Card, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Phone, Mail, Calendar, Flame, Thermometer, Snowflake, Home, CalendarPlus, UserCheck } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import { 
+  Phone, Mail, Flame, Thermometer, Snowflake, 
+  Home, CalendarPlus, UserCheck, MapPin, Calendar, Building2, Pencil
+} from 'lucide-react';
+import { formatDistanceToNow, format } from 'date-fns';
 import { PropertyMatchModal } from './PropertyMatchModal';
 import { ScheduleVisitDialog } from './ScheduleVisitDialog';
 import { QuickCallDialog } from './QuickCallDialog';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Lead } from '@/pages/Leads';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 interface Profile {
   id: string;
-  full_name: string;
+  fullName: string;
   email: string;
-  avatar_url: string | null;
 }
 
-interface Lead {
+interface DisplayProfile {
   id: string;
-  name: string;
-  email: string | null;
-  phone: string;
-  source: string;
-  stage: string;
-  temperature: string;
-  budget_min: number | null;
-  budget_max: number | null;
-  preferred_location: string | null;
-  notes: string | null;
-  next_followup_at: string | null;
-  created_at: string;
-  assigned_to: string | null;
+  fullName: string;
+  avatarUrl?: string | null;
 }
 
 interface LeadCardProps {
   lead: Lead;
-  profiles: Profile[];
+  profiles?: Profile[];
   onUpdate: () => void;
+  onEdit?: (lead: Lead) => void; // ✅ NEW PROP
 }
 
-const stages = [
-  { value: 'new', label: 'New', color: 'stage-new' },
-  { value: 'contacted', label: 'Contacted', color: 'stage-contacted' },
-  { value: 'site_visit', label: 'Site Visit', color: 'stage-site-visit' },
-  { value: 'negotiation', label: 'Negotiation', color: 'stage-negotiation' },
-  { value: 'token', label: 'Token', color: 'stage-token' },
-  { value: 'closed', label: 'Closed', color: 'stage-closed' },
-];
-
-export function LeadCard({ lead, profiles, onUpdate }: LeadCardProps) {
-  const { user, role } = useAuth();
+export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: LeadCardProps) {
+  const { token } = useAuth();
+  const { canAssignLeads } = usePermissions();
   const { toast } = useToast();
   const [isReassigning, setIsReassigning] = useState(false);
   const [showPropertyMatch, setShowPropertyMatch] = useState(false);
   const [showScheduleVisit, setShowScheduleVisit] = useState(false);
   const [showQuickCall, setShowQuickCall] = useState(false);
 
-  const assignedProfile = profiles.find(p => p.id === lead.assigned_to);
-  const isAdminOrManager = role === 'admin' || role === 'sales_manager';
+  const assignedId = lead.assignedTo?.id || lead.assignedToId;
+  
+  let assignedProfile: DisplayProfile | undefined;
+  if (lead.assignedTo) {
+    assignedProfile = { id: lead.assignedTo.id, fullName: lead.assignedTo.fullName, avatarUrl: lead.assignedTo.avatarUrl };
+  } else if (assignedId && profiles.length > 0) {
+    const found = profiles.find(p => p.id === assignedId);
+    if (found) assignedProfile = { id: found.id, fullName: found.fullName, avatarUrl: null };
+  }
 
-  const getInitials = (name: string) => {
-    return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
-  };
+  const getInitials = (name: string) => name ? name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) : '??';
 
   const getTemperatureIcon = (temp: string) => {
     switch (temp) {
-      case 'hot':
-        return <Flame className="h-4 w-4 text-red-500" />;
-      case 'warm':
-        return <Thermometer className="h-4 w-4 text-amber-500" />;
-      case 'cold':
-        return <Snowflake className="h-4 w-4 text-blue-500" />;
-      default:
-        return null;
+      case 'hot': return <Flame className="h-3 w-3 text-red-500" />;
+      case 'warm': return <Thermometer className="h-3 w-3 text-amber-500" />;
+      case 'cold': return <Snowflake className="h-3 w-3 text-blue-500" />;
+      default: return null;
     }
   };
 
-  const getStageBadge = (stage: string) => {
-    const stageConfig = stages.find(s => s.value === stage);
-    return (
-      <Badge variant="outline" className={stageConfig?.color || ''}>
-        {stageConfig?.label || stage}
-      </Badge>
-    );
-  };
+  const getStageBadge = (stage: string) => <Badge variant="secondary" className="text-[10px] h-5 px-1.5 capitalize font-normal bg-slate-100 text-slate-700">{stage.replace('_', ' ')}</Badge>;
 
   const handleReassign = async (newAgentId: string) => {
     setIsReassigning(true);
-    const { error } = await supabase
-      .from('leads')
-      .update({ assigned_to: newAgentId })
-      .eq('id', lead.id);
-
-    if (error) {
-      toast({ title: 'Error', description: 'Failed to reassign lead', variant: 'destructive' });
-    } else {
+    try {
+      const res = await fetch(`${API_URL}/leads/${lead.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ assignedToId: newAgentId })
+      });
+      if (!res.ok) throw new Error('Failed to reassign');
       toast({ title: 'Success', description: 'Lead reassigned successfully' });
       onUpdate();
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to reassign lead', variant: 'destructive' });
+    } finally {
+      setIsReassigning(false);
     }
-    setIsReassigning(false);
   };
+
+  const createdDate = lead.createdAt ? new Date(lead.createdAt) : new Date();
+  const nextVisit = lead.siteVisits && lead.siteVisits.length > 0 ? lead.siteVisits[0] : null;
+  const visitLocationName = nextVisit?.project?.name || nextVisit?.property?.title || "Site Visit";
 
   return (
     <>
-      <Card className="hover-lift">
-        <CardContent className="p-6">
-          <div className="flex items-start gap-4">
-            {/* Lead Avatar */}
-            <Avatar className="h-12 w-12 border">
-              <AvatarFallback className="bg-primary/10 text-primary font-medium">
-                {getInitials(lead.name)}
-              </AvatarFallback>
+      <Card className="flex flex-col h-full hover:shadow-lg transition-all duration-200 border-slate-200 group relative overflow-hidden bg-white">
+        <div className={`h-1 w-full ${lead.temperature === 'hot' ? 'bg-red-500' : lead.temperature === 'warm' ? 'bg-amber-500' : 'bg-blue-400'}`} />
+        
+        {/* ✅ EDIT BUTTON ABSOLUTE POSITIONED */}
+        {onEdit && (
+            <Button 
+                variant="ghost" 
+                size="icon" 
+                className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                onClick={(e) => { e.stopPropagation(); onEdit(lead); }}
+            >
+                <Pencil className="h-3 w-3 text-slate-400 hover:text-blue-600" />
+            </Button>
+        )}
+        
+        <CardContent className="p-4 flex-1 flex flex-col gap-3">
+          <div className="flex justify-between items-start gap-3">
+            <Avatar className="h-10 w-10 border bg-slate-50">
+              <AvatarFallback className="text-xs font-bold text-slate-600">{getInitials(lead.name)}</AvatarFallback>
             </Avatar>
-
-            {/* Lead Details */}
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1 flex-wrap">
-                <h3 className="font-semibold truncate">{lead.name}</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-sm truncate text-slate-900 pr-4" title={lead.name}>{lead.name}</h3>
                 {getTemperatureIcon(lead.temperature)}
-                {getStageBadge(lead.stage)}
               </div>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-                <span className="flex items-center gap-1">
-                  <Phone className="h-3.5 w-3.5" />
-                  {lead.phone}
-                </span>
-                {lead.email && (
-                  <span className="flex items-center gap-1">
-                    <Mail className="h-3.5 w-3.5" />
-                    {lead.email}
-                  </span>
-                )}
-                <span className="flex items-center gap-1">
-                  <Calendar className="h-3.5 w-3.5" />
-                  {formatDistanceToNow(new Date(lead.created_at), { addSuffix: true })}
-                </span>
-              </div>
-
-              {/* Assigned Agent */}
-              {assignedProfile && (
-                <div className="flex items-center gap-2 mt-2">
-                  <Avatar className="h-6 w-6">
-                    <AvatarImage src={assignedProfile.avatar_url || undefined} />
-                    <AvatarFallback className="text-xs bg-secondary">
-                      {getInitials(assignedProfile.full_name)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="text-xs text-muted-foreground">
-                    Assigned to <span className="font-medium text-foreground">{assignedProfile.full_name}</span>
-                  </span>
-                </div>
-              )}
+              <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5 truncate">
+                 {lead.source} • {!isNaN(createdDate.getTime()) ? formatDistanceToNow(createdDate) : 'New'}
+              </p>
             </div>
+          </div>
 
-            {/* Right Side Actions */}
-            <div className="flex flex-col items-end gap-2">
-              <div className="flex items-center gap-1">
-                <Badge variant="outline">{lead.source}</Badge>
+          <div className="grid gap-1.5 py-1 border-t border-b border-slate-50 my-1">
+            <div className="flex items-center gap-2 text-xs text-slate-600">
+              <Phone className="h-3 w-3 text-slate-400 shrink-0" /><span className="truncate">{lead.phone}</span>
+            </div>
+            {lead.email && (
+              <div className="flex items-center gap-2 text-xs text-slate-600">
+                <Mail className="h-3 w-3 text-slate-400 shrink-0" /><span className="truncate">{lead.email}</span>
               </div>
-              {lead.preferred_location && (
-                <p className="text-xs text-muted-foreground">{lead.preferred_location}</p>
+            )}
+             {lead.preferredLocation && (
+              <div className="flex items-center gap-2 text-xs text-slate-600">
+                <MapPin className="h-3 w-3 text-slate-400 shrink-0" /><span className="truncate">{lead.preferredLocation}</span>
+              </div>
+            )}
+          </div>
+          
+          {nextVisit && (
+            <div className="bg-blue-50 rounded-md p-2 mt-1 border border-blue-100">
+              <div className="flex items-center gap-2 mb-1">
+                <Calendar className="h-3 w-3 text-blue-600" />
+                <span className="text-xs font-medium text-blue-700">{format(new Date(nextVisit.scheduledAt), 'MMM d, h:mm a')}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Building2 className="h-3 w-3 text-blue-500" />
+                <span className="text-xs text-blue-600 truncate font-medium" title={visitLocationName}>{visitLocationName}</span>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-auto flex items-center justify-between pt-1">
+            {getStageBadge(lead.stage)}
+            <div className="flex items-center">
+              {canAssignLeads ? (
+                 <Select value={assignedId || ''} onValueChange={handleReassign} disabled={isReassigning}>
+                  <SelectTrigger className="h-6 w-auto border-0 p-0 text-xs bg-transparent focus:ring-0 gap-1 text-muted-foreground hover:text-foreground shadow-none">
+                    {assignedProfile ? (
+                       <div className="flex items-center gap-1">
+                         <Avatar className="h-5 w-5 border border-slate-200">
+                           <AvatarImage src={assignedProfile.avatarUrl || undefined} />
+                           <AvatarFallback className="text-[9px] bg-white">{getInitials(assignedProfile.fullName)}</AvatarFallback>
+                         </Avatar>
+                         <span className="max-w-[80px] truncate">{assignedProfile.fullName.split(' ')[0]}</span>
+                       </div>
+                    ) : (
+                      <div className="flex items-center gap-1 text-muted-foreground"><UserCheck className="h-4 w-4" /><span>Assign</span></div>
+                    )}
+                  </SelectTrigger>
+                  <SelectContent align="end">{profiles.map(p => <SelectItem key={p.id} value={p.id} className="text-xs">{p.fullName}</SelectItem>)}</SelectContent>
+                </Select>
+              ) : (
+                assignedProfile && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger>
+                        <div className="flex items-center gap-1">
+                          <Avatar className="h-5 w-5 cursor-help border border-slate-200">
+                            <AvatarImage src={assignedProfile.avatarUrl || undefined} />
+                            <AvatarFallback className="text-[9px] bg-white">{getInitials(assignedProfile.fullName)}</AvatarFallback>
+                          </Avatar>
+                          <span className="text-xs text-muted-foreground max-w-[80px] truncate">{assignedProfile.fullName.split(' ')[0]}</span>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent><p>Assigned to {assignedProfile.fullName}</p></TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )
               )}
-              
-              {/* Action Buttons */}
-              <div className="flex items-center gap-1 mt-2">
-                <Button 
-                  size="sm" 
-                  variant="ghost" 
-                  className="h-8 w-8 p-0"
-                  onClick={() => setShowQuickCall(true)}
-                  title="Quick Call"
-                >
-                  <Phone className="h-4 w-4" />
-                </Button>
-                <Button 
-                  size="sm" 
-                  variant="ghost" 
-                  className="h-8 w-8 p-0"
-                  onClick={() => setShowPropertyMatch(true)}
-                  title="Match Properties"
-                >
-                  <Home className="h-4 w-4" />
-                </Button>
-                <Button 
-                  size="sm" 
-                  variant="ghost" 
-                  className="h-8 w-8 p-0"
-                  onClick={() => setShowScheduleVisit(true)}
-                  title="Schedule Visit"
-                >
-                  <CalendarPlus className="h-4 w-4" />
-                </Button>
-                
-                {/* Reassign Dropdown - Admin/Manager only */}
-                {isAdminOrManager && (
-                  <Select
-                    value={lead.assigned_to || ''}
-                    onValueChange={handleReassign}
-                    disabled={isReassigning}
-                  >
-                    <SelectTrigger className="h-8 w-8 p-0 border-0" title="Reassign">
-                      <UserCheck className="h-4 w-4" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {profiles.map((profile) => (
-                        <SelectItem key={profile.id} value={profile.id}>
-                          <div className="flex items-center gap-2">
-                            <Avatar className="h-5 w-5">
-                              <AvatarFallback className="text-xs">
-                                {getInitials(profile.full_name)}
-                              </AvatarFallback>
-                            </Avatar>
-                            {profile.full_name}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
             </div>
           </div>
         </CardContent>
-      </Card>
 
-      {/* Modals */}
-      <PropertyMatchModal 
-        lead={lead} 
-        open={showPropertyMatch} 
-        onOpenChange={setShowPropertyMatch}
-        onSuccess={onUpdate}
-      />
-      <ScheduleVisitDialog 
-        lead={lead} 
-        open={showScheduleVisit} 
-        onOpenChange={setShowScheduleVisit}
-        onSuccess={onUpdate}
-      />
-      <QuickCallDialog 
-        lead={lead} 
-        open={showQuickCall} 
-        onOpenChange={setShowQuickCall}
-        onSuccess={onUpdate}
-      />
+        <CardFooter className="p-0 border-t bg-slate-50/50 grid grid-cols-3 divide-x divide-slate-200">
+           <Button variant="ghost" className="h-9 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowQuickCall(true)}>
+             <Phone className="h-3.5 w-3.5" />
+           </Button>
+           <Button variant="ghost" className="h-9 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowPropertyMatch(true)}>
+             <Home className="h-3.5 w-3.5" />
+           </Button>
+           <Button variant="ghost" className="h-9 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowScheduleVisit(true)}>
+             <CalendarPlus className="h-3.5 w-3.5" />
+           </Button>
+        </CardFooter>
+      </Card>
+      <PropertyMatchModal lead={lead} open={showPropertyMatch} onOpenChange={setShowPropertyMatch} onSuccess={onUpdate} />
+      <ScheduleVisitDialog lead={lead} open={showScheduleVisit} onOpenChange={setShowScheduleVisit} onSuccess={onUpdate} />
+      <QuickCallDialog lead={lead} open={showQuickCall} onOpenChange={setShowQuickCall} onSuccess={onUpdate} />
     </>
   );
 }

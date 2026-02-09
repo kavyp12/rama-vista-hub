@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/lib/auth-context';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -10,6 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, ThumbsUp, Calendar, PhoneMissed, ThumbsDown, Clock } from 'lucide-react';
 import { addHours, addDays, addWeeks } from 'date-fns';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 interface Lead {
   id: string;
@@ -26,10 +27,10 @@ interface QuickCallDialogProps {
 }
 
 const callOutcomes = [
-  { value: 'connected_positive', label: 'Interested', icon: ThumbsUp, color: 'bg-success hover:bg-success/90' },
-  { value: 'connected_callback', label: 'Callback', icon: Calendar, color: 'bg-info hover:bg-info/90' },
-  { value: 'not_connected', label: 'Busy / No Answer', icon: PhoneMissed, color: 'bg-warning hover:bg-warning/90' },
-  { value: 'not_interested', label: 'Not Interested', icon: ThumbsDown, color: 'bg-destructive hover:bg-destructive/90' },
+  { value: 'connected_positive', label: 'Interested', icon: ThumbsUp, color: 'bg-green-100 text-green-700 hover:bg-green-200 border-green-200' },
+  { value: 'connected_callback', label: 'Callback', icon: Calendar, color: 'bg-blue-100 text-blue-700 hover:bg-blue-200 border-blue-200' },
+  { value: 'not_connected', label: 'Busy / No Answer', icon: PhoneMissed, color: 'bg-amber-100 text-amber-700 hover:bg-amber-200 border-amber-200' },
+  { value: 'not_interested', label: 'Not Interested', icon: ThumbsDown, color: 'bg-red-100 text-red-700 hover:bg-red-200 border-red-200' },
 ];
 
 const quickNotes = [
@@ -47,7 +48,7 @@ const callbackOptions = [
 ];
 
 export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: QuickCallDialogProps) {
-  const { user } = useAuth();
+  const { token } = useAuth();
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
 
@@ -60,7 +61,7 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: QuickCa
   const [rejectionReason, setRejectionReason] = useState('');
 
   async function handleSubmit() {
-    if (!callOutcome || !user) return;
+    if (!callOutcome || !token) return;
 
     setSubmitting(true);
 
@@ -86,55 +87,28 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: QuickCa
         }
       }
 
-      // Create call log
-      const { error: callError } = await supabase.from('call_logs').insert({
-        lead_id: lead.id,
-        agent_id: user.id,
-        call_status: callOutcome as 'connected_positive' | 'connected_callback' | 'not_connected' | 'not_interested',
-        call_duration: callDuration ? parseInt(callDuration) : null,
+      // Prepare Payload
+      const payload = {
+        callStatus: callOutcome,
+        callDuration: callDuration ? parseInt(callDuration) : null,
         notes: notes || null,
-        callback_scheduled_at: callbackTime?.toISOString() || null,
-        rejection_reason: rejectionReason || null,
+        callbackScheduledAt: callbackTime ? callbackTime.toISOString() : null,
+        rejectionReason: rejectionReason || null
+      };
+
+      // Send to Backend
+      const res = await fetch(`${API_URL}/leads/${lead.id}/call-logs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
       });
 
-      if (callError) throw callError;
-
-      // Handle outcome-specific actions
-      if (callOutcome === 'connected_positive') {
-        // Move lead to next stage
-        const stages = ['new', 'contacted', 'site_visit', 'negotiation', 'token', 'closed'];
-        const currentIndex = stages.indexOf(lead.stage);
-        const nextStage = currentIndex < stages.length - 2 ? stages[currentIndex + 1] : lead.stage;
-        
-        await supabase.from('leads').update({ 
-          stage: nextStage as 'new' | 'contacted' | 'site_visit' | 'negotiation' | 'token' | 'closed',
-          temperature: 'hot' as const,
-          last_contacted_at: new Date().toISOString()
-        }).eq('id', lead.id);
-
-      } else if (callOutcome === 'connected_callback' || callOutcome === 'not_connected') {
-        // Create follow-up task
-        if (callbackTime) {
-          await supabase.from('follow_up_tasks').insert({
-            lead_id: lead.id,
-            agent_id: user.id,
-            task_type: callOutcome === 'connected_callback' ? 'callback' : 'retry_call',
-            scheduled_at: callbackTime.toISOString(),
-            notes: notes || (callOutcome === 'not_connected' ? 'Auto-scheduled retry' : null),
-          });
-        }
-        
-        await supabase.from('leads').update({ 
-          last_contacted_at: new Date().toISOString(),
-          next_followup_at: callbackTime?.toISOString()
-        }).eq('id', lead.id);
-
-      } else if (callOutcome === 'not_interested') {
-        await supabase.from('leads').update({ 
-          stage: 'closed',
-          notes: `Closed - ${rejectionReason || 'Not interested'}`,
-          last_contacted_at: new Date().toISOString()
-        }).eq('id', lead.id);
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Failed to log call');
       }
 
       toast({ title: 'Call Logged', description: getSuccessMessage() });
@@ -142,8 +116,8 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: QuickCa
       onOpenChange(false);
       onSuccess();
 
-    } catch (error) {
-      toast({ title: 'Error', description: 'Failed to log call', variant: 'destructive' });
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message || 'Failed to log call', variant: 'destructive' });
     } finally {
       setSubmitting(false);
     }
@@ -187,12 +161,16 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: QuickCa
                   <Button
                     key={outcome.value}
                     type="button"
-                    variant={callOutcome === outcome.value ? 'default' : 'outline'}
-                    className={`justify-start gap-2 ${callOutcome === outcome.value ? outcome.color : ''}`}
+                    variant="outline"
+                    className={`justify-start gap-2 h-auto py-3 ${
+                      callOutcome === outcome.value 
+                        ? `${outcome.color} border-current ring-1 ring-current` 
+                        : 'hover:bg-slate-50'
+                    }`}
                     onClick={() => setCallOutcome(outcome.value)}
                   >
-                    <Icon className="h-4 w-4" />
-                    {outcome.label}
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span>{outcome.label}</span>
                   </Button>
                 );
               })}
@@ -213,7 +191,7 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: QuickCa
           {/* Quick Notes */}
           <div className="space-y-2">
             <Label>Quick Notes</Label>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 mb-2">
               {quickNotes.map((note) => (
                 <Button
                   key={note}
@@ -221,6 +199,7 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: QuickCa
                   size="sm"
                   variant={notes === note ? 'default' : 'outline'}
                   onClick={() => setNotes(note)}
+                  className="h-7 text-xs"
                 >
                   {note}
                 </Button>
@@ -236,18 +215,19 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: QuickCa
 
           {/* Callback Options */}
           {(callOutcome === 'connected_callback' || callOutcome === 'not_connected') && (
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2">
+            <div className="space-y-2 bg-blue-50 p-3 rounded-md border border-blue-100">
+              <Label className="flex items-center gap-2 text-blue-900">
                 <Clock className="h-4 w-4" />
                 Schedule {callOutcome === 'connected_callback' ? 'Callback' : 'Retry'}
               </Label>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 mt-2">
                 {callbackOptions.map((option) => (
                   <Button
                     key={option.label}
                     type="button"
                     size="sm"
                     variant={callbackOption === option.label ? 'default' : 'outline'}
+                    className={callbackOption === option.label ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white'}
                     onClick={() => setCallbackOption(option.label)}
                   >
                     {option.label}
@@ -257,17 +237,21 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: QuickCa
                   type="button"
                   size="sm"
                   variant={callbackOption === 'custom' ? 'default' : 'outline'}
+                  className={callbackOption === 'custom' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white'}
                   onClick={() => setCallbackOption('custom')}
                 >
                   Custom
                 </Button>
               </div>
               {callbackOption === 'custom' && (
-                <Input
-                  type="datetime-local"
-                  value={customCallbackDate}
-                  onChange={(e) => setCustomCallbackDate(e.target.value)}
-                />
+                <div className="mt-2">
+                  <Input
+                    type="datetime-local"
+                    value={customCallbackDate}
+                    onChange={(e) => setCustomCallbackDate(e.target.value)}
+                    className="bg-white"
+                  />
+                </div>
               )}
             </div>
           )}
