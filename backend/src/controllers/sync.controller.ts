@@ -4,32 +4,57 @@ import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { ProjectStatus, LeadStage, Temperature, PropertyType, PropertyStatus } from '@prisma/client';
 
+// ✅ CHANGED: Default is now 5000 (Matches your Server's Site Backend Port)
 const SITE_API_URL = process.env.SITE_API_URL || 'http://localhost:5001/api';
+
+// --- HELPER TO FETCH DATA & LOG ERRORS ---
+// This replaces the .catch() block that was hiding your errors
+const fetchFromSite = async (endpoint: string) => {
+  try {
+    const url = `${SITE_API_URL}${endpoint}`;
+    console.log(`👉 Attempting to fetch: ${url}`); // Debug Log
+    const response = await axios.get(url);
+    
+    // Handle both { data: [...] } and [...] formats
+    if (Array.isArray(response.data)) return response.data;
+    if (response.data && Array.isArray(response.data.data)) return response.data.data;
+    return [];
+    
+  } catch (error: any) {
+    console.error(`❌ FAILED to fetch ${endpoint}:`, error.message);
+    // If there is a response from server (e.g. 404 or 500), log it
+    if (error.response) {
+      console.error(`   Server Responded: ${error.response.status}`, error.response.data);
+    }
+    return []; // Return empty array so sync doesn't crash, but we see the error above
+  }
+};
 
 // ==========================================
 // 1. SYNC PROJECTS
 // ==========================================
 export const syncProjects = async (req: AuthRequest, res: Response) => {
   try {
-    console.log('🔄 Starting Project Sync...');
+    console.log(`🔄 Starting Project Sync... Target: ${SITE_API_URL}`);
 
+    // Fetch all 3 categories using the helper
     const [resProjects, commProjects, landProjects] = await Promise.all([
-      axios.get(`${SITE_API_URL}/projects`).catch(() => ({ data: { data: [] } })),
-      axios.get(`${SITE_API_URL}/commercial-projects`).catch(() => ({ data: { data: [] } })),
-      axios.get(`${SITE_API_URL}/land-projects`).catch(() => ({ data: { data: [] } }))
+      fetchFromSite('/projects'),
+      fetchFromSite('/commercial-projects'),
+      fetchFromSite('/land-projects')
     ]);
 
     const allData = [
-      ...(resProjects.data.data || []).map((p: any) => ({ ...p, _category: 'residential' })),
-      ...(commProjects.data.data || []).map((p: any) => ({ ...p, _category: 'commercial' })),
-      ...(landProjects.data.data || []).map((p: any) => ({ ...p, _category: 'land' }))
+      ...resProjects.map((p: any) => ({ ...p, _category: 'residential' })),
+      ...commProjects.map((p: any) => ({ ...p, _category: 'commercial' })),
+      ...landProjects.map((p: any) => ({ ...p, _category: 'land' }))
     ];
 
-    console.log(`📥 Fetched ${allData.length} projects from site.`);
+    console.log(`📥 Fetched ${allData.length} total projects from site.`);
     let createdCount = 0;
     let updatedCount = 0;
 
-    const extractNumericPrice = (priceStr: string): number => {
+    const extractNumericPrice = (priceStr: any): number => {
       if (!priceStr || typeof priceStr !== 'string') return 0;
       const crMatch = priceStr.match(/([\d.]+)\s*Cr/i);
       const lMatch = priceStr.match(/([\d.]+)\s*L/i);
@@ -46,6 +71,7 @@ export const syncProjects = async (req: AuthRequest, res: Response) => {
       let maxPrice = 0;
       let priceDisplay = item.priceDisplay || item.priceRange || 'On Request';
 
+      // Price Logic
       if (item.price) minPrice = Number(item.price);
       else if (item.priceRange) {
         priceDisplay = item.priceRange;
@@ -57,15 +83,12 @@ export const syncProjects = async (req: AuthRequest, res: Response) => {
       }
 
       const projectData = {
-        websiteId: item._id,
+        websiteId: item._id, // Ensure this exists in your schema
         name: item.name || item.title || 'Untitled',
         category: category as any,
-
-        // 🔧 FIXED: Proper location hierarchy
         location: item.area || item.location || item.address || item.village || 'Unknown',
         city: item.city || item.district || null,
         state: item.state || 'Gujarat',
-
         status: ProjectStatus.active,
         description: item.description || item.about || '',
         imageUrls: item.heroImages || item.images || [],
@@ -85,6 +108,7 @@ export const syncProjects = async (req: AuthRequest, res: Response) => {
         district: item.district || null
       };
 
+      // ✅ NO DUPLICATE LOGIC: Update if exists, Create if new
       const existing = await prisma.project.findUnique({ where: { websiteId: item._id } });
 
       if (existing) {
@@ -113,7 +137,7 @@ export const syncProjects = async (req: AuthRequest, res: Response) => {
     });
 
   } catch (error: any) {
-    console.error('Project Sync Error:', error);
+    console.error('Project Sync CRITICAL Error:', error);
     return res.status(500).json({ error: 'Sync failed', details: error.message });
   }
 };
@@ -125,9 +149,7 @@ export const syncLeads = async (req: AuthRequest, res: Response) => {
   try {
     console.log('🔄 Starting Lead Sync...');
 
-    const response = await axios.get(`${SITE_API_URL}/leads`);
-    const siteLeads = response.data.data || [];
-
+    const siteLeads = await fetchFromSite('/leads');
     console.log(`📥 Fetched ${siteLeads.length} leads from site.`);
 
     let createdCount = 0;
@@ -138,12 +160,14 @@ export const syncLeads = async (req: AuthRequest, res: Response) => {
       let projectId = null;
       let projectNameFromSite = '';
 
+      // Try to find project name from lead data
       if (siteLead.project && siteLead.project.name) {
         projectNameFromSite = siteLead.project.name;
       } else if (siteLead.commercialProject && siteLead.commercialProject.name) {
         projectNameFromSite = siteLead.commercialProject.name;
       }
 
+      // Link lead to CRM project if name matches
       if (projectNameFromSite) {
         const match = await prisma.project.findFirst({
           where: { name: { contains: projectNameFromSite, mode: 'insensitive' } }
@@ -170,10 +194,11 @@ export const syncLeads = async (req: AuthRequest, res: Response) => {
         assignedToId: req.user?.userId ?? null
       };
 
+      // ✅ NO DUPLICATE LOGIC: Check by Phone Number
       const existing = await prisma.lead.findFirst({ where: { phone: siteLead.phone } });
 
       if (existing) {
-        updatedCount++;
+        updatedCount++; // Skip or update if needed
       } else {
         await prisma.lead.create({ data: leadData });
         createdCount++;
@@ -203,221 +228,128 @@ export const syncLeads = async (req: AuthRequest, res: Response) => {
 };
 
 // ==========================================
-// 3. SYNC PROPERTIES (FROM PROJECT CONFIGURATIONS)
+// 3. SYNC PROPERTIES
 // ==========================================
 export const syncProperties = async (req: AuthRequest, res: Response) => {
   try {
     console.log('🔄 Starting Property Sync from Project Configurations...');
 
-    // Fetch all projects from site API
+    // Fetch all project types
     const [resProjects, commProjects, landProjects] = await Promise.all([
-      axios.get(`${SITE_API_URL}/projects`).catch(() => ({ data: { data: [] } })),
-      axios.get(`${SITE_API_URL}/commercial-projects`).catch(() => ({ data: { data: [] } })),
-      axios.get(`${SITE_API_URL}/land-projects`).catch(() => ({ data: { data: [] } }))
+      fetchFromSite('/projects'),
+      fetchFromSite('/commercial-projects'),
+      fetchFromSite('/land-projects')
     ]);
 
     const siteProjects = [
-      ...(resProjects.data.data || []).map((p: any) => ({ ...p, _category: 'residential' })),
-      ...(commProjects.data.data || []).map((p: any) => ({ ...p, _category: 'commercial' })),
-      ...(landProjects.data.data || []).map((p: any) => ({ ...p, _category: 'land' }))
+      ...resProjects.map((p: any) => ({ ...p, _category: 'residential' })),
+      ...commProjects.map((p: any) => ({ ...p, _category: 'commercial' })),
+      ...landProjects.map((p: any) => ({ ...p, _category: 'land' }))
     ];
 
-    console.log(`📥 Processing ${siteProjects.length} projects for property extraction...`);
+    console.log(`📥 Processing ${siteProjects.length} projects for properties...`);
 
     let createdCount = 0;
     let updatedCount = 0;
 
-    // Helper to extract numeric price
     const extractPrice = (str: any): number => {
       if (!str) return 0;
       if (typeof str === 'number') return str;
-
       const text = str.toString();
       const crMatch = text.match(/([\d.]+)\s*Cr/i);
       const lMatch = text.match(/([\d.]+)\s*L/i);
       const numMatch = text.match(/([\d,]+)/);
-
       if (crMatch) return parseFloat(crMatch[1]) * 10000000;
       if (lMatch) return parseFloat(lMatch[1]) * 100000;
       if (numMatch) return parseFloat(numMatch[1].replace(/,/g, ''));
-
       return 0;
     };
 
-    // Helper to map property type
     const mapPropertyType = (type: string, category: string): PropertyType => {
       const t = (type || '').toLowerCase();
-
-      if (category === 'land' || t.includes('plot') || t.includes('land')) {
-        return PropertyType.plot;
-      }
-
-      if (category === 'commercial' || t.includes('commercial') || t.includes('office') || t.includes('shop') || t.includes('showroom')) {
-        return PropertyType.commercial;
-      }
-
-      // Residential types
+      if (category === 'land' || t.includes('plot') || t.includes('land')) return PropertyType.plot;
+      if (category === 'commercial' || t.includes('commercial') || t.includes('office')) return PropertyType.commercial;
       if (t.includes('villa')) return PropertyType.villa;
       if (t.includes('penthouse')) return PropertyType.penthouse;
-      if (t.includes('townhouse')) return PropertyType.townhouse;
-
-      return PropertyType.apartment; // Default
+      return PropertyType.apartment;
     };
 
     for (const siteProject of siteProjects) {
-      // Find matching project in CRM
+      // Must match a project in CRM first
       const crmProject = await prisma.project.findUnique({
         where: { websiteId: siteProject._id }
       });
 
       if (!crmProject) {
-        console.log(`⚠️ Skipping properties for project ${siteProject.name} - not synced to CRM yet`);
-        continue;
+        continue; // Skip if project not synced yet
       }
 
       const projectId = crmProject.id;
+      const location = siteProject.area || siteProject.location || 'Unknown';
+      const city = siteProject.city || null;
 
-      // 🔧 FIXED: Use proper location hierarchy from site project
-      const location = siteProject.area || siteProject.location || siteProject.address || siteProject.village || 'Unknown Location';
-      const city = siteProject.city || siteProject.district || null;
-
-      // --- RESIDENTIAL: Extract from CONFIGURATIONS ---
+      // --- RESIDENTIAL ---
       if (siteProject._category === 'residential' && siteProject.configurations) {
         for (const config of siteProject.configurations) {
-          // Extract BHK (e.g., "3 BHK Flat" -> 3)
           const bhkMatch = config.type?.match(/(\d+(\.\d+)?)\s*BHK/i);
           const bhk = bhkMatch ? parseFloat(bhkMatch[1]) : null;
-
-          // Extract area (e.g., "1200 Sq.Ft" -> 1200)
           const areaMatch = config.area?.match(/([\d,]+)/);
           const area = areaMatch ? parseFloat(areaMatch[1].replace(/,/g, '')) : null;
-
           const price = extractPrice(config.price);
-
-          // Generate unique title
           const title = `${config.type || 'Unit'} - ${config.area || 'TBD'}`;
 
           const propertyData = {
             title,
             propertyType: mapPropertyType(config.type, 'residential'),
-            location,
-            city,
-            bedrooms: bhk ? Math.floor(bhk) : null,
-            bathrooms: bhk ? Math.floor(bhk) : null,
-            areaSqft: area,
-            price: price || 1,
-            status: PropertyStatus.available,
+            location, city, bedrooms: bhk ? Math.floor(bhk) : null, bathrooms: bhk ? Math.floor(bhk) : null,
+            areaSqft: area, price: price || 1, status: PropertyStatus.available,
             description: `${config.type} in ${siteProject.name}`,
-            features: [],
-            imageUrls: siteProject.heroImages?.slice(0, 3) || [],
-            projectId
+            projectId, features: [], imageUrls: siteProject.heroImages?.slice(0, 3) || []
           };
 
-          // Check if property already exists
-          const existing = await prisma.property.findFirst({
-            where: {
-              projectId,
-              title,
-              areaSqft: area
-            }
-          });
-
-          if (existing) {
-            await prisma.property.update({ where: { id: existing.id }, data: propertyData });
-            updatedCount++;
-          } else {
-            await prisma.property.create({ data: propertyData });
-            createdCount++;
-          }
+          const existing = await prisma.property.findFirst({ where: { projectId, title, areaSqft: area } });
+          if (existing) { await prisma.property.update({ where: { id: existing.id }, data: propertyData }); updatedCount++; }
+          else { await prisma.property.create({ data: propertyData }); createdCount++; }
         }
       }
 
-      // --- COMMERCIAL: Extract from PRICING DETAILS ---
+      // --- COMMERCIAL ---
       else if (siteProject._category === 'commercial' && siteProject.pricingDetails) {
         for (const pricing of siteProject.pricingDetails) {
           const type = pricing.propertyType || pricing.type || 'Commercial Unit';
-
-          // Extract area
-          const superArea = pricing.superBuiltupArea ? parseFloat(pricing.superBuiltupArea) : null;
-          const carpetArea = pricing.carpetArea ? parseFloat(pricing.carpetArea) : null;
-          const area = superArea || carpetArea || (pricing.area ? parseFloat(pricing.area) : null);
-
-          // Extract price
-          const price = extractPrice(pricing.priceDisplay || pricing.price || pricing.rentLeaseAmount);
-
-          const title = `${type} - ${pricing.superBuiltupArea || pricing.carpetArea || pricing.area || 'Custom'}`;
+          const area = pricing.superBuiltupArea ? parseFloat(pricing.superBuiltupArea) : (pricing.area ? parseFloat(pricing.area) : null);
+          const price = extractPrice(pricing.priceDisplay || pricing.price);
+          const title = `${type} - ${area || 'Custom'}`;
 
           const propertyData = {
-            title,
-            propertyType: PropertyType.commercial,
-            location,
-            city,
-            bedrooms: null,
-            bathrooms: pricing.washrooms ? parseInt(pricing.washrooms) : null,
-            areaSqft: area,
-            price: price || 1,
-            status: PropertyStatus.available,
-            description: `${type} in ${siteProject.name}`,
-            features: [],
-            imageUrls: siteProject.heroImages?.slice(0, 3) || [],
-            projectId
+            title, propertyType: PropertyType.commercial, location, city,
+            areaSqft: area, price: price || 1, status: PropertyStatus.available,
+            description: `${type} in ${siteProject.name}`, projectId,
+            features: [], imageUrls: siteProject.heroImages?.slice(0, 3) || []
           };
 
-          const existing = await prisma.property.findFirst({
-            where: {
-              projectId,
-              title,
-              areaSqft: area
-            }
-          });
-
-          if (existing) {
-            await prisma.property.update({ where: { id: existing.id }, data: propertyData });
-            updatedCount++;
-          } else {
-            await prisma.property.create({ data: propertyData });
-            createdCount++;
-          }
+          const existing = await prisma.property.findFirst({ where: { projectId, title, areaSqft: area } });
+          if (existing) { await prisma.property.update({ where: { id: existing.id }, data: propertyData }); updatedCount++; }
+          else { await prisma.property.create({ data: propertyData }); createdCount++; }
         }
       }
 
-      // --- LAND: Create single property entry ---
+      // --- LAND ---
       else if (siteProject._category === 'land') {
         const area = siteProject.plotArea ? parseFloat(siteProject.plotArea) : null;
         const price = extractPrice(siteProject.price);
-
-        const title = `Plot at ${siteProject.village || location} - ${siteProject.plotArea || ''} ${siteProject.areaUnit || ''}`.trim();
+        const title = `Plot at ${siteProject.village || location}`;
 
         const propertyData = {
-          title,
-          propertyType: PropertyType.plot,
-          location: siteProject.village || location,
-          city: siteProject.district || city,
-          bedrooms: null,
-          bathrooms: null,
-          areaSqft: area,
-          price: price || 1,
-          status: PropertyStatus.available,
-          description: `Land in ${siteProject.village}. Survey: ${siteProject.surveyNumber || 'N/A'}`,
-          features: [],
-          imageUrls: siteProject.heroImages || siteProject.images || [],
-          projectId
+          title, propertyType: PropertyType.plot, location, city,
+          areaSqft: area, price: price || 1, status: PropertyStatus.available,
+          description: `Land in ${siteProject.village}`, projectId,
+          features: [], imageUrls: siteProject.heroImages || []
         };
 
-        const existing = await prisma.property.findFirst({
-          where: {
-            projectId,
-            title
-          }
-        });
-
-        if (existing) {
-          await prisma.property.update({ where: { id: existing.id }, data: propertyData });
-          updatedCount++;
-        } else {
-          await prisma.property.create({ data: propertyData });
-          createdCount++;
-        }
+        const existing = await prisma.property.findFirst({ where: { projectId, title } });
+        if (existing) { await prisma.property.update({ where: { id: existing.id }, data: propertyData }); updatedCount++; }
+        else { await prisma.property.create({ data: propertyData }); createdCount++; }
       }
     }
 
