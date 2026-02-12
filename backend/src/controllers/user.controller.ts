@@ -450,3 +450,38 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
     return res.status(500).json({ error: 'Failed to delete user' });
   }
 };
+
+// Get user call logs (Admin/Manager can view any, users can view their own)
+export const getUserCallLogs = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    // Authorization check
+    if (req.user!.userId !== id && req.user!.role !== 'admin' && req.user!.role !== 'sales_manager') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const callLogs = await prisma.callLog.findMany({
+      where: { agentId: id },
+      include: {
+        lead: {
+          select: { 
+            id: true, 
+            name: true, 
+            phone: true, 
+            email: true,
+            stage: true,
+            temperature: true
+          }
+        }
+      },
+      orderBy: { callDate: 'desc' },
+      take: 100 // Limit to last 100 calls
+    });
+
+    return res.json(callLogs);
+  } catch (error) {
+    console.error('Get User Call Logs Error:', error);
+    return res.status(500).json({ error: 'Failed to fetch call logs' });
+  }
+};

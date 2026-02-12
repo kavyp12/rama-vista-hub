@@ -10,13 +10,15 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useToast } from '@/hooks/use-toast';
 import {
   Calendar, MapPin, User, Star, CalendarDays, CheckCircle2,
   Flame, Clock, Search, Phone, Filter, Building2, Home,
-  AlertCircle, TrendingUp, X, RefreshCw, ChevronDown, ChevronUp
+  AlertCircle, TrendingUp, X, RefreshCw, ChevronDown, ChevronUp,
+  Download, SlidersHorizontal
 } from 'lucide-react';
-import { format, parseISO, isToday, isTomorrow, isPast, startOfWeek, endOfWeek, isWithinInterval, addHours, addDays } from 'date-fns';
+import { format, parseISO, isToday, isTomorrow, isPast, startOfWeek, endOfWeek, isWithinInterval, addHours, addDays, startOfDay, endOfDay } from 'date-fns';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
@@ -28,6 +30,7 @@ interface SiteVisit {
   feedback: string | null;
   rating: number | null;
   conductedBy: string | null;
+  createdAt?: string;
   lead?: {
     id: string;
     name: string;
@@ -67,6 +70,17 @@ interface VisitStats {
   avgRating: number;
 }
 
+interface AdvancedFilters {
+  status: string;
+  temperature: string;
+  stage: string;
+  rating: string;
+  dateFrom: string;
+  dateTo: string;
+  propertyType: string;
+  city: string;
+}
+
 export default function SiteVisits() {
   const { user, token } = useAuth();
   const { canAssignLeads } = usePermissions();
@@ -91,6 +105,20 @@ export default function SiteVisits() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedAgent, setSelectedAgent] = useState<string>('all');
   const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
+  const [sortBy, setSortBy] = useState<'date' | 'rating' | 'created'>('date');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [showFilters, setShowFilters] = useState(false);
+
+  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>({
+    status: 'all',
+    temperature: 'all',
+    stage: 'all',
+    rating: 'all',
+    dateFrom: '',
+    dateTo: '',
+    propertyType: 'all',
+    city: 'all'
+  });
 
   const [selectedVisit, setSelectedVisit] = useState<SiteVisit | null>(null);
   const [showActionDialog, setShowActionDialog] = useState(false);
@@ -117,8 +145,11 @@ export default function SiteVisits() {
       const data = await res.json();
       
       if (res.ok && Array.isArray(data)) {
-        setVisits(data);
-        calculateStats(data);
+        const sortedData = data.sort((a, b) => 
+          new Date(b.createdAt || b.scheduledAt).getTime() - new Date(a.createdAt || a.scheduledAt).getTime()
+        );
+        setVisits(sortedData);
+        calculateStats(sortedData);
         
         const todayDate = format(new Date(), 'yyyy-MM-dd');
         setExpandedDates(new Set([todayDate]));
@@ -180,27 +211,80 @@ export default function SiteVisits() {
 
     let filtered = visits.filter(visit => {
       const visitDate = parseISO(visit.scheduledAt);
+      
+      // Tab filter
       switch (activeTab) {
         case 'missed':
-          return visit.status === 'scheduled' && isPast(visitDate) && !isToday(visitDate);
+          if (!(visit.status === 'scheduled' && isPast(visitDate) && !isToday(visitDate))) return false;
+          break;
         case 'today':
-          return isToday(visitDate);
+          if (!isToday(visitDate)) return false;
+          break;
         case 'tomorrow':
-          return isTomorrow(visitDate);
+          if (!isTomorrow(visitDate)) return false;
+          break;
         case 'week':
-          return isWithinInterval(visitDate, { start: weekStart, end: weekEnd });
+          if (!isWithinInterval(visitDate, { start: weekStart, end: weekEnd })) return false;
+          break;
         case 'completed':
-          return visit.status === 'completed';
+          if (visit.status !== 'completed') return false;
+          break;
         case 'all':
         default:
-          return true;
+          break;
       }
+
+      // Advanced filters
+      if (advancedFilters.status !== 'all') {
+        if (advancedFilters.status === 'missed') {
+          if (!(visit.status === 'scheduled' && isPast(visitDate) && !isToday(visitDate))) return false;
+        } else if (visit.status !== advancedFilters.status) {
+          return false;
+        }
+      }
+
+      if (advancedFilters.temperature !== 'all' && visit.lead?.temperature !== advancedFilters.temperature) {
+        return false;
+      }
+
+      if (advancedFilters.stage !== 'all' && visit.lead?.stage !== advancedFilters.stage) {
+        return false;
+      }
+
+      if (advancedFilters.rating !== 'all') {
+        const ratingFilter = parseInt(advancedFilters.rating);
+        if (!visit.rating || visit.rating < ratingFilter) return false;
+      }
+
+      if (advancedFilters.dateFrom) {
+        const fromDate = startOfDay(parseISO(advancedFilters.dateFrom));
+        if (visitDate < fromDate) return false;
+      }
+
+      if (advancedFilters.dateTo) {
+        const toDate = endOfDay(parseISO(advancedFilters.dateTo));
+        if (visitDate > toDate) return false;
+      }
+
+      if (advancedFilters.propertyType !== 'all') {
+        if (advancedFilters.propertyType === 'property' && !visit.property) return false;
+        if (advancedFilters.propertyType === 'project' && !visit.project) return false;
+      }
+
+      if (advancedFilters.city !== 'all') {
+        const visitCity = visit.property?.city || visit.project?.location || '';
+        if (!visitCity.toLowerCase().includes(advancedFilters.city.toLowerCase())) return false;
+      }
+
+      return true;
     });
 
+    // Agent filter
     if (canAssignLeads && selectedAgent !== 'all') {
       filtered = filtered.filter(v => v.conductedBy === selectedAgent);
     }
 
+    // Search filter
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(v =>
@@ -208,15 +292,32 @@ export default function SiteVisits() {
         v.lead?.phone.includes(query) ||
         v.property?.title.toLowerCase().includes(query) ||
         v.project?.name.toLowerCase().includes(query) ||
-        v.conductor?.fullName.toLowerCase().includes(query)
+        v.conductor?.fullName.toLowerCase().includes(query) ||
+        v.property?.location.toLowerCase().includes(query) ||
+        v.project?.location.toLowerCase().includes(query)
       );
     }
 
-    return filtered.sort((a, b) => {
-      if (a.status !== 'completed' && b.status === 'completed') return -1;
-      if (a.status === 'completed' && b.status !== 'completed') return 1;
-      return new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime();
+    // Sorting
+    filtered.sort((a, b) => {
+      let comparison = 0;
+      
+      switch (sortBy) {
+        case 'date':
+          comparison = new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime();
+          break;
+        case 'rating':
+          comparison = (b.rating || 0) - (a.rating || 0);
+          break;
+        case 'created':
+          comparison = new Date(b.createdAt || b.scheduledAt).getTime() - new Date(a.createdAt || a.scheduledAt).getTime();
+          break;
+      }
+
+      return sortOrder === 'asc' ? comparison : -comparison;
     });
+
+    return filtered;
   }
 
   function groupVisitsByDate(visits: SiteVisit[]) {
@@ -269,6 +370,37 @@ export default function SiteVisits() {
     }
     
     setRescheduleDate(format(newDate, "yyyy-MM-dd'T'HH:mm"));
+  }
+
+  function clearAllFilters() {
+    setAdvancedFilters({
+      status: 'all',
+      temperature: 'all',
+      stage: 'all',
+      rating: 'all',
+      dateFrom: '',
+      dateTo: '',
+      propertyType: 'all',
+      city: 'all'
+    });
+    setSelectedAgent('all');
+    setSearchQuery('');
+    setSortBy('date');
+    setSortOrder('asc');
+  }
+
+  function getActiveFilterCount() {
+    let count = 0;
+    if (advancedFilters.status !== 'all') count++;
+    if (advancedFilters.temperature !== 'all') count++;
+    if (advancedFilters.stage !== 'all') count++;
+    if (advancedFilters.rating !== 'all') count++;
+    if (advancedFilters.dateFrom) count++;
+    if (advancedFilters.dateTo) count++;
+    if (advancedFilters.propertyType !== 'all') count++;
+    if (advancedFilters.city !== 'all') count++;
+    if (selectedAgent !== 'all') count++;
+    return count;
   }
 
   async function handleUpdateVisit(action: 'complete' | 'reschedule') {
@@ -375,6 +507,7 @@ export default function SiteVisits() {
 
   const filteredVisits = getFilteredVisits();
   const groupedVisits = groupVisitsByDate(filteredVisits);
+  const activeFilterCount = getActiveFilterCount();
 
   return (
     <DashboardLayout title="Site Visits" description="Manage property viewing appointments">
@@ -450,46 +583,275 @@ export default function SiteVisits() {
         </div>
 
         {/* Filters & Controls */}
-        <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-          <div className="flex gap-2 w-full sm:w-auto">
-            <div className="relative flex-1 sm:w-80">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search visits..."
-                className="pl-10"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+            <div className="flex gap-2 w-full sm:w-auto flex-wrap">
+              <div className="relative flex-1 sm:w-80">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search visits..."
+                  className="pl-10"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
 
-            {canAssignLeads && (
-              <Select value={selectedAgent} onValueChange={setSelectedAgent}>
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="All Agents" />
+              {canAssignLeads && (
+                <Select value={selectedAgent} onValueChange={setSelectedAgent}>
+                  <SelectTrigger className="w-[160px]">
+                    <SelectValue placeholder="All Agents" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Agents</SelectItem>
+                    {agents.map(agent => (
+                      <SelectItem key={agent.id} value={agent.id}>{agent.fullName}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+
+              <Popover open={showFilters} onOpenChange={setShowFilters}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="gap-2">
+                    <SlidersHorizontal className="h-4 w-4" />
+                    Advanced
+                    {activeFilterCount > 0 && (
+                      <Badge variant="secondary" className="ml-1 rounded-full px-2">
+                        {activeFilterCount}
+                      </Badge>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[500px] p-6" align="start">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-semibold">Advanced Filters</h4>
+                      {activeFilterCount > 0 && (
+                        <Button variant="ghost" size="sm" onClick={clearAllFilters} className="text-xs">
+                          Clear All
+                        </Button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label className="text-xs">Status</Label>
+                        <Select value={advancedFilters.status} onValueChange={(v) => setAdvancedFilters({...advancedFilters, status: v})}>
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Status</SelectItem>
+                            <SelectItem value="scheduled">Scheduled</SelectItem>
+                            <SelectItem value="completed">Completed</SelectItem>
+                            <SelectItem value="rescheduled">Rescheduled</SelectItem>
+                            <SelectItem value="cancelled">Cancelled</SelectItem>
+                            <SelectItem value="missed">Missed</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-xs">Temperature</Label>
+                        <Select value={advancedFilters.temperature} onValueChange={(v) => setAdvancedFilters({...advancedFilters, temperature: v})}>
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Temps</SelectItem>
+                            <SelectItem value="hot">🔥 Hot</SelectItem>
+                            <SelectItem value="warm">📈 Warm</SelectItem>
+                            <SelectItem value="cold">❄️ Cold</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-xs">Stage</Label>
+                        <Select value={advancedFilters.stage} onValueChange={(v) => setAdvancedFilters({...advancedFilters, stage: v})}>
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Stages</SelectItem>
+                            <SelectItem value="new">New</SelectItem>
+                            <SelectItem value="contacted">Contacted</SelectItem>
+                            <SelectItem value="qualified">Qualified</SelectItem>
+                            <SelectItem value="site_visit">Site Visit</SelectItem>
+                            <SelectItem value="negotiation">Negotiation</SelectItem>
+                            <SelectItem value="token">Token</SelectItem>
+                            <SelectItem value="lost">Lost</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-xs">Min Rating</Label>
+                        <Select value={advancedFilters.rating} onValueChange={(v) => setAdvancedFilters({...advancedFilters, rating: v})}>
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Any Rating</SelectItem>
+                            <SelectItem value="5">5 ⭐ Only</SelectItem>
+                            <SelectItem value="4">4+ ⭐</SelectItem>
+                            <SelectItem value="3">3+ ⭐</SelectItem>
+                            <SelectItem value="2">2+ ⭐</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-xs">Property Type</Label>
+                        <Select value={advancedFilters.propertyType} onValueChange={(v) => setAdvancedFilters({...advancedFilters, propertyType: v})}>
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Types</SelectItem>
+                            <SelectItem value="property">Individual Property</SelectItem>
+                            <SelectItem value="project">Project</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-xs">City/Location</Label>
+                        <Input
+                          placeholder="Enter city..."
+                          className="h-9 text-sm"
+                          value={advancedFilters.city === 'all' ? '' : advancedFilters.city}
+                          onChange={(e) => setAdvancedFilters({...advancedFilters, city: e.target.value || 'all'})}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-xs">Date From</Label>
+                        <Input
+                          type="date"
+                          className="h-9 text-sm"
+                          value={advancedFilters.dateFrom}
+                          onChange={(e) => setAdvancedFilters({...advancedFilters, dateFrom: e.target.value})}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-xs">Date To</Label>
+                        <Input
+                          type="date"
+                          className="h-9 text-sm"
+                          value={advancedFilters.dateTo}
+                          onChange={(e) => setAdvancedFilters({...advancedFilters, dateTo: e.target.value})}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-muted-foreground">
+                          {filteredVisits.length} visits match filters
+                        </p>
+                        <Button size="sm" onClick={() => setShowFilters(false)}>
+                          Apply Filters
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+
+              <Select value={sortBy} onValueChange={(v: any) => setSortBy(v)}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Agents</SelectItem>
-                  {agents.map(agent => (
-                    <SelectItem key={agent.id} value={agent.id}>{agent.fullName}</SelectItem>
-                  ))}
+                  <SelectItem value="date">Sort: Date</SelectItem>
+                  <SelectItem value="rating">Sort: Rating</SelectItem>
+                  <SelectItem value="created">Sort: Created</SelectItem>
                 </SelectContent>
               </Select>
-            )}
+
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                title={sortOrder === 'asc' ? 'Ascending' : 'Descending'}
+              >
+                {sortOrder === 'asc' ? '↑' : '↓'}
+              </Button>
+            </div>
+
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full sm:w-auto">
+              <TabsList>
+                <TabsTrigger value="today" className="text-xs">Today</TabsTrigger>
+                <TabsTrigger value="tomorrow" className="text-xs">Tomorrow</TabsTrigger>
+                <TabsTrigger value="week" className="text-xs">Week</TabsTrigger>
+                <TabsTrigger value="missed" className="text-xs gap-1">
+                  <AlertCircle className="h-3 w-3" />
+                  Missed
+                </TabsTrigger>
+                <TabsTrigger value="completed" className="text-xs">Completed</TabsTrigger>
+                <TabsTrigger value="all" className="text-xs">All</TabsTrigger>
+              </TabsList>
+            </Tabs>
           </div>
 
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full sm:w-auto">
-            <TabsList>
-              <TabsTrigger value="today" className="text-xs">Today</TabsTrigger>
-              <TabsTrigger value="tomorrow" className="text-xs">Tomorrow</TabsTrigger>
-              <TabsTrigger value="week" className="text-xs">Week</TabsTrigger>
-              <TabsTrigger value="missed" className="text-xs gap-1">
-                <AlertCircle className="h-3 w-3" />
-                Missed
-              </TabsTrigger>
-              <TabsTrigger value="completed" className="text-xs">Completed</TabsTrigger>
-              <TabsTrigger value="all" className="text-xs">All</TabsTrigger>
-            </TabsList>
-          </Tabs>
+          {(activeFilterCount > 0 || searchQuery) && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="text-xs text-muted-foreground">Active filters:</p>
+              {searchQuery && (
+                <Badge variant="secondary" className="gap-1">
+                  Search: {searchQuery}
+                  <X className="h-3 w-3 cursor-pointer" onClick={() => setSearchQuery('')} />
+                </Badge>
+              )}
+              {selectedAgent !== 'all' && (
+                <Badge variant="secondary" className="gap-1">
+                  Agent: {agents.find(a => a.id === selectedAgent)?.fullName}
+                  <X className="h-3 w-3 cursor-pointer" onClick={() => setSelectedAgent('all')} />
+                </Badge>
+              )}
+              {advancedFilters.status !== 'all' && (
+                <Badge variant="secondary" className="gap-1">
+                  Status: {advancedFilters.status}
+                  <X className="h-3 w-3 cursor-pointer" onClick={() => setAdvancedFilters({...advancedFilters, status: 'all'})} />
+                </Badge>
+              )}
+              {advancedFilters.temperature !== 'all' && (
+                <Badge variant="secondary" className="gap-1">
+                  Temp: {advancedFilters.temperature}
+                  <X className="h-3 w-3 cursor-pointer" onClick={() => setAdvancedFilters({...advancedFilters, temperature: 'all'})} />
+                </Badge>
+              )}
+              {advancedFilters.stage !== 'all' && (
+                <Badge variant="secondary" className="gap-1">
+                  Stage: {advancedFilters.stage}
+                  <X className="h-3 w-3 cursor-pointer" onClick={() => setAdvancedFilters({...advancedFilters, stage: 'all'})} />
+                </Badge>
+              )}
+              {advancedFilters.rating !== 'all' && (
+                <Badge variant="secondary" className="gap-1">
+                  Min Rating: {advancedFilters.rating}★
+                  <X className="h-3 w-3 cursor-pointer" onClick={() => setAdvancedFilters({...advancedFilters, rating: 'all'})} />
+                </Badge>
+              )}
+              {advancedFilters.dateFrom && (
+                <Badge variant="secondary" className="gap-1">
+                  From: {format(parseISO(advancedFilters.dateFrom), 'MMM dd')}
+                  <X className="h-3 w-3 cursor-pointer" onClick={() => setAdvancedFilters({...advancedFilters, dateFrom: ''})} />
+                </Badge>
+              )}
+              {advancedFilters.dateTo && (
+                <Badge variant="secondary" className="gap-1">
+                  To: {format(parseISO(advancedFilters.dateTo), 'MMM dd')}
+                  <X className="h-3 w-3 cursor-pointer" onClick={() => setAdvancedFilters({...advancedFilters, dateTo: ''})} />
+                </Badge>
+              )}
+              <Button variant="ghost" size="sm" onClick={clearAllFilters} className="text-xs h-6">
+                Clear all
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Visits List */}
@@ -821,4 +1183,3 @@ export default function SiteVisits() {
     </DashboardLayout>
   );
 }
-

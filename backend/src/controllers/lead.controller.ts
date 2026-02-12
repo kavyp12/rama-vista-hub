@@ -250,8 +250,15 @@ export const logCall = async (req: AuthRequest, res: Response) => {
 
     let leadUpdates: any = { lastContactedAt: new Date() };
     
-    if (data.callStatus === 'connected_positive') {
+    // ✅ CHANGED LOGIC HERE
+   if (data.callStatus === 'connected_positive') {
         leadUpdates.temperature = 'hot';
+        leadUpdates.stage = 'contacted'; 
+    } else if (data.callStatus === 'connected_callback') {
+        leadUpdates.stage = 'contacted';
+        if (data.callbackScheduledAt) {
+            leadUpdates.nextFollowupAt = new Date(data.callbackScheduledAt);
+        }
     } else if (data.callStatus === 'not_interested') {
         leadUpdates.stage = 'closed';
         leadUpdates.notes = `Closed: ${data.rejectionReason || 'Not Interested'}`;

@@ -44,7 +44,6 @@ export function AppSidebar() {
   const { user, role, logout } = useAuth();
   const permissions = usePermissions();
 
-  // ✅ Dynamic menu based on role
   const getMenuItems = () => {
     const baseItems = {
       group: 'Overview',
@@ -53,11 +52,11 @@ export function AppSidebar() {
       ],
     };
 
-    // ✅ AGENT: Basic sales tools only
+    // ✅ AGENT: "My Leads" instead of Telecalling
     const agentSalesItems = {
       group: 'My Work',
       items: [
-        { title: 'Telecalling', icon: Phone, url: '/telecalling' }, // Prioritized for agents
+        { title: 'My Leads', icon: Users, url: '/leads' },
         { title: 'Site Visits', icon: CalendarDays, url: '/site-visits' },
         { title: 'Properties', icon: Home, url: '/properties' },
       ],
@@ -82,7 +81,6 @@ export function AppSidebar() {
       ],
     };
 
-    // ✅ MANAGER Operations
     const managerOperations = {
       group: 'Operations',
       items: [
@@ -91,7 +89,6 @@ export function AppSidebar() {
       ],
     };
 
-    // ✅ ADMIN Operations
     const adminOperations = {
       group: 'Operations',
       items: [
@@ -104,13 +101,12 @@ export function AppSidebar() {
       ],
     };
 
-    // ✅ Build menu based on role
     if (permissions.isAdmin) {
       return [baseItems, advancedSalesItems, inventoryItems, adminOperations];
     } else if (permissions.isManager) {
       return [baseItems, advancedSalesItems, inventoryItems, managerOperations];
     } else {
-      // ✅ AGENT - simplified menu
+      // ✅ Return Agent menu
       return [baseItems, agentSalesItems];
     }
   };

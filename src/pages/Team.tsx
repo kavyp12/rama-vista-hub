@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,15 +11,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { 
-  Users, UserPlus, Search, Mail, Phone, Calendar, TrendingUp, Target, Award, 
-  Settings, Shield, UserCheck, UserX, Eye, Edit, Trash2, RefreshCw, 
-  MapPin, Building2, Home, Clock, BarChart3, PhoneCall, AlertCircle, CheckCircle2
+import { Progress } from '@/components/ui/progress';
+import {
+  Users, UserPlus, Search, Mail, Phone, Calendar, TrendingUp, Target, Shield,
+  UserCheck, Eye, Edit, Trash2, RefreshCw, MapPin, Building2, Home, Clock,
+  BarChart3, PhoneCall, AlertCircle, CheckCircle2, Flame, Snowflake, ThermometerSun
 } from 'lucide-react';
-import { format, parseISO, isToday, isTomorrow, isPast, isThisWeek, isThisMonth } from 'date-fns';
+import { format, isPast, formatDistanceToNow } from 'date-fns';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
+// --- Interfaces ---
 interface User {
   id: string;
   email: string;
@@ -35,28 +37,32 @@ interface User {
   };
 }
 
-interface UserStats {
-  leadsByStage: { stage: string; count: number }[];
-  leadsByTemperature: { temperature: string; count: number }[];
-  callStats: { total: number; connected: number; connectRate: number };
-  dealStats: { total: number; closed: number; winRate: number; totalRevenue: number };
-  totalLeads: number;
-  convertedLeads: number;
-  conversionRate: number;
-  recentActivity?: {
-    newLeadsThisWeek: number;
-    newLeadsThisMonth: number;
-    callsThisWeek: number;
-    visitsThisWeek: number;
-  };
+interface Lead {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string;
+  stage: string;
+  temperature: 'hot' | 'warm' | 'cold';
+  source: string;
+  budgetMin: number | null;
+  budgetMax: number | null;
+  preferredLocation: string | null;
+  nextFollowupAt: string | null;
+  lastContactedAt: string | null;
+  createdAt: string;
+  notes: string | null;
+  project?: { name: string; location: string } | null;
 }
 
 interface SiteVisit {
-  feedback: any;
   id: string;
   scheduledAt: string;
-  status: string;
+  status: 'scheduled' | 'completed' | 'cancelled' | 'rescheduled';
+  rating: number | null;
+  feedback: string | null;
   lead: {
+    id: string;
     name: string;
     phone: string;
     temperature: string;
@@ -75,31 +81,79 @@ interface SiteVisit {
   } | null;
 }
 
+interface CallLog {
+  id: string;
+  callStatus: 'connected_positive' | 'connected_callback' | 'not_connected' | 'not_interested';
+  callDate: string;
+  callDuration: number | null;
+  notes: string | null;
+  lead: {
+    name: string;
+    phone: string;
+  };
+}
+
+interface UserStats {
+  leadsByStage: { stage: string; count: number }[];
+  leadsByTemperature: { temperature: string; count: number }[];
+  callStats: { total: number; connected: number; connectRate: number };
+  dealStats: { total: number; closed: number; winRate: number; totalRevenue: number };
+  totalLeads: number;
+  convertedLeads: number;
+  conversionRate: number;
+}
+
+interface AgentDetails {
+  leads: Lead[];
+  siteVisits: SiteVisit[];
+  callLogs: CallLog[];
+  stats: UserStats;
+  missedFollowups: number;
+  missedVisits: number;
+  stagnantLeads: number;
+}
+
+// --- Config ---
 const roleConfig = {
   admin: { label: 'Admin', color: 'bg-purple-100 text-purple-700 border-purple-200', icon: Shield },
-  sales_manager: { label: 'Sales Manager', color: 'bg-blue-100 text-blue-700 border-blue-200', icon: UserCheck },
+  sales_manager: { label: 'Manager', color: 'bg-blue-100 text-blue-700 border-blue-200', icon: UserCheck },
   sales_agent: { label: 'Sales Agent', color: 'bg-green-100 text-green-700 border-green-200', icon: Users }
+};
+
+const stageColors: Record<string, string> = {
+  new: 'bg-blue-100 text-blue-700',
+  contacted: 'bg-purple-100 text-purple-700',
+  site_visit: 'bg-orange-100 text-orange-700',
+  negotiation: 'bg-yellow-100 text-yellow-700',
+  token: 'bg-teal-100 text-teal-700',
+  closed: 'bg-green-100 text-green-700',
+  lost: 'bg-red-100 text-red-700'
+};
+
+const temperatureIcons = {
+  hot: { icon: Flame, color: 'text-red-500' },
+  warm: { icon: ThermometerSun, color: 'text-orange-500' },
+  cold: { icon: Snowflake, color: 'text-blue-500' }
 };
 
 export default function Team() {
   const { user: currentUser, token } = useAuth();
   const { toast } = useToast();
-  
+
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
-  
+
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  const [userStats, setUserStats] = useState<UserStats | null>(null);
-  const [agentVisits, setAgentVisits] = useState<SiteVisit[]>([]);
-  const [loadingVisits, setLoadingVisits] = useState(false);
-  const [loadingStats, setLoadingStats] = useState(false);
+
+  const [agentDetails, setAgentDetails] = useState<AgentDetails | null>(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
+
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -121,159 +175,60 @@ export default function Team() {
       const res = await fetch(`${API_URL}/users?${params.toString()}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      
+
       if (!res.ok) throw new Error('Failed to fetch users');
-      
+
       const data = await res.json();
       setUsers(data);
     } catch (error: any) {
-      toast({ 
-        title: 'Error', 
-        description: error.message || 'Failed to load team members',
-        variant: 'destructive' 
-      });
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } finally {
       setLoading(false);
     }
   }
 
-  async function fetchUserStats(userId: string) {
-    setLoadingStats(true);
+  async function fetchAgentDetails(userId: string) {
+    setLoadingDetails(true);
     try {
-      const res = await fetch(`${API_URL}/users/${userId}/stats`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const [statsRes, leadsRes, visitsRes, callLogsRes, dashboardRes] = await Promise.all([
+        fetch(`${API_URL}/users/${userId}/stats`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(`${API_URL}/leads?assignedTo=${userId}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(`${API_URL}/site-visits`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(`${API_URL}/users/${userId}/call-logs`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(`${API_URL}/leads/dashboard/stats`, { headers: { 'Authorization': `Bearer ${token}` } })
+      ]);
+
+      if (!statsRes.ok || !leadsRes.ok || !visitsRes.ok || !callLogsRes.ok) throw new Error('Failed to fetch details');
+
+      const stats = await statsRes.json();
+      const leads = await leadsRes.json();
+      const allVisits = await visitsRes.json();
+      const callLogs = await callLogsRes.json();
+      const dashboardStats = dashboardRes.ok ? await dashboardRes.json() : { missedFollowups: 0, missedVisits: 0, stagnantLeads: 0 };
+
+      const agentVisits = allVisits.filter((v: any) => v.conductedBy === userId || v.lead?.assignedToId === userId);
+
+      setAgentDetails({
+        leads,
+        siteVisits: agentVisits,
+        callLogs,
+        stats,
+        missedFollowups: dashboardStats.missedFollowups || 0,
+        missedVisits: dashboardStats.missedVisits || 0,
+        stagnantLeads: dashboardStats.stagnantLeads || 0
       });
-      
-      if (!res.ok) throw new Error('Failed to fetch stats');
-      
-      const data = await res.json();
-      setUserStats(data);
     } catch (error: any) {
-      toast({ 
-        title: 'Error', 
-        description: 'Failed to load user statistics',
-        variant: 'destructive' 
-      });
+      toast({ title: 'Error', description: 'Failed to load agent details', variant: 'destructive' });
+      setAgentDetails(null);
     } finally {
-      setLoadingStats(false);
-    }
-  }
-
-  async function fetchAgentVisits(userId: string) {
-    setLoadingVisits(true);
-    try {
-      const res = await fetch(`${API_URL}/site-visits`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
-      if (!res.ok) throw new Error('Failed to fetch visits');
-      
-      const data = await res.json();
-      
-      const filtered = data.filter((v: any) => 
-        v.conductedBy === userId && (v.status === 'scheduled' || v.status === 'rescheduled')
-      );
-      
-      filtered.sort((a: any, b: any) => 
-        new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()
-      );
-      
-      setAgentVisits(filtered);
-    } catch (error) {
-      console.error(error);
-      toast({ 
-        title: 'Error', 
-        description: 'Failed to load agent visits',
-        variant: 'destructive' 
-      });
-    } finally {
-      setLoadingVisits(false);
-    }
-  }
-
-  async function handleCreateUser() {
-    if (!formData.email || !formData.password || !formData.fullName) {
-      toast({ title: 'Validation Error', description: 'Please fill all required fields', variant: 'destructive' });
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const res = await fetch(`${API_URL}/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(formData)
-      });
-
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || 'Failed to create user');
-      }
-
-      toast({ title: 'Success', description: 'Team member added successfully' });
-      setIsAddDialogOpen(false);
-      setFormData({ email: '', password: '', fullName: '', role: 'sales_agent', avatarUrl: '' });
-      fetchUsers();
-    } catch (error: any) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function handleUpdateUser() {
-    if (!selectedUser) return;
-
-    setIsSubmitting(true);
-    try {
-      const res = await fetch(`${API_URL}/users/${selectedUser.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({
-          fullName: formData.fullName,
-          email: formData.email,
-          role: formData.role,
-          avatarUrl: formData.avatarUrl || null
-        })
-      });
-
-      if (!res.ok) throw new Error('Failed to update user');
-
-      toast({ title: 'Success', description: 'Team member updated successfully' });
-      setIsEditDialogOpen(false);
-      fetchUsers();
-    } catch (error: any) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function handleDeleteUser(userId: string) {
-    if (!confirm('Are you sure you want to remove this team member? This action cannot be undone.')) return;
-
-    try {
-      const res = await fetch(`${API_URL}/users/${userId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (!res.ok) throw new Error('Failed to delete user');
-
-      toast({ title: 'Success', description: 'Team member removed successfully' });
-      fetchUsers();
-    } catch (error: any) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      setLoadingDetails(false);
     }
   }
 
   function handleViewUser(user: User) {
     setSelectedUser(user);
     setIsViewDialogOpen(true);
-    fetchUserStats(user.id);
-    if (user.role === 'sales_agent') {
-      fetchAgentVisits(user.id);
-    }
+    fetchAgentDetails(user.id);
   }
 
   function handleEditUser(user: User) {
@@ -288,724 +243,792 @@ export default function Team() {
     setIsEditDialogOpen(true);
   }
 
-  function formatCurrency(amount: number) {
-    if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(2)}Cr`;
-    if (amount >= 100000) return `₹${(amount / 100000).toFixed(2)}L`;
-    return `₹${amount.toLocaleString()}`;
+  async function handleCreateUser() {
+    setIsSubmitting(true);
+    try {
+      const res = await fetch(`${API_URL}/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(formData)
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed to create user');
+      toast({ title: 'Success', description: 'User created successfully' });
+      setIsAddDialogOpen(false);
+      setFormData({ email: '', password: '', fullName: '', role: 'sales_agent', avatarUrl: '' });
+      fetchUsers();
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setIsSubmitting(false);
+    }
   }
+
+  async function handleUpdateUser() {
+    if (!selectedUser) return;
+    setIsSubmitting(true);
+    try {
+      const updateData = {
+        email: formData.email,
+        fullName: formData.fullName,
+        role: formData.role,
+        avatarUrl: formData.avatarUrl || null
+      };
+      const res = await fetch(`${API_URL}/users/${selectedUser.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(updateData)
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed to update user');
+      toast({ title: 'Success', description: 'User updated successfully' });
+      setIsEditDialogOpen(false);
+      fetchUsers();
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleDeleteUser(userId: string) {
+    if (!confirm('Are you sure you want to delete this user?')) return;
+    try {
+      const res = await fetch(`${API_URL}/users/${userId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Failed to delete user');
+      toast({ title: 'Success', description: 'User deleted successfully' });
+      fetchUsers();
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    }
+  }
+
+  const filteredUsers = users.filter(user =>
+    user.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    user.email.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const globalStats = useMemo(() => {
+    return users.reduce((acc, user) => {
+      acc.totalMembers += 1;
+      acc.totalLeads += user._count?.assignedLeads || 0;
+      acc.totalDeals += user._count?.assignedDeals || 0;
+      acc.totalCalls += user._count?.callLogs || 0;
+      return acc;
+    }, { totalMembers: 0, totalLeads: 0, totalDeals: 0, totalCalls: 0 });
+  }, [users]);
 
   function getInitials(name: string) {
     return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
   }
 
-  function getDateBadge(dateStr: string) {
-    const date = parseISO(dateStr);
-    if (isToday(date)) return { text: 'Today', class: 'bg-green-100 text-green-700 border-green-200' };
-    if (isTomorrow(date)) return { text: 'Tomorrow', class: 'bg-blue-100 text-blue-700 border-blue-200' };
-    if (isPast(date)) return { text: 'Past', class: 'bg-red-100 text-red-700 border-red-200' };
-    return { text: format(date, 'MMM dd'), class: 'bg-slate-100 text-slate-700 border-slate-200' };
+  function formatCurrency(amount: number) {
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
   }
-
-  function getLocationName(visit: SiteVisit) {
-    if (visit.property) {
-      return visit.property.title;
-    }
-    return visit.project?.name || 'Unknown Location';
-  }
-
-  function getLocationAddress(visit: SiteVisit) {
-    if (visit.property) {
-      return `${visit.property.location}${visit.property.city ? ', ' + visit.property.city : ''}`;
-    }
-    return `${visit.project?.location || ''}${visit.project?.city ? ', ' + visit.project.city : ''}`;
-  }
-
-  const filteredUsers = users.filter(user => 
-    user.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    user.email.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const teamStats = {
-    total: users.length,
-    admins: users.filter(u => u.role === 'admin').length,
-    managers: users.filter(u => u.role === 'sales_manager').length,
-    agents: users.filter(u => u.role === 'sales_agent').length,
-    totalLeads: users.reduce((sum, u) => sum + (u._count?.assignedLeads || 0), 0),
-    totalDeals: users.reduce((sum, u) => sum + (u._count?.assignedDeals || 0), 0),
-    totalCalls: users.reduce((sum, u) => sum + (u._count?.callLogs || 0), 0)
-  };
 
   return (
-    <DashboardLayout title="Team Management" description="Manage your sales team members">
+    <DashboardLayout title="Team Management" description="Manage your sales team and view performance">
       <div className="space-y-6">
-        
-        {/* Team Overview Cards */}
+
+        {/* Top Stats Row */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card className="hover-lift">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Total Members</p>
-                  <p className="text-2xl font-bold">{teamStats.total}</p>
-                </div>
-                <div className="h-12 w-12 bg-blue-50 rounded-full flex items-center justify-center">
-                  <Users className="h-6 w-6 text-blue-600" />
-                </div>
+          <Card className="shadow-sm border-l-4 border-l-blue-500">
+            <CardContent className="p-4 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Total Members</p>
+                <h3 className="text-2xl font-bold text-slate-900">{globalStats.totalMembers}</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {users.filter(u => u.role === 'sales_agent').length} agents • {users.filter(u => u.role !== 'sales_agent').length} managers
+                </p>
               </div>
-              <p className="text-xs text-muted-foreground mt-2">
-                {teamStats.agents} agents • {teamStats.managers} managers
-              </p>
+              <div className="h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
+                <Users className="h-5 w-5" />
+              </div>
             </CardContent>
           </Card>
 
-          <Card className="hover-lift">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Total Leads</p>
-                  <p className="text-2xl font-bold">{teamStats.totalLeads}</p>
-                </div>
-                <div className="h-12 w-12 bg-green-50 rounded-full flex items-center justify-center">
-                  <Target className="h-6 w-6 text-green-600" />
-                </div>
+          <Card className="shadow-sm border-l-4 border-l-green-500">
+            <CardContent className="p-4 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Total Leads</p>
+                <h3 className="text-2xl font-bold text-slate-900">{globalStats.totalLeads}</h3>
+                <p className="text-xs text-muted-foreground mt-1">Across all team members</p>
               </div>
-              <p className="text-xs text-muted-foreground mt-2">
-                Across all team members
-              </p>
+              <div className="h-10 w-10 bg-green-100 rounded-full flex items-center justify-center text-green-600">
+                <Target className="h-5 w-5" />
+              </div>
             </CardContent>
           </Card>
 
-          <Card className="hover-lift">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Active Deals</p>
-                  <p className="text-2xl font-bold">{teamStats.totalDeals}</p>
-                </div>
-                <div className="h-12 w-12 bg-purple-50 rounded-full flex items-center justify-center">
-                  <TrendingUp className="h-6 w-6 text-purple-600" />
-                </div>
+          <Card className="shadow-sm border-l-4 border-l-purple-500">
+            <CardContent className="p-4 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Active Deals</p>
+                <h3 className="text-2xl font-bold text-slate-900">{globalStats.totalDeals}</h3>
+                <p className="text-xs text-muted-foreground mt-1">In pipeline</p>
               </div>
-              <p className="text-xs text-muted-foreground mt-2">
-                In pipeline
-              </p>
+              <div className="h-10 w-10 bg-purple-100 rounded-full flex items-center justify-center text-purple-600">
+                <TrendingUp className="h-5 w-5" />
+              </div>
             </CardContent>
           </Card>
 
-          <Card className="hover-lift">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Total Calls</p>
-                  <p className="text-2xl font-bold">{teamStats.totalCalls}</p>
-                </div>
-                <div className="h-12 w-12 bg-orange-50 rounded-full flex items-center justify-center">
-                  <PhoneCall className="h-6 w-6 text-orange-600" />
-                </div>
+          <Card className="shadow-sm border-l-4 border-l-orange-500">
+            <CardContent className="p-4 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Total Calls</p>
+                <h3 className="text-2xl font-bold text-slate-900">{globalStats.totalCalls}</h3>
+                <p className="text-xs text-muted-foreground mt-1">Call activity logged</p>
               </div>
-              <p className="text-xs text-muted-foreground mt-2">
-                Call activity logged
-              </p>
+              <div className="h-10 w-10 bg-orange-100 rounded-full flex items-center justify-center text-orange-600">
+                <PhoneCall className="h-5 w-5" />
+              </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Controls */}
-        <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-          <div className="flex gap-2 w-full sm:w-auto">
-            <div className="relative flex-1 sm:w-96">
+        {/* Action Bar */}
+        <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <div className="relative w-full sm:w-72">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input 
-                placeholder="Search team members..." 
-                className="pl-10"
+              <Input
+                placeholder="Search team members..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 bg-white"
               />
             </div>
-            
             <Select value={roleFilter} onValueChange={setRoleFilter}>
-              <SelectTrigger className="w-[160px]">
-                <SelectValue placeholder="Filter by role" />
+              <SelectTrigger className="w-40 bg-white">
+                <SelectValue placeholder="All Roles" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Roles</SelectItem>
-                <SelectItem value="admin">Admin</SelectItem>
-                <SelectItem value="sales_manager">Sales Manager</SelectItem>
                 <SelectItem value="sales_agent">Sales Agent</SelectItem>
+                <SelectItem value="sales_manager">Manager</SelectItem>
+                <SelectItem value="admin">Admin</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="gap-2 w-full sm:w-auto">
-                <UserPlus className="h-4 w-4" /> Add Member
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[500px]">
-              <DialogHeader>
-                <DialogTitle>Add Team Member</DialogTitle>
-                <DialogDescription>Create a new user account for your team</DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label>Full Name *</Label>
-                  <Input 
-                    value={formData.fullName}
-                    onChange={(e) => setFormData({...formData, fullName: e.target.value})}
-                    placeholder="John Doe"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Email *</Label>
-                  <Input 
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({...formData, email: e.target.value})}
-                    placeholder="john@example.com"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Password *</Label>
-                  <Input 
-                    type="password"
-                    value={formData.password}
-                    onChange={(e) => setFormData({...formData, password: e.target.value})}
-                    placeholder="••••••••"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Role *</Label>
-                  <Select 
-                    value={formData.role} 
-                    onValueChange={(val: any) => setFormData({...formData, role: val})}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="admin">Admin</SelectItem>
-                      <SelectItem value="sales_manager">Sales Manager</SelectItem>
-                      <SelectItem value="sales_agent">Sales Agent</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
-                <Button onClick={handleCreateUser} disabled={isSubmitting}>
-                  {isSubmitting ? 'Creating...' : 'Create Member'}
+          {currentUser?.role === 'admin' && (
+            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+              <DialogTrigger asChild>
+                <Button className="w-full sm:w-auto gap-2 bg-slate-900 text-white hover:bg-slate-800">
+                  <UserPlus className="h-4 w-4" />
+                  Add Member
                 </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Add New Team Member</DialogTitle>
+                  <DialogDescription>Create a new user account for your team</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div>
+                    <Label>Full Name</Label>
+                    <Input value={formData.fullName} onChange={(e) => setFormData({ ...formData, fullName: e.target.value })} placeholder="John Doe" />
+                  </div>
+                  <div>
+                    <Label>Email</Label>
+                    <Input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="john@example.com" />
+                  </div>
+                  <div>
+                    <Label>Password</Label>
+                    <Input type="password" value={formData.password} onChange={(e) => setFormData({ ...formData, password: e.target.value })} placeholder="Min. 6 characters" />
+                  </div>
+                  <div>
+                    <Label>Role</Label>
+                    <Select value={formData.role} onValueChange={(value: any) => setFormData({ ...formData, role: value })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="sales_agent">Sales Agent</SelectItem>
+                        <SelectItem value="sales_manager">Sales Manager</SelectItem>
+                        <SelectItem value="admin">Admin</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Avatar URL (Optional)</Label>
+                    <Input value={formData.avatarUrl} onChange={(e) => setFormData({ ...formData, avatarUrl: e.target.value })} placeholder="https://..." />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
+                  <Button onClick={handleCreateUser} disabled={isSubmitting}>{isSubmitting ? 'Creating...' : 'Create User'}</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
         </div>
 
-        {/* Team Members Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {loading ? (
-            [...Array(8)].map((_, i) => (
-              <Card key={i} className="animate-pulse">
-                <CardContent className="p-6">
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-3">
-                      <div className="h-12 w-12 bg-muted rounded-full" />
-                      <div className="flex-1 space-y-2">
-                        <div className="h-4 bg-muted rounded w-3/4" />
-                        <div className="h-3 bg-muted rounded w-1/2" />
+        {/* Compact Team Grid */}
+        {loading ? (
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map(i => <Card key={i} className="animate-pulse h-64 bg-muted/50" />)}
+          </div>
+        ) : filteredUsers.length === 0 ? (
+          <div className="text-center py-12 bg-white rounded-lg border border-dashed">
+            <Users className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+            <p className="text-muted-foreground">No team members found matching your search.</p>
+          </div>
+        ) : (
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+            {filteredUsers.map(user => (
+              <Card key={user.id} className="hover:shadow-md transition-all duration-200 overflow-hidden group">
+                <CardContent className="p-0">
+                  {/* Top Section */}
+                  <div className="p-5 flex items-start gap-4">
+                    <Avatar className="h-12 w-12 border border-slate-200">
+                      <AvatarImage src={user.avatarUrl || undefined} />
+                      <AvatarFallback className="bg-slate-100 text-slate-700 font-semibold">
+                        {getInitials(user.fullName)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-slate-900 truncate">{user.fullName}</h3>
+                      <div className="flex items-center gap-2 mt-1">
+                        <Badge variant="secondary" className={`${roleConfig[user.role].color} text-[10px] px-2 py-0 h-5 font-normal`}>
+                          {roleConfig[user.role].label}
+                        </Badge>
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Compact Stats Box */}
+                  <div className="grid grid-cols-3 border-y border-slate-100 bg-slate-50/50">
+                    <div className="p-3 text-center border-r border-slate-100">
+                      <p className="text-lg font-bold text-blue-600">{user._count?.assignedLeads || 0}</p>
+                      <p className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">Leads</p>
+                    </div>
+                    <div className="p-3 text-center border-r border-slate-100">
+                      <p className="text-lg font-bold text-green-600">{user._count?.assignedDeals || 0}</p>
+                      <p className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">Deals</p>
+                    </div>
+                    <div className="p-3 text-center">
+                      <p className="text-lg font-bold text-orange-600">{user._count?.callLogs || 0}</p>
+                      <p className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">Calls</p>
+                    </div>
+                  </div>
+
+                  {/* Footer Actions */}
+                  <div className="p-4 space-y-3">
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <Mail className="h-3.5 w-3.5" />
+                        <span className="truncate">{user.email}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <Clock className="h-3.5 w-3.5" />
+                        <span>Joined {format(new Date(user.createdAt), 'MMM yyyy')}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2 pt-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="flex-1 h-8 text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border-slate-200"
+                        onClick={() => handleViewUser(user)}
+                      >
+                        <Eye className="h-3 w-3 mr-1.5" />
+                        View
+                      </Button>
+
+                      {currentUser?.role === 'admin' && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-slate-500 hover:text-blue-600 hover:bg-blue-50"
+                            onClick={() => handleEditUser(user)}
+                          >
+                            <Edit className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-slate-500 hover:text-red-600 hover:bg-red-50"
+                            onClick={() => handleDeleteUser(user.id)}
+                            disabled={user.id === currentUser.id}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </CardContent>
               </Card>
-            ))
-          ) : filteredUsers.length === 0 ? (
-            <Card className="col-span-full">
-              <CardContent className="flex flex-col items-center justify-center py-12">
-                <UserX className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold">No team members found</h3>
-                <p className="text-sm text-muted-foreground">Try adjusting your filters</p>
-              </CardContent>
-            </Card>
-          ) : (
-            filteredUsers.map((user) => {
-              const RoleIcon = roleConfig[user.role].icon;
-              const isCurrentUser = user.id === currentUser?.id;
-              
-              return (
-                <Card key={user.id} className="hover-lift group">
-                  <CardContent className="p-6">
-                    <div className="space-y-4">
-                      
-                      {/* Header */}
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-12 w-12 border-2 border-primary/10">
-                            <AvatarImage src={user.avatarUrl || undefined} />
-                            <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-                              {getInitials(user.fullName)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div>
-                            <h3 className="font-semibold flex items-center gap-2">
-                              {user.fullName}
-                              {isCurrentUser && (
-                                <Badge variant="outline" className="text-[10px] px-1">You</Badge>
-                              )}
-                            </h3>
-                            <Badge variant="outline" className={`text-[10px] mt-1 ${roleConfig[user.role].color}`}>
-                              <RoleIcon className="h-3 w-3 mr-1" />
-                              {roleConfig[user.role].label}
-                            </Badge>
-                          </div>
-                        </div>
-                      </div>
+            ))}
+          </div>
+        )}
 
-                      {/* Stats */}
-                      <div className="grid grid-cols-3 gap-2 pt-3 border-t">
-                        <div className="text-center">
-                          <p className="text-lg font-bold text-primary">{user._count?.assignedLeads || 0}</p>
-                          <p className="text-[10px] text-muted-foreground uppercase font-semibold">Leads</p>
-                        </div>
-                        <div className="text-center border-x">
-                          <p className="text-lg font-bold text-purple-600">{user._count?.assignedDeals || 0}</p>
-                          <p className="text-[10px] text-muted-foreground uppercase font-semibold">Deals</p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-lg font-bold text-orange-600">{user._count?.callLogs || 0}</p>
-                          <p className="text-[10px] text-muted-foreground uppercase font-semibold">Calls</p>
-                        </div>
-                      </div>
-
-                      {/* Contact Info */}
-                      <div className="space-y-1.5 text-sm pt-2 border-t">
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <Mail className="h-3.5 w-3.5" />
-                          <span className="truncate">{user.email}</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <Clock className="h-3.5 w-3.5" />
-                          <span className="text-xs">Joined {format(parseISO(user.createdAt), 'MMM yyyy')}</span>
-                        </div>
-                      </div>
-
-                      {/* Actions */}
-                      <div className="flex gap-2 pt-2">
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          className="flex-1 gap-1"
-                          onClick={() => handleViewUser(user)}
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                          View
-                        </Button>
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          className="gap-1"
-                          onClick={() => handleEditUser(user)}
-                        >
-                          <Edit className="h-3.5 w-3.5" />
-                        </Button>
-                        {!isCurrentUser && (
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            className="gap-1 text-destructive hover:text-destructive"
-                            onClick={() => handleDeleteUser(user.id)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })
-          )}
-        </div>
-
-        {/* Edit Dialog */}
-        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent className="sm:max-w-[500px]">
-            <DialogHeader>
-              <DialogTitle>Edit Team Member</DialogTitle>
-              <DialogDescription>Update team member information</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>Full Name</Label>
-                <Input 
-                  value={formData.fullName}
-                  onChange={(e) => setFormData({...formData, fullName: e.target.value})}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Email</Label>
-                <Input 
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({...formData, email: e.target.value})}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Role</Label>
-                <Select 
-                  value={formData.role} 
-                  onValueChange={(val: any) => setFormData({...formData, role: val})}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="sales_manager">Sales Manager</SelectItem>
-                    <SelectItem value="sales_agent">Sales Agent</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleUpdateUser} disabled={isSubmitting}>
-                {isSubmitting ? 'Updating...' : 'Update Member'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* View Dialog */}
+        {/* View Details Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <div className="flex items-center gap-4">
                 <Avatar className="h-16 w-16 border-2 border-primary">
                   <AvatarImage src={selectedUser?.avatarUrl || undefined} />
-                  <AvatarFallback className="bg-primary text-primary-foreground text-xl font-bold">
-                    {selectedUser && getInitials(selectedUser.fullName)}
+                  <AvatarFallback className="bg-primary/10 text-primary font-semibold text-xl">
+                    {selectedUser ? getInitials(selectedUser.fullName) : ''}
                   </AvatarFallback>
                 </Avatar>
                 <div>
                   <DialogTitle className="text-2xl">{selectedUser?.fullName}</DialogTitle>
-                  <div className="flex items-center gap-2 mt-1">
-                    <Badge variant="outline" className={selectedUser ? roleConfig[selectedUser.role].color : ''}>
-                      {selectedUser && roleConfig[selectedUser.role].label}
+                  <DialogDescription className="flex items-center gap-4 mt-1">
+                    <span className="flex items-center gap-1">
+                      <Mail className="h-3 w-3" />
+                      {selectedUser?.email}
+                    </span>
+                    <Badge className={roleConfig[selectedUser?.role || 'sales_agent'].color}>
+                      {roleConfig[selectedUser?.role || 'sales_agent'].label}
                     </Badge>
-                    <span className="text-sm text-muted-foreground">{selectedUser?.email}</span>
-                  </div>
+                  </DialogDescription>
                 </div>
               </div>
             </DialogHeader>
 
-            <div className="space-y-6 py-4">
-              {loadingStats ? (
-                <div className="flex items-center justify-center py-12">
-                  <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+            {loadingDetails ? (
+              <div className="py-12 text-center">
+                <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
+                <p className="text-muted-foreground">Loading agent details...</p>
+              </div>
+            ) : agentDetails ? (
+              <div className="space-y-6">
+                {/* Agent Performance KPI Cards */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <Card className="border-blue-200 bg-blue-50/30">
+                    <CardContent className="p-4 text-center">
+                      <Target className="h-6 w-6 mx-auto mb-2 text-blue-600" />
+                      <p className="text-2xl font-bold text-blue-600">{agentDetails.stats.totalLeads}</p>
+                      <p className="text-xs text-muted-foreground">Total Leads</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-green-200 bg-green-50/30">
+                    <CardContent className="p-4 text-center">
+                      <CheckCircle2 className="h-6 w-6 mx-auto mb-2 text-green-600" />
+                      <p className="text-2xl font-bold text-green-600">{agentDetails.stats.conversionRate}%</p>
+                      <p className="text-xs text-muted-foreground">Conversion</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-orange-200 bg-orange-50/30">
+                    <CardContent className="p-4 text-center">
+                      <PhoneCall className="h-6 w-6 mx-auto mb-2 text-orange-600" />
+                      <p className="text-2xl font-bold text-orange-600">{agentDetails.stats.callStats.total}</p>
+                      <p className="text-xs text-muted-foreground">Total Calls</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-purple-200 bg-purple-50/30">
+                    <CardContent className="p-4 text-center">
+                      <TrendingUp className="h-6 w-6 mx-auto mb-2 text-purple-600" />
+                      <p className="text-xl font-bold text-purple-600">{formatCurrency(agentDetails.stats.dealStats.totalRevenue)}</p>
+                      <p className="text-xs text-muted-foreground">Revenue</p>
+                    </CardContent>
+                  </Card>
                 </div>
-              ) : userStats ? (
-                <>
-                  {/* Quick Stats */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <Card className="border-blue-200 bg-blue-50/30">
-                      <CardContent className="pt-6">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                            <Target className="h-5 w-5 text-blue-600" />
-                          </div>
-                          <div>
-                            <p className="text-2xl font-bold text-blue-600">{userStats.totalLeads}</p>
-                            <p className="text-xs text-muted-foreground">Total Leads</p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                    
-                    <Card className="border-green-200 bg-green-50/30">
-                      <CardContent className="pt-6">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 bg-green-100 rounded-lg flex items-center justify-center">
-                            <CheckCircle2 className="h-5 w-5 text-green-600" />
-                          </div>
-                          <div>
-                            <p className="text-2xl font-bold text-green-600">{userStats.conversionRate}%</p>
-                            <p className="text-xs text-muted-foreground">Conversion</p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                    
-                    <Card className="border-purple-200 bg-purple-50/30">
-                      <CardContent className="pt-6">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                            <TrendingUp className="h-5 w-5 text-purple-600" />
-                          </div>
-                          <div>
-                            <p className="text-2xl font-bold text-purple-600">{formatCurrency(userStats.dealStats.totalRevenue)}</p>
-                            <p className="text-xs text-muted-foreground">Revenue</p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                    
-                    <Card className="border-orange-200 bg-orange-50/30">
-                      <CardContent className="pt-6">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 bg-orange-100 rounded-lg flex items-center justify-center">
-                            <PhoneCall className="h-5 w-5 text-orange-600" />
-                          </div>
-                          <div>
-                            <p className="text-2xl font-bold text-orange-600">{userStats.callStats.connectRate}%</p>
-                            <p className="text-xs text-muted-foreground">Connect Rate</p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </div>
 
-                  {/* Agent Visits */}
-                  {selectedUser?.role === 'sales_agent' && (
-                    <Card className="border-blue-200 bg-blue-50/30">
-                      <CardHeader>
-                        <CardTitle className="text-lg flex items-center gap-2">
-                          <Calendar className="h-5 w-5 text-blue-600" />
-                          Scheduled Site Visits ({agentVisits.length})
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        {loadingVisits ? (
-                          <div className="flex items-center justify-center py-8">
-                            <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+                {/* Alerts Section */}
+                {(agentDetails.missedFollowups > 0 || agentDetails.missedVisits > 0 || agentDetails.stagnantLeads > 0) && (
+                  <Card className="border-red-200 bg-red-50/30">
+                    <CardHeader>
+                      <CardTitle className="text-red-700 flex items-center gap-2 text-sm">
+                        <AlertCircle className="h-4 w-4" />
+                        Attention Required
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-3 gap-4">
+                        {agentDetails.missedFollowups > 0 && (
+                          <div className="text-center p-3 bg-white rounded border border-red-200">
+                            <p className="text-xl font-bold text-red-600">{agentDetails.missedFollowups}</p>
+                            <p className="text-xs text-muted-foreground">Missed Follow-ups</p>
                           </div>
-                        ) : agentVisits.length === 0 ? (
-                          <div className="text-center py-8 text-muted-foreground">
-                            <Calendar className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                            <p>No scheduled visits</p>
+                        )}
+                        {agentDetails.missedVisits > 0 && (
+                          <div className="text-center p-3 bg-white rounded border border-red-200">
+                            <p className="text-xl font-bold text-red-600">{agentDetails.missedVisits}</p>
+                            <p className="text-xs text-muted-foreground">Missed Visits</p>
                           </div>
-                        ) : (
-                          <div className="space-y-3 max-h-[400px] overflow-y-auto">
-                            {agentVisits.map((visit) => {
-                              const dateBadge = getDateBadge(visit.scheduledAt);
-                              const getStatusColor = (s: string) => {
-                                if (s === 'completed') return 'bg-green-100 text-green-700 border-green-200';
-                                if (s === 'rescheduled') return 'bg-purple-100 text-purple-700 border-purple-200';
-                                if (s === 'cancelled') return 'bg-gray-100 text-gray-700 border-gray-200';
-                                return 'bg-blue-100 text-blue-700 border-blue-200';
-                              };
+                        )}
+                        {agentDetails.stagnantLeads > 0 && (
+                          <div className="text-center p-3 bg-white rounded border border-red-200">
+                            <p className="text-xl font-bold text-red-600">{agentDetails.stagnantLeads}</p>
+                            <p className="text-xs text-muted-foreground">Stagnant Leads</p>
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
 
-                              return (
-                                <Card key={visit.id} className="border-l-4 border-l-blue-500 hover:shadow-md transition-shadow">
-                                  <CardContent className="p-4">
-                                    <div className="flex items-start justify-between gap-4">
-                                      <div className="flex-1 space-y-2">
-                                        
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                          <Badge className={dateBadge.class}>
-                                            {dateBadge.text}
-                                          </Badge>
-                                          <Badge variant="outline" className={getStatusColor(visit.status)}>
-                                            {visit.status}
-                                          </Badge>
-                                          <span className="text-sm font-medium">
-                                            {format(parseISO(visit.scheduledAt), 'h:mm a')}
-                                          </span>
-                                        </div>
-                                        
-                                        <div className="flex items-start gap-2">
-                                          {visit.property ? (
-                                            <Home className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
-                                          ) : (
-                                            <Building2 className="h-4 w-4 text-purple-600 mt-0.5 shrink-0" />
-                                          )}
-                                          <div>
-                                            <p className="font-semibold text-sm">
-                                              {getLocationName(visit)}
-                                            </p>
-                                            <p className="text-xs text-muted-foreground flex items-center gap-1">
-                                              <MapPin className="h-3 w-3" />
-                                              {getLocationAddress(visit)}
-                                            </p>
-                                          </div>
-                                        </div>
+                {/* Main Content Tabs */}
+                <Tabs defaultValue="leads" className="w-full">
+                  <TabsList className="grid w-full grid-cols-4 bg-slate-100 p-1">
+                    <TabsTrigger value="leads" className="gap-2">
+                      <Target className="h-4 w-4" />
+                      Leads ({agentDetails.leads.length})
+                    </TabsTrigger>
+                    <TabsTrigger value="visits" className="gap-2">
+                      <MapPin className="h-4 w-4" />
+                      Visits ({agentDetails.siteVisits.length})
+                    </TabsTrigger>
+                    <TabsTrigger value="calls" className="gap-2">
+                      <PhoneCall className="h-4 w-4" />
+                      Calls ({agentDetails.callLogs.length})
+                    </TabsTrigger>
+                    <TabsTrigger value="stats" className="gap-2">
+                      <BarChart3 className="h-4 w-4" />
+                      Stats
+                    </TabsTrigger>
+                  </TabsList>
 
-                                        {visit.feedback && (
-                                          <div className="mt-2 text-xs bg-muted/50 p-2 rounded text-muted-foreground border-l-2 border-gray-300">
-                                            <span className="font-semibold text-gray-700">Latest Note: </span>
-                                            {visit.feedback.split('\n').pop()?.replace(/\[.*?\]: /, '')}
-                                          </div>
-                                        )}
+                  {/* LEADS TAB */}
+                  <TabsContent value="leads" className="space-y-4 mt-4">
+                    <div className="grid gap-3 max-h-96 overflow-y-auto pr-2">
+                      {agentDetails.leads.length === 0 ? (
+                        <Card className="border-dashed">
+                          <CardContent className="p-8 text-center">
+                            <Target className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
+                            <p className="text-muted-foreground">No leads assigned</p>
+                          </CardContent>
+                        </Card>
+                      ) : (
+                        agentDetails.leads.map(lead => {
+                          const TempIcon = temperatureIcons[lead.temperature].icon;
+                          const isOverdue = lead.nextFollowupAt && isPast(new Date(lead.nextFollowupAt));
 
-                                        <div className="flex items-center gap-4 text-xs text-muted-foreground pt-2 border-t mt-2">
-                                          <span className="font-medium">Client: {visit.lead.name}</span>
-                                          <span className="flex items-center gap-1">
-                                            <Phone className="h-3 w-3" />
-                                            {visit.lead.phone}
-                                          </span>
-                                        </div>
-                                      </div>
+                          return (
+                            <Card key={lead.id} className={`hover:shadow-md transition-shadow ${isOverdue ? 'border-red-300 bg-red-50/20' : ''}`}>
+                              <CardContent className="p-4">
+                                <div className="flex justify-between items-start">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <h4 className="font-semibold">{lead.name}</h4>
+                                      <TempIcon className={`h-4 w-4 ${temperatureIcons[lead.temperature].color}`} />
                                     </div>
-                                  </CardContent>
-                                </Card>
+                                    <div className="flex flex-wrap gap-2 mb-2">
+                                      <Badge className={stageColors[lead.stage] || 'bg-gray-100 text-gray-700'}>
+                                        {lead.stage.replace('_', ' ')}
+                                      </Badge>
+                                      <Badge variant="outline" className="text-xs">
+                                        {lead.source}
+                                      </Badge>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                                      <span className="flex items-center gap-1">
+                                        <Phone className="h-3 w-3" />
+                                        {lead.phone}
+                                      </span>
+                                      {lead.email && (
+                                        <span className="flex items-center gap-1">
+                                          <Mail className="h-3 w-3" />
+                                          {lead.email}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          );
+                        })
+                      )}
+                    </div>
+                  </TabsContent>
+
+                  {/* SITE VISITS TAB */}
+                  <TabsContent value="visits" className="space-y-4 mt-4">
+                    <div className="grid gap-3 max-h-96 overflow-y-auto pr-2">
+                      {agentDetails.siteVisits.length === 0 ? (
+                        <Card className="border-dashed">
+                          <CardContent className="p-8 text-center">
+                            <MapPin className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
+                            <p className="text-muted-foreground">No site visits scheduled</p>
+                          </CardContent>
+                        </Card>
+                      ) : (
+                        agentDetails.siteVisits.map(visit => {
+                          const visitDate = new Date(visit.scheduledAt);
+                          const isPastVisit = isPast(visitDate);
+                          const statusColors = {
+                            scheduled: 'bg-blue-100 text-blue-700',
+                            completed: 'bg-green-100 text-green-700',
+                            cancelled: 'bg-red-100 text-red-700',
+                            rescheduled: 'bg-orange-100 text-orange-700'
+                          };
+
+                          return (
+                            <Card key={visit.id} className={`hover:shadow-md transition-shadow ${isPastVisit && visit.status === 'scheduled' ? 'border-red-300 bg-red-50/20' : ''}`}>
+                              <CardContent className="p-4">
+                                <div className="flex justify-between items-start mb-3">
+                                  <div>
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <Calendar className="h-4 w-4 text-primary" />
+                                      <span className="font-semibold text-sm">
+                                        {format(visitDate, 'MMM dd, yyyy')} at {format(visitDate, 'hh:mm a')}
+                                      </span>
+                                    </div>
+                                    <Badge className={`${statusColors[visit.status]} text-xs`}>
+                                      {visit.status}
+                                    </Badge>
+                                  </div>
+                                  {isPastVisit && visit.status === 'scheduled' && (
+                                    <Badge variant="destructive" className="gap-1 text-xs">
+                                      <AlertCircle className="h-3 w-3" />
+                                      Overdue
+                                    </Badge>
+                                  )}
+                                </div>
+
+                                <div className="space-y-2 text-sm">
+                                  <div className="flex items-center gap-2">
+                                    {visit.property ? <Home className="h-4 w-4 text-muted-foreground" /> : <Building2 className="h-4 w-4 text-muted-foreground" />}
+                                    <div>
+                                      <p className="font-medium">
+                                        {visit.property?.title || visit.project?.name}
+                                      </p>
+                                      <p className="text-xs text-muted-foreground">
+                                        {visit.property?.location || visit.project?.location}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <div className="pt-2 border-t">
+                                    <p className="text-xs font-medium mb-1">Client: {visit.lead.name}</p>
+                                    <p className="text-xs text-muted-foreground flex items-center gap-1">
+                                      <Phone className="h-3 w-3" />
+                                      {visit.lead.phone}
+                                    </p>
+                                  </div>
+                                  {visit.feedback && (
+                                    <div className="pt-2 border-t text-xs">
+                                      <span className="font-semibold">Feedback:</span> {visit.feedback}
+                                    </div>
+                                  )}
+                                </div>
+                              </CardContent>
+                            </Card>
+                          );
+                        })
+                      )}
+                    </div>
+                  </TabsContent>
+
+                  {/* CALL LOGS TAB */}
+                  <TabsContent value="calls" className="space-y-4 mt-4">
+                    <div className="grid gap-3 max-h-96 overflow-y-auto pr-2">
+                      {agentDetails.callLogs.length === 0 ? (
+                        <Card className="border-dashed">
+                          <CardContent className="p-8 text-center">
+                            <PhoneCall className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
+                            <p className="text-muted-foreground">No call logs recorded</p>
+                          </CardContent>
+                        </Card>
+                      ) : (
+                        agentDetails.callLogs.slice(0, 50).map(call => {
+                          const callStatusColors = {
+                            connected_positive: 'bg-green-100 text-green-700',
+                            connected_callback: 'bg-yellow-100 text-yellow-700',
+                            not_connected: 'bg-orange-100 text-orange-700',
+                            not_interested: 'bg-red-100 text-red-700'
+                          };
+
+                          return (
+                            <Card key={call.id} className="hover:shadow-sm transition-shadow">
+                              <CardContent className="p-4">
+                                <div className="flex justify-between items-start">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <PhoneCall className="h-4 w-4 text-primary" />
+                                      <span className="font-semibold text-sm">{call.lead.name}</span>
+                                      <Badge className={`${callStatusColors[call.callStatus]} text-[10px]`}>
+                                        {call.callStatus.replace(/_/g, ' ')}
+                                      </Badge>
+                                    </div>
+                                    <div className="text-xs text-muted-foreground space-y-1">
+                                      <p className="flex items-center gap-1">
+                                        <Phone className="h-3 w-3" />
+                                        {call.lead.phone}
+                                      </p>
+                                      <p className="flex items-center gap-1">
+                                        <Clock className="h-3 w-3" />
+                                        {format(new Date(call.callDate), 'MMM dd, hh:mm a')}
+                                      </p>
+                                      {call.callDuration && (
+                                        <p>Duration: {Math.floor(call.callDuration / 60)}m {call.callDuration % 60}s</p>
+                                      )}
+                                    </div>
+                                    {call.notes && (
+                                      <div className="mt-2 text-xs bg-slate-50 p-2 rounded border">
+                                        <span className="font-semibold">Notes:</span> {call.notes}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          );
+                        })
+                      )}
+                    </div>
+                  </TabsContent>
+
+                  {/* STATISTICS TAB */}
+                  <TabsContent value="stats" className="space-y-4 mt-4">
+                    <div className="grid md:grid-cols-2 gap-4">
+                      {/* Leads by Stage */}
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm">Leads by Stage</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-2">
+                            {agentDetails.stats.leadsByStage.map((item) => (
+                              <div key={item.stage} className="flex justify-between items-center p-2 rounded-md bg-slate-50 text-sm">
+                                <span className="capitalize">{item.stage.replace('_', ' ')}</span>
+                                <Badge variant="secondary" className="bg-white border shadow-sm">{item.count}</Badge>
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      {/* Leads by Temp */}
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm">Leads by Temperature</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-2">
+                            {agentDetails.stats.leadsByTemperature.map((item) => {
+                              const TempIcon = temperatureIcons[item.temperature as 'hot' | 'warm' | 'cold'].icon;
+                              const tempColor = item.temperature === 'hot' ? 'bg-red-100 text-red-700' :
+                                item.temperature === 'warm' ? 'bg-orange-100 text-orange-700' :
+                                  'bg-blue-100 text-blue-700';
+                              return (
+                                <div key={item.temperature} className="flex justify-between items-center p-2 rounded-md bg-slate-50 text-sm">
+                                  <span className="capitalize flex items-center gap-2">
+                                    <TempIcon className="h-3.5 w-3.5" />
+                                    {item.temperature}
+                                  </span>
+                                  <Badge className={tempColor}>{item.count}</Badge>
+                                </div>
                               );
                             })}
                           </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  )}
+                        </CardContent>
+                      </Card>
 
-                  {/* Detailed Stats Tabs */}
-                  <Tabs defaultValue="leads" className="w-full">
-                    <TabsList className="grid w-full grid-cols-3">
-                      <TabsTrigger value="leads" className="gap-2">
-                        <Target className="h-4 w-4" />
-                        Leads
-                      </TabsTrigger>
-                      <TabsTrigger value="calls" className="gap-2">
-                        <PhoneCall className="h-4 w-4" />
-                        Calls
-                      </TabsTrigger>
-                      <TabsTrigger value="deals" className="gap-2">
-                        <TrendingUp className="h-4 w-4" />
-                        Deals
-                      </TabsTrigger>
-                    </TabsList>
-                    
-                    <TabsContent value="leads" className="space-y-4 mt-4">
-                      <div className="grid md:grid-cols-2 gap-4">
-                        <Card>
-                          <CardHeader>
-                            <CardTitle className="text-sm">By Stage</CardTitle>
-                          </CardHeader>
-                          <CardContent>
-                            <div className="space-y-2">
-                              {userStats.leadsByStage.map((item) => (
-                                <div key={item.stage} className="flex justify-between items-center p-3 rounded-lg border hover:bg-slate-50 transition-colors">
-                                  <span className="capitalize font-medium text-sm">{item.stage}</span>
-                                  <Badge variant="secondary" className="bg-primary/10 text-primary">{item.count}</Badge>
-                                </div>
-                              ))}
+                      {/* Call Stats */}
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm">Call Performance</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-4">
+                            <div>
+                              <div className="flex justify-between text-xs mb-1">
+                                <span>Connect Rate</span>
+                                <span className="font-semibold">{agentDetails.stats.callStats.connectRate}%</span>
+                              </div>
+                              <Progress value={agentDetails.stats.callStats.connectRate} className="h-1.5" />
                             </div>
-                          </CardContent>
-                        </Card>
-                        
-                        <Card>
-                          <CardHeader>
-                            <CardTitle className="text-sm">By Temperature</CardTitle>
-                          </CardHeader>
-                          <CardContent>
-                            <div className="space-y-2">
-                              {userStats.leadsByTemperature.map((item) => {
-                                const tempColor = item.temperature === 'hot' ? 'bg-red-100 text-red-700' :
-                                                  item.temperature === 'warm' ? 'bg-orange-100 text-orange-700' :
-                                                  'bg-blue-100 text-blue-700';
-                                return (
-                                  <div key={item.temperature} className="flex justify-between items-center p-3 rounded-lg border hover:bg-slate-50 transition-colors">
-                                    <span className="capitalize font-medium text-sm">{item.temperature}</span>
-                                    <Badge className={tempColor}>{item.count}</Badge>
-                                  </div>
-                                );
-                              })}
+                            <div className="grid grid-cols-2 gap-2 text-center">
+                              <div className="p-2 bg-slate-50 rounded">
+                                <p className="text-xl font-bold text-slate-700">{agentDetails.stats.callStats.total}</p>
+                                <p className="text-[10px] text-muted-foreground uppercase">Total</p>
+                              </div>
+                              <div className="p-2 bg-green-50 rounded">
+                                <p className="text-xl font-bold text-green-600">{agentDetails.stats.callStats.connected}</p>
+                                <p className="text-[10px] text-muted-foreground uppercase">Connected</p>
+                              </div>
                             </div>
-                          </CardContent>
-                        </Card>
-                      </div>
-                    </TabsContent>
-                    
-                    <TabsContent value="calls" className="space-y-4 mt-4">
-                      <div className="grid grid-cols-3 gap-4">
-                        <Card className="border-orange-200 bg-orange-50/30">
-                          <CardContent className="p-6 text-center">
-                            <p className="text-3xl font-bold text-orange-600">{userStats.callStats.total}</p>
-                            <p className="text-sm text-muted-foreground mt-1">Total Calls</p>
-                          </CardContent>
-                        </Card>
-                        <Card className="border-green-200 bg-green-50/30">
-                          <CardContent className="p-6 text-center">
-                            <p className="text-3xl font-bold text-green-600">{userStats.callStats.connected}</p>
-                            <p className="text-sm text-muted-foreground mt-1">Connected</p>
-                          </CardContent>
-                        </Card>
-                        <Card className="border-blue-200 bg-blue-50/30">
-                          <CardContent className="p-6 text-center">
-                            <p className="text-3xl font-bold text-blue-600">{userStats.callStats.connectRate}%</p>
-                            <p className="text-sm text-muted-foreground mt-1">Connect Rate</p>
-                          </CardContent>
-                        </Card>
-                      </div>
-                    </TabsContent>
-                    
-                    <TabsContent value="deals" className="space-y-4 mt-4">
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <Card className="border-purple-200 bg-purple-50/30">
-                          <CardContent className="p-6 text-center">
-                            <p className="text-3xl font-bold text-purple-600">{userStats.dealStats.total}</p>
-                            <p className="text-sm text-muted-foreground mt-1">Total Deals</p>
-                          </CardContent>
-                        </Card>
-                        <Card className="border-green-200 bg-green-50/30">
-                          <CardContent className="p-6 text-center">
-                            <p className="text-3xl font-bold text-green-600">{userStats.dealStats.closed}</p>
-                            <p className="text-sm text-muted-foreground mt-1">Closed</p>
-                          </CardContent>
-                        </Card>
-                        <Card className="border-blue-200 bg-blue-50/30">
-                          <CardContent className="p-6 text-center">
-                            <p className="text-3xl font-bold text-blue-600">{userStats.dealStats.winRate}%</p>
-                            <p className="text-sm text-muted-foreground mt-1">Win Rate</p>
-                          </CardContent>
-                        </Card>
-                        <Card className="border-indigo-200 bg-indigo-50/30">
-                          <CardContent className="p-6 text-center">
-                            <p className="text-2xl font-bold text-indigo-600">{formatCurrency(userStats.dealStats.totalRevenue)}</p>
-                            <p className="text-sm text-muted-foreground mt-1">Revenue</p>
-                          </CardContent>
-                        </Card>
-                      </div>
-                    </TabsContent>
-                  </Tabs>
-                </>
-              ) : (
-                <div className="text-center py-12 text-muted-foreground">
-                  <AlertCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>Unable to load statistics</p>
-                </div>
-              )}
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      {/* Deal Stats */}
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm">Deal Performance</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-4">
+                            <div>
+                              <div className="flex justify-between text-xs mb-1">
+                                <span>Win Rate</span>
+                                <span className="font-semibold">{agentDetails.stats.dealStats.winRate}%</span>
+                              </div>
+                              <Progress value={agentDetails.stats.dealStats.winRate} className="h-1.5" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 text-center">
+                              <div className="p-2 bg-slate-50 rounded">
+                                <p className="text-xl font-bold text-slate-700">{agentDetails.stats.dealStats.total}</p>
+                                <p className="text-[10px] text-muted-foreground uppercase">Deals</p>
+                              </div>
+                              <div className="p-2 bg-green-50 rounded">
+                                <p className="text-xl font-bold text-green-600">{agentDetails.stats.dealStats.closed}</p>
+                                <p className="text-[10px] text-muted-foreground uppercase">Closed</p>
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  </TabsContent>
+                </Tabs>
+              </div>
+            ) : (
+              <div className="text-center py-12 text-muted-foreground">
+                <AlertCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>Unable to load agent details</p>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit User Dialog */}
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Team Member</DialogTitle>
+              <DialogDescription>Update user information</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label>Full Name</Label>
+                <Input value={formData.fullName} onChange={(e) => setFormData({ ...formData, fullName: e.target.value })} />
+              </div>
+              <div>
+                <Label>Email</Label>
+                <Input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} />
+              </div>
+              <div>
+                <Label>Role</Label>
+                <Select value={formData.role} onValueChange={(value: any) => setFormData({ ...formData, role: value })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sales_agent">Sales Agent</SelectItem>
+                    <SelectItem value="sales_manager">Sales Manager</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Avatar URL</Label>
+                <Input value={formData.avatarUrl} onChange={(e) => setFormData({ ...formData, avatarUrl: e.target.value })} />
+              </div>
             </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
+              <Button onClick={handleUpdateUser} disabled={isSubmitting}>{isSubmitting ? 'Updating...' : 'Update User'}</Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
     </DashboardLayout>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

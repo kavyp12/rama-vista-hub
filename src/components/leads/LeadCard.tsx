@@ -7,14 +7,13 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { 
-  Phone, Mail, Flame, Thermometer, Snowflake, 
-  Home, CalendarPlus, UserCheck, MapPin, Calendar, Building2, Pencil
+  Phone, Flame, Thermometer, Snowflake, 
+  Home, CalendarPlus, UserCheck, MapPin, Calendar, Building2, Pencil, Wallet, FileText
 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { PropertyMatchModal } from './PropertyMatchModal';
 import { ScheduleVisitDialog } from './ScheduleVisitDialog';
 import { QuickCallDialog } from './QuickCallDialog';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Lead } from '@/pages/Leads';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
@@ -35,7 +34,7 @@ interface LeadCardProps {
   lead: Lead;
   profiles?: Profile[];
   onUpdate: () => void;
-  onEdit?: (lead: Lead) => void; // ✅ NEW PROP
+  onEdit?: (lead: Lead) => void;
 }
 
 export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: LeadCardProps) {
@@ -68,7 +67,34 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: LeadCardProp
     }
   };
 
-  const getStageBadge = (stage: string) => <Badge variant="secondary" className="text-[10px] h-5 px-1.5 capitalize font-normal bg-slate-100 text-slate-700">{stage.replace('_', ' ')}</Badge>;
+  const formatBudget = (val: number) => {
+    if (val >= 10000000) return `${(val / 10000000).toFixed(1)} Cr`;
+    if (val >= 100000) return `${(val / 100000).toFixed(1)} L`;
+    return `${(val / 1000).toFixed(0)} K`;
+  };
+
+  const budgetDisplay = () => {
+    if (lead.budgetMin && lead.budgetMax) return `${formatBudget(lead.budgetMin)} - ${formatBudget(lead.budgetMax)}`;
+    if (lead.budgetMin) return `Min ${formatBudget(lead.budgetMin)}`;
+    if (lead.budgetMax) return `Max ${formatBudget(lead.budgetMax)}`;
+    return 'Budget unset';
+  };
+
+  const handleStageChange = async (newStage: string) => {
+    try {
+      const res = await fetch(`${API_URL}/leads/${lead.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ stage: newStage })
+      });
+      if (!res.ok) throw new Error('Failed to update stage');
+      
+      toast({ title: 'Updated', description: `Stage changed to ${newStage}` });
+      onUpdate();
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to update stage', variant: 'destructive' });
+    }
+  };
 
   const handleReassign = async (newAgentId: string) => {
     setIsReassigning(true);
@@ -97,12 +123,11 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: LeadCardProp
       <Card className="flex flex-col h-full hover:shadow-lg transition-all duration-200 border-slate-200 group relative overflow-hidden bg-white">
         <div className={`h-1 w-full ${lead.temperature === 'hot' ? 'bg-red-500' : lead.temperature === 'warm' ? 'bg-amber-500' : 'bg-blue-400'}`} />
         
-        {/* ✅ EDIT BUTTON ABSOLUTE POSITIONED */}
         {onEdit && (
             <Button 
                 variant="ghost" 
                 size="icon" 
-                className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity z-10"
                 onClick={(e) => { e.stopPropagation(); onEdit(lead); }}
             >
                 <Pencil className="h-3 w-3 text-slate-400 hover:text-blue-600" />
@@ -125,20 +150,37 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: LeadCardProp
             </div>
           </div>
 
-          <div className="grid gap-1.5 py-1 border-t border-b border-slate-50 my-1">
-            <div className="flex items-center gap-2 text-xs text-slate-600">
-              <Phone className="h-3 w-3 text-slate-400 shrink-0" /><span className="truncate">{lead.phone}</span>
-            </div>
-            {lead.email && (
-              <div className="flex items-center gap-2 text-xs text-slate-600">
-                <Mail className="h-3 w-3 text-slate-400 shrink-0" /><span className="truncate">{lead.email}</span>
-              </div>
-            )}
+          <div className="grid gap-1.5 py-2 border-t border-slate-100 my-1">
+             <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-medium text-slate-700">
+                  <Wallet className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                  <span>{budgetDisplay()}</span>
+                </div>
+             </div>
+
              {lead.preferredLocation && (
               <div className="flex items-center gap-2 text-xs text-slate-600">
-                <MapPin className="h-3 w-3 text-slate-400 shrink-0" /><span className="truncate">{lead.preferredLocation}</span>
+                <MapPin className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                <span className="truncate" title={lead.preferredLocation}>{lead.preferredLocation}</span>
               </div>
             )}
+          </div>
+
+          {lead.notes && (
+             <div className="bg-amber-50 rounded-md p-2 border border-amber-100">
+               <div className="flex items-start gap-2">
+                 <FileText className="h-3 w-3 text-amber-600 mt-0.5 shrink-0" />
+                 <p className="text-[10px] text-amber-800 line-clamp-2 leading-tight" title={lead.notes}>
+                   {lead.notes}
+                 </p>
+               </div>
+             </div>
+          )}
+          
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <Phone className="h-3 w-3 shrink-0" />{lead.phone}
+            </div>
           </div>
           
           {nextVisit && (
@@ -154,8 +196,27 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: LeadCardProp
             </div>
           )}
 
-          <div className="mt-auto flex items-center justify-between pt-1">
-            {getStageBadge(lead.stage)}
+          <div className="mt-auto flex items-center justify-between pt-2 border-t border-slate-50">
+            <div onClick={(e) => e.stopPropagation()}>
+              <Select value={lead.stage} onValueChange={handleStageChange}>
+                <SelectTrigger className="h-6 w-auto border-0 p-0 text-[10px] font-medium bg-transparent shadow-none gap-1 focus:ring-0">
+                  <Badge variant="secondary" className="text-[10px] h-5 px-1.5 capitalize font-normal bg-slate-100 text-slate-700 hover:bg-slate-200">
+                    {lead.stage.replace('_', ' ')}
+                  </Badge>
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="new">New</SelectItem>
+                    <SelectItem value="contacted">Contacted</SelectItem>
+                    <SelectItem value="site_visit">Site Visit</SelectItem>
+                    <SelectItem value="negotiation">Negotiation</SelectItem>
+                    <SelectItem value="token">Token</SelectItem>
+                    <SelectItem value="closed">Closed</SelectItem>
+                    <SelectItem value="lost">Lost</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
             <div className="flex items-center">
               {canAssignLeads ? (
                  <Select value={assignedId || ''} onValueChange={handleReassign} disabled={isReassigning}>
@@ -166,7 +227,6 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: LeadCardProp
                            <AvatarImage src={assignedProfile.avatarUrl || undefined} />
                            <AvatarFallback className="text-[9px] bg-white">{getInitials(assignedProfile.fullName)}</AvatarFallback>
                          </Avatar>
-                         <span className="max-w-[80px] truncate">{assignedProfile.fullName.split(' ')[0]}</span>
                        </div>
                     ) : (
                       <div className="flex items-center gap-1 text-muted-foreground"><UserCheck className="h-4 w-4" /><span>Assign</span></div>
@@ -176,20 +236,12 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: LeadCardProp
                 </Select>
               ) : (
                 assignedProfile && (
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger>
-                        <div className="flex items-center gap-1">
-                          <Avatar className="h-5 w-5 cursor-help border border-slate-200">
-                            <AvatarImage src={assignedProfile.avatarUrl || undefined} />
-                            <AvatarFallback className="text-[9px] bg-white">{getInitials(assignedProfile.fullName)}</AvatarFallback>
-                          </Avatar>
-                          <span className="text-xs text-muted-foreground max-w-[80px] truncate">{assignedProfile.fullName.split(' ')[0]}</span>
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent><p>Assigned to {assignedProfile.fullName}</p></TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                  <div className="flex items-center gap-1">
+                     <span className="text-[10px] text-muted-foreground mr-1">Owner:</span>
+                     <Avatar className="h-5 w-5 border border-slate-200">
+                        <AvatarFallback className="text-[9px] bg-slate-100 text-slate-600">{getInitials(assignedProfile.fullName)}</AvatarFallback>
+                     </Avatar>
+                  </div>
                 )
               )}
             </div>
@@ -198,16 +250,17 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: LeadCardProp
 
         <CardFooter className="p-0 border-t bg-slate-50/50 grid grid-cols-3 divide-x divide-slate-200">
            <Button variant="ghost" className="h-9 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowQuickCall(true)}>
-             <Phone className="h-3.5 w-3.5" />
+             <Phone className="h-3.5 w-3.5 mr-1" /> <span className="text-[10px]">Call</span>
            </Button>
            <Button variant="ghost" className="h-9 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowPropertyMatch(true)}>
-             <Home className="h-3.5 w-3.5" />
+             <Home className="h-3.5 w-3.5 mr-1" /> <span className="text-[10px]">Match</span>
            </Button>
            <Button variant="ghost" className="h-9 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowScheduleVisit(true)}>
-             <CalendarPlus className="h-3.5 w-3.5" />
+             <CalendarPlus className="h-3.5 w-3.5 mr-1" /> <span className="text-[10px]">Visit</span>
            </Button>
         </CardFooter>
       </Card>
+
       <PropertyMatchModal lead={lead} open={showPropertyMatch} onOpenChange={setShowPropertyMatch} onSuccess={onUpdate} />
       <ScheduleVisitDialog lead={lead} open={showScheduleVisit} onOpenChange={setShowScheduleVisit} onSuccess={onUpdate} />
       <QuickCallDialog lead={lead} open={showQuickCall} onOpenChange={setShowQuickCall} onSuccess={onUpdate} />

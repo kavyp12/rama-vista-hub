@@ -7,7 +7,8 @@ import {
   createUser,
   updateUser,
   resetUserPassword,
-  deleteUser
+  deleteUser,
+  getUserCallLogs
 } from '../controllers/user.controller';
 
 const router = Router();
@@ -23,6 +24,9 @@ router.get('/:id', getUser);
 
 // Get user statistics
 router.get('/:id/stats', getUserStats);
+
+// Get user call logs
+router.get('/:id/call-logs', getUserCallLogs);
 
 // Create new user (Admin only)
 router.post('/', createUser);
