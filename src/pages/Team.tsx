@@ -26,6 +26,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 interface User {
   id: string;
   email: string;
+  phone?: string | null; // Added phone field
   fullName: string;
   role: 'admin' | 'sales_manager' | 'sales_agent';
   avatarUrl: string | null;
@@ -133,8 +134,9 @@ export default function Team() {
   const [visitSearch, setVisitSearch] = useState('');
   const [callSearch, setCallSearch] = useState('');
 
+  // Added phone to formData
   const [formData, setFormData] = useState({
-    email: '', password: '', fullName: '',
+    email: '', password: '', fullName: '', phone: '',
     role: 'sales_agent' as 'admin' | 'sales_manager' | 'sales_agent',
     avatarUrl: ''
   });
@@ -199,9 +201,17 @@ export default function Team() {
     fetchAgentDetails(user.id);
   }
 
+  // Included phone mapping
   function handleEditUser(user: User) {
     setSelectedUser(user);
-    setFormData({ email: user.email, password: '', fullName: user.fullName, role: user.role, avatarUrl: user.avatarUrl || '' });
+    setFormData({ 
+      email: user.email, 
+      password: '', 
+      fullName: user.fullName, 
+      phone: user.phone || '', 
+      role: user.role, 
+      avatarUrl: user.avatarUrl || '' 
+    });
     setIsEditDialogOpen(true);
   }
 
@@ -216,7 +226,7 @@ export default function Team() {
       if (!res.ok) throw new Error((await res.json()).error || 'Failed to create');
       toast({ title: 'Success', description: 'Created successfully' });
       setIsAddDialogOpen(false);
-      setFormData({ email: '', password: '', fullName: '', role: 'sales_agent', avatarUrl: '' });
+      setFormData({ email: '', password: '', fullName: '', phone: '', role: 'sales_agent', avatarUrl: '' });
       fetchUsers();
     } catch (error: any) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); }
     finally { setIsSubmitting(false); }
@@ -226,7 +236,8 @@ export default function Team() {
     if (!selectedUser) return;
     setIsSubmitting(true);
     try {
-      const updateData = { email: formData.email, fullName: formData.fullName, role: formData.role, avatarUrl: formData.avatarUrl || null };
+      // Included phone in update payload
+      const updateData = { email: formData.email, fullName: formData.fullName, phone: formData.phone, role: formData.role, avatarUrl: formData.avatarUrl || null };
       const res = await fetch(`${API_URL}/users/${selectedUser.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -356,6 +367,13 @@ export default function Team() {
                   <div className="space-y-4">
                     <div><Label>Full Name</Label><Input value={formData.fullName} onChange={(e) => setFormData({ ...formData, fullName: e.target.value })} /></div>
                     <div><Label>Email</Label><Input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} /></div>
+                    
+                    {/* Added Phone input here */}
+                    <div>
+                      <Label>Phone Number (For MCUBE Dialer)</Label>
+                      <Input placeholder="e.g. 9876543210" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} />
+                    </div>
+
                     <div><Label>Password</Label><Input type="password" value={formData.password} onChange={(e) => setFormData({ ...formData, password: e.target.value })} /></div>
                     <div>
                       <Label>Role</Label>
@@ -875,6 +893,13 @@ export default function Team() {
             <div className="space-y-4">
               <div><Label>Full Name</Label><Input value={formData.fullName} onChange={(e) => setFormData({ ...formData, fullName: e.target.value })} /></div>
               <div><Label>Email</Label><Input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} /></div>
+              
+              {/* Added Phone input here */}
+              <div>
+                <Label>Phone Number (For MCUBE Dialer)</Label>
+                <Input placeholder="e.g. 9876543210" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} />
+              </div>
+
               <div>
                 <Label>Role</Label>
                 <Select value={formData.role} onValueChange={(val: any) => setFormData({ ...formData, role: val })}>

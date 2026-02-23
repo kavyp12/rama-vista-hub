@@ -4,28 +4,29 @@ import {
   getCallLogs, 
   getCallStats, 
   updateCallLog, 
-  deleteCallLog 
+  deleteCallLog,
+  initiateMcubeCall,
+  mcubeWebhook
 } from '../controllers/callLog.controller';
 import { authenticate } from '../middlewares/auth.middleware';
 
 const router = Router();
 
-// All routes require authentication
+// --- NO AUTH REQUIRED FOR WEBHOOK ---
+// MCUBE will post data here when a call is disconnected
+router.post('/mcube-webhook', mcubeWebhook);
+
+// --- ALL ROUTES BELOW REQUIRE AUTHENTICATION ---
 router.use(authenticate);
 
-// Create call log
+// NEW: Endpoint for React to trigger an MCUBE call
+router.post('/initiate-mcube', initiateMcubeCall);
+
+// Existing Routes
 router.post('/', createCallLog);
-
-// Get call logs
 router.get('/', getCallLogs);
-
-// Get call statistics
 router.get('/stats', getCallStats);
-
-// ✅ NEW: Update call log (Archive)
 router.patch('/:id', updateCallLog);
-
-// ✅ NEW: Delete call log (Soft Delete)
 router.delete('/:id', deleteCallLog);
 
 export default router;

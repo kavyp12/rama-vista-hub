@@ -39,6 +39,7 @@ model User {
   id                  String                   @id @default(uuid())
   email               String                   @unique
   password            String
+  phone               String?                  // <--- ADD THIS LINE
   fullName            String                   @map("full_name")
   role                UserRole                 @default(sales_agent)
   avatarUrl           String?                  @map("avatar_url")

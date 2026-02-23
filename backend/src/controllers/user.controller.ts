@@ -9,6 +9,7 @@ const createUserSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
   fullName: z.string().min(2),
+  phone: z.string().optional().nullable(), // ✅ Added phone
   role: z.enum(['admin', 'sales_manager', 'sales_agent']).default('sales_agent'),
   avatarUrl: z.string().url().optional().nullable()
 });
@@ -16,6 +17,7 @@ const createUserSchema = z.object({
 const updateUserSchema = z.object({
   email: z.string().email().optional(),
   fullName: z.string().min(2).optional(),
+  phone: z.string().optional().nullable(), // ✅ Added phone
   role: z.enum(['admin', 'sales_manager', 'sales_agent']).optional(),
   avatarUrl: z.string().url().optional().nullable()
 });
@@ -51,6 +53,7 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
         id: true,
         email: true,
         fullName: true,
+        phone: true, // ✅ Added phone
         role: true,
         avatarUrl: true,
         createdAt: true,
@@ -89,6 +92,7 @@ export const getUser = async (req: AuthRequest, res: Response) => {
         id: true,
         email: true,
         fullName: true,
+        phone: true, // ✅ Added phone
         role: true,
         avatarUrl: true,
         createdAt: true,
@@ -259,6 +263,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
         email: data.email,
         password: hashedPassword,
         fullName: data.fullName,
+        phone: data.phone, // ✅ Added phone
         role: data.role,
         avatarUrl: data.avatarUrl
       },
@@ -266,6 +271,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
         id: true,
         email: true,
         fullName: true,
+        phone: true, // ✅ Added phone
         role: true,
         avatarUrl: true,
         createdAt: true
@@ -319,13 +325,15 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
     // If self-update, restrict what can be changed
     const updateData: any = {};
     if (isSelfUpdate && !isAdmin) {
-      // Users can only update their own name and avatar
+      // Users can update their own name, avatar, and phone number
       if (data.fullName) updateData.fullName = data.fullName;
+      if (data.phone !== undefined) updateData.phone = data.phone; // ✅ Added phone
       if (data.avatarUrl !== undefined) updateData.avatarUrl = data.avatarUrl;
     } else {
       // Admin can update everything
       if (data.email) updateData.email = data.email;
       if (data.fullName) updateData.fullName = data.fullName;
+      if (data.phone !== undefined) updateData.phone = data.phone; // ✅ Added phone
       if (data.role) updateData.role = data.role;
       if (data.avatarUrl !== undefined) updateData.avatarUrl = data.avatarUrl;
     }
@@ -337,6 +345,7 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
         id: true,
         email: true,
         fullName: true,
+        phone: true, // ✅ Added phone
         role: true,
         avatarUrl: true,
         updatedAt: true

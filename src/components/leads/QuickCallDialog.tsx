@@ -38,7 +38,7 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: any) {
   const { token } = useAuth();
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
-  const [isSuccessState, setIsSuccessState] = useState(false); // Used to show WA template
+  const [isSuccessState, setIsSuccessState] = useState(false);
 
   // Form state
   const [callOutcome, setCallOutcome] = useState('');
@@ -48,17 +48,38 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: any) {
   const [customCallbackDate, setCustomCallbackDate] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
 
-  // Count past calls
   const callCount = lead.callLogs?.length || 0;
 
-  // Auto-Dialer
+  // --- NEW MCUBE AUTO-DIALER ---
   useEffect(() => {
     if (open) {
-      window.open(`tel:${lead.phone}`, '_self');
+      initiateCallViaMCUBE();
       setIsSuccessState(false);
     }
   }, [open, lead.phone]);
 
+  async function initiateCallViaMCUBE() {
+    try {
+      toast({ title: 'Dialing...', description: 'Connecting call via MCUBE...' });
+      const res = await fetch(`${API_URL}/call-logs/initiate-mcube`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ leadPhone: lead.phone })
+      });
+      
+      if (!res.ok) throw new Error('Failed to connect call');
+      
+      toast({ title: 'Ringing', description: 'Please answer your phone to connect to the lead.' });
+    } catch (error) {
+      toast({ title: 'Dialer Error', description: 'Could not connect to MCUBE. Showing manual log format.', variant: 'destructive' });
+    }
+  }
+
+  // Allow manual submission in case the agent still wants to add specific notes 
+  // (MCUBE handles duration and recording in the background, but this form handles extra text notes)
   async function handleSubmit() {
     if (!callOutcome || !token) return;
 
@@ -101,11 +122,10 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: any) {
         body: JSON.stringify(payload)
       });
 
-      if (!res.ok) throw new Error('Failed to log call');
+      if (!res.ok) throw new Error('Failed to save manual log');
 
-      toast({ title: 'Call Logged', description: 'Lead stage has been automatically updated.' });
+      toast({ title: 'Notes Saved', description: 'Manual notes attached to lead successfully.' });
       
-      // Auto-advance logic implies if connected, we show WA sharing
       if (callOutcome === 'connected_positive' || callOutcome === 'connected_callback') {
           setIsSuccessState(true);
       } else {
@@ -144,7 +164,7 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: any) {
         <Dialog open={open} onOpenChange={(val) => { resetForm(); onOpenChange(val); }}>
           <DialogContent className="sm:max-w-md text-center py-10">
             <CheckCircle2 className="h-16 w-16 text-green-500 mx-auto mb-4" />
-            <DialogTitle className="text-xl">Call Logged Successfully</DialogTitle>
+            <DialogTitle className="text-xl">Notes Logged Successfully</DialogTitle>
             <p className="text-muted-foreground mb-6">Would you like to send a follow-up WhatsApp message?</p>
             <div className="flex justify-center gap-3">
                <Button variant="outline" onClick={() => { resetForm(); onOpenChange(false); }}>Skip</Button>
@@ -163,16 +183,20 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: any) {
         <DialogHeader>
           <div className="flex justify-between items-start">
               <div>
-                <DialogTitle>Log Call - {lead.name}</DialogTitle>
-                <p className="text-sm text-muted-foreground">{lead.phone}</p>
+                <DialogTitle>Add Manual Notes - {lead.name}</DialogTitle>
+                <p className="text-sm text-muted-foreground">{lead.phone} (Dialing via MCUBE)</p>
               </div>
               <Badge variant="outline" className="text-xs bg-slate-50"><Phone className="h-3 w-3 mr-1"/> Called {callCount}x</Badge>
           </div>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
+          <div className="text-xs bg-blue-50 text-blue-700 p-2 rounded-md border border-blue-200">
+            <strong>Note:</strong> MCUBE automatically tracks call duration and call recordings. Use this form only if you need to schedule a callback or leave specific text notes.
+          </div>
+
           <div className="space-y-2">
-            <Label>Call Outcome *</Label>
+            <Label>Call Outcome (For scheduling)</Label>
             <div className="grid grid-cols-2 gap-2">
               {callOutcomes.map((outcome) => {
                 const Icon = outcome.icon;
@@ -197,12 +221,7 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: any) {
           </div>
 
           <div className="space-y-2">
-            <Label>Duration (seconds)</Label>
-            <Input type="number" placeholder="e.g. 120" value={callDuration} onChange={(e) => setCallDuration(e.target.value)} />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Quick Notes</Label>
+            <Label>Agent Notes</Label>
             <div className="flex flex-wrap gap-2 mb-2">
               {quickNotes.map((note) => (
                 <Button key={note} type="button" size="sm" variant={notes === note ? 'default' : 'outline'} onClick={() => setNotes(note)} className="h-7 text-xs">
@@ -210,7 +229,7 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: any) {
                 </Button>
               ))}
             </div>
-            <Textarea placeholder="Add custom notes..." value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+            <Textarea placeholder="Add specific conversation notes here..." value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
           </div>
 
           {(callOutcome === 'connected_callback' || callOutcome === 'not_connected') && (
@@ -261,9 +280,9 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: any) {
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
           <Button onClick={handleSubmit} disabled={!callOutcome || submitting}>
-            {submitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />} Log Call
+            {submitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />} Save Notes
           </Button>
         </DialogFooter>
       </DialogContent>
