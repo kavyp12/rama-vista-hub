@@ -20,14 +20,31 @@ const createLeadSchema = z.object({
 
 const logCallSchema = z.object({
   callStatus: z.enum(['connected_positive', 'connected_callback', 'not_connected', 'not_interested']),
+  type: z.enum(['call', 'whatsapp']).default('call'),
   callDuration: z.number().optional().nullable(),
   notes: z.string().optional().nullable(),
-  callbackScheduledAt: z.string().optional().nullable(), // ISO String
+  callbackScheduledAt: z.string().optional().nullable(),
   rejectionReason: z.string().optional().nullable()
 });
 
 const recommendationSchema = z.object({
   propertyIds: z.array(z.string()).min(1)
+});
+
+const bulkAssignSchema = z.object({
+  leadIds: z.array(z.string()),
+  agentId: z.string()
+});
+
+const bulkImportSchema = z.object({
+  leads: z.array(z.object({
+    name: z.string(),
+    phone: z.string(),
+    email: z.string().optional(),
+    source: z.string().optional(),
+    budgetMin: z.number().optional(),
+    budgetMax: z.number().optional()
+  }))
 });
 
 // --- CONTROLLERS ---
@@ -43,23 +60,16 @@ export const getLeads = async (req: AuthRequest, res: Response) => {
     if (source) where.source = source;
     if (assignedTo) where.assignedToId = assignedTo;
 
-    // ✅ Filter by phone to find related leads/inquiries
     if (phone) {
         where.phone = { contains: String(phone) };
     }
 
-    // Filter for leads needing follow-up
     if (needsFollowup === 'true') {
       const now = new Date();
-      where.nextFollowupAt = {
-        lte: now
-      };
-      where.stage = {
-        notIn: ['closed']
-      };
+      where.nextFollowupAt = { lte: now };
+      where.stage = { notIn: ['closed', 'completed', 'lost'] };
     }
 
-    // Agents only see their own leads
     if (req.user!.role === 'sales_agent') {
       where.assignedToId = req.user!.userId;
     }
@@ -77,7 +87,6 @@ export const getLeads = async (req: AuthRequest, res: Response) => {
         project: {
           select: { id: true, name: true, location: true }
         },
-        // ❌ REMOVED 'property' include here to fix the error
         siteVisits: {
           select: {
             id: true, scheduledAt: true, status: true, rating: true, feedback: true,
@@ -88,9 +97,11 @@ export const getLeads = async (req: AuthRequest, res: Response) => {
           take: 5 
         },
         callLogs: {
-           select: { id: true, callStatus: true, callDate: true, notes: true },
+           select: { id: true, callStatus: true, callDate: true, notes: true, type: true },
            orderBy: { callDate: 'desc' },
-           take: 5
+        },
+        propertyRecommendations: {
+            select: { propertyId: true }
         }
       },
       orderBy: { createdAt: 'desc' }
@@ -114,7 +125,6 @@ export const getLead = async (req: AuthRequest, res: Response) => {
           select: { id: true, fullName: true, email: true, avatarUrl: true }
         },
         project: { select: { id: true, name: true, location: true } },
-        // ❌ REMOVED 'property' include here as well
         deals: {
           include: { property: { select: { title: true, price: true } } },
           orderBy: { createdAt: 'desc' }
@@ -140,7 +150,6 @@ export const getLead = async (req: AuthRequest, res: Response) => {
 
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
-    // Security check
     if (req.user!.role === 'sales_agent' && lead.assignedToId !== req.user!.userId) {
       return res.status(403).json({ error: 'Access denied' });
     }
@@ -194,12 +203,13 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
         if (!isOwner) {
             return res.status(403).json({ error: 'You can only update your own leads.' });
         }
-        const allowedUpdates = ['notes', 'stage', 'temperature', 'budgetMin', 'budgetMax', 'preferredLocation', 'nextFollowupAt'];
+        // ADDED AGENT SPECIFIC FIELDS
+        const allowedUpdates = ['notes', 'stage', 'temperature', 'budgetMin', 'budgetMax', 'preferredLocation', 'nextFollowupAt', 'lostReason', 'agentNotes', 'interestLevel', 'preferredPropertyType'];
         const updates = Object.keys(data);
         const hasIllegalUpdates = updates.some(key => !allowedUpdates.includes(key));
 
         if (hasIllegalUpdates) {
-            return res.status(403).json({ error: 'Agents can only update notes, stage, and preferences.' });
+            return res.status(403).json({ error: 'Agents can only update basic properties.' });
         }
     }
 
@@ -241,6 +251,7 @@ export const logCall = async (req: AuthRequest, res: Response) => {
         leadId: id,
         agentId: req.user!.userId,
         callStatus: data.callStatus as any,
+        type: data.type,
         callDuration: data.callDuration,
         notes: data.notes,
         callbackScheduledAt: data.callbackScheduledAt ? new Date(data.callbackScheduledAt) : null,
@@ -250,8 +261,8 @@ export const logCall = async (req: AuthRequest, res: Response) => {
 
     let leadUpdates: any = { lastContactedAt: new Date() };
     
-    // ✅ CHANGED LOGIC HERE
-   if (data.callStatus === 'connected_positive') {
+    // Auto Advance logic
+    if (data.callStatus === 'connected_positive') {
         leadUpdates.temperature = 'hot';
         leadUpdates.stage = 'contacted'; 
     } else if (data.callStatus === 'connected_callback') {
@@ -261,7 +272,7 @@ export const logCall = async (req: AuthRequest, res: Response) => {
         }
     } else if (data.callStatus === 'not_interested') {
         leadUpdates.stage = 'closed';
-        leadUpdates.notes = `Closed: ${data.rejectionReason || 'Not Interested'}`;
+        leadUpdates.lostReason = data.rejectionReason || 'Not Interested';
     } else if (data.callbackScheduledAt) {
         leadUpdates.nextFollowupAt = new Date(data.callbackScheduledAt);
     }
@@ -305,7 +316,60 @@ export const recommendProperties = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// ✅ NEW FUNCTION: Agent Dashboard Stats (Missed & Stagnant Items)
+export const togglePriority = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const lead = await prisma.lead.findUnique({ where: { id } });
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    const updated = await prisma.lead.update({
+      where: { id },
+      data: { isPriority: !lead.isPriority }
+    });
+    return res.json(updated);
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to update priority' });
+  }
+};
+
+export const bulkAssign = async (req: AuthRequest, res: Response) => {
+  try {
+    if (req.user!.role === 'sales_agent') return res.status(403).json({ error: 'Forbidden' });
+
+    const { leadIds, agentId } = bulkAssignSchema.parse(req.body);
+
+    await prisma.lead.updateMany({
+      where: { id: { in: leadIds } },
+      data: { assignedToId: agentId }
+    });
+
+    return res.json({ success: true, count: leadIds.length });
+  } catch (error) {
+    return res.status(500).json({ error: 'Bulk assign failed' });
+  }
+};
+
+export const importLeads = async (req: AuthRequest, res: Response) => {
+  try {
+    const { leads } = bulkImportSchema.parse(req.body);
+    const userId = req.user!.userId;
+
+    const created = await prisma.lead.createMany({
+      data: leads.map(l => ({
+        ...l,
+        assignedToId: userId,
+        source: l.source || 'Imported',
+        stage: 'new',
+        temperature: 'warm'
+      }))
+    });
+
+    return res.json({ success: true, count: created.count });
+  } catch (error) {
+    return res.status(500).json({ error: 'Import failed' });
+  }
+};
+
 export const getAgentDashboardStats = async (req: AuthRequest, res: Response) => {
   try {
     const agentId = req.user!.userId;
@@ -313,16 +377,14 @@ export const getAgentDashboardStats = async (req: AuthRequest, res: Response) =>
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    // 1. Get Missed Follow-ups (Past date, active stage)
     const missedFollowups = await prisma.lead.count({
       where: {
         assignedToId: agentId,
-        nextFollowupAt: { lt: now }, // Past
+        nextFollowupAt: { lt: now },
         stage: { notIn: ['closed', 'completed', 'lost'] }
       }
     });
 
-    // 2. Get Missed Site Visits (Past date, still scheduled)
     const missedVisits = await prisma.siteVisit.count({
       where: {
         OR: [
@@ -334,7 +396,6 @@ export const getAgentDashboardStats = async (req: AuthRequest, res: Response) =>
       }
     });
 
-    // 3. Get Stagnant Leads (No updates in 7 days, active stage)
     const stagnantLeads = await prisma.lead.count({
       where: {
         assignedToId: agentId,
@@ -343,12 +404,7 @@ export const getAgentDashboardStats = async (req: AuthRequest, res: Response) =>
       }
     });
 
-    return res.json({
-      missedFollowups,
-      missedVisits,
-      stagnantLeads
-    });
-
+    return res.json({ missedFollowups, missedVisits, stagnantLeads });
   } catch (error) {
     console.error('Agent Stats Error:', error);
     return res.status(500).json({ error: 'Failed to fetch agent stats' });

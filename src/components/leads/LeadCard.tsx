@@ -5,16 +5,18 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Input } from "@/components/ui/input";
 import { useToast } from '@/hooks/use-toast';
 import { 
   Phone, Flame, Thermometer, Snowflake, 
-  Home, CalendarPlus, UserCheck, MapPin, Calendar, Building2, Pencil, Wallet, FileText
+  Home, CalendarPlus, UserCheck, MapPin, Calendar, Building2, Pencil, Wallet, FileText,
+  CheckCircle2, MessageCircle, Pin, PinOff
 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { PropertyMatchModal } from './PropertyMatchModal';
 import { ScheduleVisitDialog } from './ScheduleVisitDialog';
 import { QuickCallDialog } from './QuickCallDialog';
-import { Lead } from '@/pages/Leads';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
@@ -30,21 +32,18 @@ interface DisplayProfile {
   avatarUrl?: string | null;
 }
 
-interface LeadCardProps {
-  lead: Lead;
-  profiles?: Profile[];
-  onUpdate: () => void;
-  onEdit?: (lead: Lead) => void;
-}
-
-export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: LeadCardProps) {
+export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
   const { token } = useAuth();
   const { canAssignLeads } = usePermissions();
   const { toast } = useToast();
+  
   const [isReassigning, setIsReassigning] = useState(false);
   const [showPropertyMatch, setShowPropertyMatch] = useState(false);
   const [showScheduleVisit, setShowScheduleVisit] = useState(false);
   const [showQuickCall, setShowQuickCall] = useState(false);
+  
+  const [isLostReasonOpen, setIsLostReasonOpen] = useState(false);
+  const [lostReasonInput, setLostReasonInput] = useState('');
 
   const assignedId = lead.assignedTo?.id || lead.assignedToId;
   
@@ -52,7 +51,7 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: LeadCardProp
   if (lead.assignedTo) {
     assignedProfile = { id: lead.assignedTo.id, fullName: lead.assignedTo.fullName, avatarUrl: lead.assignedTo.avatarUrl };
   } else if (assignedId && profiles.length > 0) {
-    const found = profiles.find(p => p.id === assignedId);
+    const found = profiles.find((p:any) => p.id === assignedId);
     if (found) assignedProfile = { id: found.id, fullName: found.fullName, avatarUrl: null };
   }
 
@@ -80,16 +79,36 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: LeadCardProp
     return 'Budget unset';
   };
 
+  const handlePriorityToggle = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+        await fetch(`${API_URL}/leads/${lead.id}/priority`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        onUpdate();
+    } catch (e) { toast({ title: "Failed", variant: "destructive" }); }
+  };
+
   const handleStageChange = async (newStage: string) => {
+    if (newStage === 'lost') {
+        setIsLostReasonOpen(true);
+        return;
+    }
+    updateStage(newStage);
+  };
+
+  const updateStage = async (stage: string, reason?: string) => {
     try {
       const res = await fetch(`${API_URL}/leads/${lead.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ stage: newStage })
+        body: JSON.stringify({ stage, lostReason: reason })
       });
       if (!res.ok) throw new Error('Failed to update stage');
       
-      toast({ title: 'Updated', description: `Stage changed to ${newStage}` });
+      toast({ title: 'Updated', description: `Stage changed to ${stage}` });
+      setIsLostReasonOpen(false);
       onUpdate();
     } catch (error) {
       toast({ title: 'Error', description: 'Failed to update stage', variant: 'destructive' });
@@ -114,15 +133,30 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: LeadCardProp
     }
   };
 
+  const openWhatsApp = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const cleanPhone = lead.phone.replace(/\D/g, ''); 
+    window.open(`https://wa.me/${cleanPhone}?text=Hello ${lead.name}, I am contacting you regarding your property inquiry.`, '_blank');
+  };
+
   const createdDate = lead.createdAt ? new Date(lead.createdAt) : new Date();
+  const daysOld = Math.floor((Date.now() - createdDate.getTime()) / (1000 * 3600 * 24));
   const nextVisit = lead.siteVisits && lead.siteVisits.length > 0 ? lead.siteVisits[0] : null;
   const visitLocationName = nextVisit?.project?.name || nextVisit?.property?.title || "Site Visit";
+  
+  // Get last call log
+  const lastCall = lead.callLogs && lead.callLogs.length > 0 ? lead.callLogs[0] : null;
 
   return (
     <>
-      <Card className="flex flex-col h-full hover:shadow-lg transition-all duration-200 border-slate-200 group relative overflow-hidden bg-white">
+      <Card className={`flex flex-col h-full hover:shadow-lg transition-all duration-200 border-slate-200 group relative overflow-hidden bg-white ${lead.isPriority ? 'bg-amber-50/20' : ''}`}>
         <div className={`h-1 w-full ${lead.temperature === 'hot' ? 'bg-red-500' : lead.temperature === 'warm' ? 'bg-amber-500' : 'bg-blue-400'}`} />
         
+        {/* Priority Pin */}
+        <button onClick={handlePriorityToggle} className="absolute top-2 right-8 p-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+            {lead.isPriority ? <Pin className="h-4 w-4 text-amber-600 fill-amber-100" /> : <PinOff className="h-4 w-4 text-slate-300 hover:text-slate-500" />}
+        </button>
+
         {onEdit && (
             <Button 
                 variant="ghost" 
@@ -143,10 +177,12 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: LeadCardProp
               <div className="flex items-center gap-2">
                 <h3 className="font-semibold text-sm truncate text-slate-900 pr-4" title={lead.name}>{lead.name}</h3>
                 {getTemperatureIcon(lead.temperature)}
+                {lead.isPriority && <Pin className="h-3 w-3 text-amber-500 fill-amber-500 shrink-0" />}
               </div>
-              <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5 truncate">
-                 {lead.source} • {!isNaN(createdDate.getTime()) ? formatDistanceToNow(createdDate) : 'New'}
-              </p>
+              <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5 truncate">
+                 <Badge variant="outline" className="text-[9px] h-4 px-1">{daysOld}d old</Badge>
+                 <span>• {lead.source}</span>
+              </div>
             </div>
           </div>
 
@@ -164,6 +200,13 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: LeadCardProp
                 <span className="truncate" title={lead.preferredLocation}>{lead.preferredLocation}</span>
               </div>
             )}
+
+            {lastCall && (
+                <div className="flex items-center gap-2 text-[10px] text-slate-500 bg-slate-50 p-1.5 rounded border border-slate-100">
+                    {lastCall.callStatus === 'connected_positive' ? <CheckCircle2 className="h-3 w-3 text-green-500" /> : <Phone className="h-3 w-3 text-blue-500" />}
+                    <span className="truncate">Last call: {lastCall.callStatus.replace('_', ' ')}</span>
+                </div>
+             )}
           </div>
 
           {lead.notes && (
@@ -196,7 +239,26 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: LeadCardProp
             </div>
           )}
 
-          <div className="mt-auto flex items-center justify-between pt-2 border-t border-slate-50">
+          <div className="mt-auto flex items-center justify-between pt-2 border-t border-slate-50 relative">
+            
+            {/* Lost Reason Popover */}
+            <Popover open={isLostReasonOpen} onOpenChange={setIsLostReasonOpen}>
+                <PopoverTrigger asChild><div className="absolute top-0 left-0 w-0 h-0" /></PopoverTrigger>
+                <PopoverContent className="w-64 p-3 z-50 mb-8" side="top">
+                    <h4 className="font-medium text-sm mb-2">Why was this lead lost?</h4>
+                    <Input 
+                        placeholder="Reason (e.g. Budget issue)" 
+                        value={lostReasonInput} 
+                        onChange={(e) => setLostReasonInput(e.target.value)} 
+                        className="h-8 text-xs mb-2"
+                    />
+                    <div className="flex gap-2">
+                        <Button variant="outline" size="sm" className="w-full h-8" onClick={() => { setIsLostReasonOpen(false); }}>Cancel</Button>
+                        <Button size="sm" className="w-full h-8" onClick={() => updateStage('lost', lostReasonInput)}>Confirm</Button>
+                    </div>
+                </PopoverContent>
+            </Popover>
+
             <div onClick={(e) => e.stopPropagation()}>
               <Select value={lead.stage} onValueChange={handleStageChange}>
                 <SelectTrigger className="h-6 w-auto border-0 p-0 text-[10px] font-medium bg-transparent shadow-none gap-1 focus:ring-0">
@@ -210,9 +272,9 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: LeadCardProp
                     <SelectItem value="site_visit">Site Visit</SelectItem>
                     <SelectItem value="negotiation">Negotiation</SelectItem>
                     <SelectItem value="token">Token</SelectItem>
-                    <SelectItem value="closed">Closed</SelectItem>
-                    <SelectItem value="lost">Lost</SelectItem>
                     <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="closed" className="text-red-600">Closed</SelectItem>
+                    <SelectItem value="lost" className="text-slate-500">Lost</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -248,15 +310,19 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: LeadCardProp
           </div>
         </CardContent>
 
-        <CardFooter className="p-0 border-t bg-slate-50/50 grid grid-cols-3 divide-x divide-slate-200">
+        {/* 4-Grid Footer */}
+        <CardFooter className="p-0 border-t bg-slate-50/50 grid grid-cols-4 divide-x divide-slate-200">
            <Button variant="ghost" className="h-9 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowQuickCall(true)}>
-             <Phone className="h-3.5 w-3.5 mr-1" /> <span className="text-[10px]">Call</span>
+             <Phone className="h-3.5 w-3.5" />
+           </Button>
+           <Button variant="ghost" className="h-9 rounded-none text-slate-500 hover:text-green-600 hover:bg-green-50" onClick={openWhatsApp}>
+             <MessageCircle className="h-3.5 w-3.5" />
            </Button>
            <Button variant="ghost" className="h-9 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowPropertyMatch(true)}>
-             <Home className="h-3.5 w-3.5 mr-1" /> <span className="text-[10px]">Match</span>
+             <Home className="h-3.5 w-3.5" />
            </Button>
            <Button variant="ghost" className="h-9 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowScheduleVisit(true)}>
-             <CalendarPlus className="h-3.5 w-3.5 mr-1" /> <span className="text-[10px]">Visit</span>
+             <CalendarPlus className="h-3.5 w-3.5" />
            </Button>
         </CardFooter>
       </Card>

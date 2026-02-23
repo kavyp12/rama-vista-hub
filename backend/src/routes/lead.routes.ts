@@ -1,8 +1,9 @@
+// lead.routes.ts
 import { Router } from 'express';
 import { 
   getLeads, getLead, createLead, updateLead, deleteLead,
-  recommendProperties, logCall, 
-  getAgentDashboardStats
+  recommendProperties, logCall, getAgentDashboardStats,
+  togglePriority, bulkAssign, importLeads
 } from '../controllers/lead.controller';
 import { authenticate } from '../middlewares/auth.middleware';
 
@@ -16,7 +17,11 @@ router.post('/', createLead);
 router.patch('/:id', updateLead);
 router.delete('/:id', deleteLead);
 
-// ✅ NEW ROUTES
+// New Routes
+router.patch('/:id/priority', togglePriority);
+router.post('/bulk-assign', bulkAssign);
+router.post('/import', importLeads);
+
 router.post('/:id/recommendations', recommendProperties);
 router.get('/dashboard/stats', getAgentDashboardStats);
 router.post('/:id/call-logs', logCall);

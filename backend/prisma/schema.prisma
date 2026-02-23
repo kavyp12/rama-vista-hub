@@ -69,6 +69,17 @@ model Lead {
   source                  String
   stage                   LeadStage                @default(new)
   temperature             Temperature              @default(warm)
+  
+  isPriority              Boolean                  @default(false) @map("is_priority")
+  leadScore               Int                      @default(0) @map("lead_score")
+  lostReason              String?                  @map("lost_reason")
+  
+  // --- NEW FIELDS ---
+  agentNotes              String?                  @map("agent_notes")
+  interestLevel           Int?                     @default(5) @map("interest_level")
+  preferredPropertyType   String?                  @map("preferred_property_type")
+  // ------------------
+
   budgetMin               Float?                   @map("budget_min")
   budgetMax               Float?                   @map("budget_max")
   preferredLocation       String?                  @map("preferred_location")
@@ -77,9 +88,11 @@ model Lead {
   assignedToId            String?                  @map("assigned_to")
   createdAt               DateTime                 @default(now()) @map("created_at")
   updatedAt               DateTime                 @updatedAt @map("updated_at")
+  
   projectId               String?                  @map("project_id")
   brokerId                String?                  @map("broker_id")
   lastContactedAt         DateTime?                @map("last_contacted_at")
+  
   callLogs                CallLog[]
   deals                   Deal[]
   documents               Document[]
@@ -93,6 +106,7 @@ model Lead {
 
   @@map("leads")
 }
+
 
 model Property {
   id              String                   @id @default(uuid())
@@ -284,6 +298,11 @@ model CallLog {
   leadId              String     @map("lead_id")
   agentId             String     @map("agent_id")
   callStatus          CallStatus @map("call_status")
+  
+  type                String     @default("call") // 'call' or 'whatsapp'
+  deletedAt           DateTime?  @map("deleted_at")  // Added to prevent data loss
+  isArchived          Boolean?   @default(false) @map("is_archived") // Added to prevent data loss
+
   callDate            DateTime   @default(now()) @map("call_date")
   callDuration        Int?       @map("call_duration")
   notes               String?
@@ -291,8 +310,7 @@ model CallLog {
   rejectionReason     String?    @map("rejection_reason")
   retryCount          Int        @default(0) @map("retry_count")
   createdAt           DateTime   @default(now()) @map("created_at")
-  deletedAt           DateTime?  @map("deleted_at")
-  isArchived          Boolean    @default(false) @map("is_archived")
+  
   agent               User       @relation(fields: [agentId], references: [id])
   lead                Lead       @relation(fields: [leadId], references: [id])
 

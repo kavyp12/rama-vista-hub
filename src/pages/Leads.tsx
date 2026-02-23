@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useAuth, usePermissions } from '@/lib/auth-context';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
@@ -11,16 +11,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { LeadCard } from '@/components/leads/LeadCard'; 
 import { EditLeadDialog } from '@/components/leads/EditLeadDialog'; 
-import { Plus, Search, Users, RefreshCw, MapPin, Filter, X } from 'lucide-react';
+import { Plus, Search, Users, RefreshCw, MapPin, Filter, X, Upload, CheckSquare, UserCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
-const UNITS = {
-  'L': 100000,
-  'Cr': 10000000,
-  'K': 1000
-};
+const UNITS = { 'L': 100000, 'Cr': 10000000, 'K': 1000 };
 
 export interface Lead {
   id: string;
@@ -30,6 +26,9 @@ export interface Lead {
   source: string;
   stage: string;
   temperature: string;
+  isPriority: boolean;
+  leadScore: number;
+  lostReason?: string | null;
   budgetMin: number | null;
   budgetMax: number | null;
   preferredLocation: string | null;
@@ -37,26 +36,18 @@ export interface Lead {
   assignedToId: string | null;
   createdAt: string;
   nextFollowupAt: string | null;
+  lastContactedAt?: string | null;
   assignedTo?: {
     id: string;
     fullName: string;
     email: string;
     avatarUrl?: string | null;
   } | null;
-  siteVisits?: {
-    id: string;
-    scheduledAt: string;
-    status: string;
-    property?: { title: string; location: string } | null;
-    project?: { name: string; location: string } | null;
-  }[];
+  siteVisits?: any[];
+  callLogs?: any[];
 }
 
-interface Agent {
-  id: string;
-  fullName: string;
-  email: string;
-}
+interface Agent { id: string; fullName: string; email: string; }
 
 export default function Leads() {
   const { user, token } = useAuth();
@@ -70,14 +61,18 @@ export default function Leads() {
   const [searchQuery, setSearchQuery] = useState('');
   const [stageFilter, setStageFilter] = useState('active_open');
   const [sourceFilter, setSourceFilter] = useState('all');
+
+  const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
+  const [isBulkAssignOpen, setIsBulkAssignOpen] = useState(false);
+  const [bulkAgentId, setBulkAgentId] = useState('');
   
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [leadToEdit, setLeadToEdit] = useState<Lead | null>(null);
-
   const [isSyncing, setIsSyncing] = useState(false);
-  const [budgetUnit, setBudgetUnit] = useState<'L' | 'Cr' | 'K'>('L');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [budgetUnit, setBudgetUnit] = useState<'L' | 'Cr' | 'K'>('L');
   const [formData, setFormData] = useState({
     name: '', phone: '', email: '', source: 'Website',
     temperature: 'warm', budgetMin: '', budgetMax: '',
@@ -100,7 +95,6 @@ export default function Leads() {
       const data = await res.json();
       if (Array.isArray(data)) setLeads(data);
     } catch (error) {
-      console.error("Error fetching leads:", error);
       toast({ title: 'Error', description: 'Failed to fetch leads', variant: 'destructive' });
     } finally {
       setLoading(false);
@@ -138,13 +132,79 @@ export default function Leads() {
     }
   }
 
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const text = e.target?.result as string;
+      const rows = text.split('\n').slice(1);
+      
+      const parsedLeads = rows.filter(row => row.trim() !== '').map(row => {
+        const [name, phone, email, budget, source] = row.split(',');
+        return {
+          name: name?.trim(),
+          phone: phone?.trim(),
+          email: email?.trim() || undefined,
+          budgetMin: budget ? parseFloat(budget) : undefined,
+          source: source?.trim() || 'Imported'
+        };
+      });
+
+      if (parsedLeads.length === 0) return;
+
+      try {
+        const res = await fetch(`${API_URL}/leads/import`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ leads: parsedLeads })
+        });
+        const data = await res.json();
+        if (data.success) {
+            toast({ title: 'Import Successful', description: `${data.count} leads added.` });
+            fetchData();
+        }
+      } catch (err) {
+        toast({ title: 'Import Failed', variant: 'destructive' });
+      }
+    };
+    reader.readAsText(file);
+    if(fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const toggleSelect = (id: string) => {
+    const newSet = new Set(selectedLeads);
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
+    setSelectedLeads(newSet);
+  };
+
+  const selectAll = () => {
+    if (selectedLeads.size === filteredLeads.length) setSelectedLeads(new Set());
+    else setSelectedLeads(new Set(filteredLeads.map(l => l.id)));
+  };
+
+  const handleBulkAssign = async () => {
+    if (!bulkAgentId) return;
+    try {
+        await fetch(`${API_URL}/leads/bulk-assign`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ leadIds: Array.from(selectedLeads), agentId: bulkAgentId })
+        });
+        toast({ title: 'Bulk Assign', description: 'Leads reassigned successfully.' });
+        setSelectedLeads(new Set());
+        setIsBulkAssignOpen(false);
+        fetchData();
+    } catch (e) { toast({ title: 'Error', variant: 'destructive' }); }
+  };
+
   async function handleCreateLead(e: React.FormEvent) {
     e.preventDefault();
     try {
       const multiplier = UNITS[budgetUnit];
-      const finalAssignedId = formData.assignedToId && formData.assignedToId.trim() !== '' 
-        ? formData.assignedToId 
-        : user?.id;
+      const finalAssignedId = formData.assignedToId && formData.assignedToId.trim() !== '' ? formData.assignedToId : user?.id;
 
       const payload = {
         name: formData.name,
@@ -169,7 +229,6 @@ export default function Leads() {
 
       toast({ title: 'Success', description: 'Lead created successfully' });
       setIsAddDialogOpen(false);
-      
       setFormData({
         name: '', phone: '', email: '', source: 'Website',
         temperature: 'warm', budgetMin: '', budgetMax: '',
@@ -177,63 +236,52 @@ export default function Leads() {
       });
       fetchData();
     } catch (error) {
-      console.error(error);
       toast({ title: 'Error', description: 'Failed to create lead', variant: 'destructive' });
     }
   }
 
-  const handleEditClick = (lead: Lead) => {
-    setLeadToEdit(lead);
-    setIsEditDialogOpen(true);
-  };
-
-  const filteredLeads = leads.filter(lead => {
-    const matchesSearch = 
-      lead.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      lead.phone.includes(searchQuery) ||
-      (lead.email && lead.email.toLowerCase().includes(searchQuery.toLowerCase()));
-
-    let matchesStage = true;
-    if (stageFilter === 'all') {
-      matchesStage = true;
-    } else if (stageFilter === 'active_open') {
-      matchesStage = !['closed', 'lost', 'completed'].includes(lead.stage);
-    } else {
-      matchesStage = lead.stage === stageFilter;
-    }
-
-    const matchesSource = sourceFilter === 'all' ? true : lead.source === sourceFilter;
-
-    return matchesSearch && matchesStage && matchesSource;
-  });
+  const filteredLeads = leads
+    .filter(lead => {
+      const matchesSearch = lead.name.toLowerCase().includes(searchQuery.toLowerCase()) || lead.phone.includes(searchQuery) || (lead.email && lead.email.toLowerCase().includes(searchQuery.toLowerCase()));
+      let matchesStage = true;
+      if (stageFilter === 'active_open') matchesStage = !['closed', 'lost', 'completed'].includes(lead.stage);
+      else if (stageFilter !== 'all') matchesStage = lead.stage === stageFilter;
+      const matchesSource = sourceFilter === 'all' ? true : lead.source === sourceFilter;
+      return matchesSearch && matchesStage && matchesSource;
+    })
+    .sort((a, b) => {
+        if (a.isPriority && !b.isPriority) return -1;
+        if (!a.isPriority && b.isPriority) return 1;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
 
   return (
     <DashboardLayout title="Leads" description={canAssignLeads ? "Manage and track your potential customers" : "My Assigned Leads & Action Items"}>
-      <div className="space-y-4 h-full flex flex-col">
+      <div className="space-y-4 h-full flex flex-col relative">
         
         <div className="flex flex-col gap-4 shrink-0 bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
-          <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
-             <div className="relative w-full sm:w-96">
+          <div className="flex flex-col sm:flex-row gap-4 justify-between items-center">
+             <div className="relative w-full sm:w-80">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input 
-                  placeholder="Search by name, phone, or email..." 
-                  className="pl-10" 
-                  value={searchQuery} 
-                  onChange={(e) => setSearchQuery(e.target.value)} 
-                />
+                <Input placeholder="Search..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
              </div>
              
              <div className="flex gap-2 w-full sm:w-auto">
-                <Button variant="outline" onClick={handleSync} disabled={isSyncing} className="gap-2 border-blue-200 text-blue-700 hover:bg-blue-50">
+                <Button variant="outline" onClick={handleSync} disabled={isSyncing} className="gap-2 border-blue-200 text-blue-700 hover:bg-blue-50 hidden sm:flex">
                   <RefreshCw className={`h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} /> Sync
                 </Button>
 
-                {/* Hide Add Lead for Agents unless they need to create their own leads manually */}
                 {canAssignLeads && (
-                  <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-                    <DialogTrigger asChild>
-                      <Button className="gap-2"><Plus className="h-4 w-4" /> Add Lead</Button>
-                    </DialogTrigger>
+                    <>
+                        <Button variant="outline" className="gap-2" onClick={() => fileInputRef.current?.click()}>
+                            <Upload className="h-4 w-4" /> Import CSV
+                        </Button>
+                        <input type="file" accept=".csv" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
+                    </>
+                )}
+
+                <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+                    <DialogTrigger asChild><Button className="gap-2"><Plus className="h-4 w-4" /> Add Lead</Button></DialogTrigger>
                     <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
                       <DialogHeader>
                         <DialogTitle>Add New Lead</DialogTitle>
@@ -296,35 +344,34 @@ export default function Leads() {
                         </div>
                       </form>
                     </DialogContent>
-                  </Dialog>
-                )}
+                </Dialog>
              </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-100">
-             <div className="flex items-center gap-2">
-                <Filter className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium text-slate-700">Filter By:</span>
-             </div>
-
+          <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
+             {canAssignLeads && (
+                <Button variant="ghost" size="sm" onClick={selectAll} className="gap-2">
+                    <CheckSquare className={`h-4 w-4 ${selectedLeads.size > 0 ? 'text-blue-600' : 'text-slate-400'}`} />
+                    {selectedLeads.size === filteredLeads.length && filteredLeads.length > 0 ? 'Deselect All' : 'Select All'}
+                </Button>
+             )}
+             
              <div className="w-[180px]">
                <Select value={stageFilter} onValueChange={setStageFilter}>
                  <SelectTrigger className="h-8 text-xs bg-slate-50 border-slate-200">
-                   <div className="flex gap-2">
+                    <div className="flex gap-2">
                      <span className="text-muted-foreground">Status:</span>
                      <SelectValue />
                    </div>
                  </SelectTrigger>
                  <SelectContent>
-                   <SelectItem value="all" className="font-bold">All Leads</SelectItem>
-                   <SelectItem value="active_open" className="font-bold text-blue-600">Active (Open)</SelectItem>
-                   <div className="h-px bg-slate-100 my-1" />
+                   <SelectItem value="active_open">Active (Open)</SelectItem>
+                   <SelectItem value="all">All Leads</SelectItem>
                    <SelectItem value="new">New</SelectItem>
                    <SelectItem value="contacted">Contacted</SelectItem>
                    <SelectItem value="site_visit">Site Visit</SelectItem>
                    <SelectItem value="negotiation">Negotiation</SelectItem>
                    <SelectItem value="token">Token</SelectItem>
-                   <div className="h-px bg-slate-100 my-1" />
                    <SelectItem value="closed" className="text-red-600">Closed</SelectItem>
                    <SelectItem value="lost" className="text-slate-500">Lost</SelectItem>
                    <SelectItem value="completed" className="text-green-600">Completed</SelectItem>
@@ -352,23 +399,34 @@ export default function Leads() {
              </div>
 
              {(stageFilter !== 'active_open' || sourceFilter !== 'all' || searchQuery) && (
-               <Button 
-                 variant="ghost" 
-                 size="sm" 
-                 onClick={() => { setStageFilter('active_open'); setSourceFilter('all'); setSearchQuery(''); }}
-                 className="h-8 px-2 text-xs text-muted-foreground hover:text-red-600"
-               >
+               <Button variant="ghost" size="sm" onClick={() => { setStageFilter('active_open'); setSourceFilter('all'); setSearchQuery(''); }} className="h-8 px-2 text-xs text-muted-foreground hover:text-red-600">
                  <X className="h-3 w-3 mr-1" /> Clear
                </Button>
              )}
-
-             <div className="ml-auto">
-               <Badge variant="secondary" className="text-[10px] font-normal text-slate-500">
-                 Results: {filteredLeads.length}
-               </Badge>
-             </div>
           </div>
         </div>
+
+        {selectedLeads.size > 0 && canAssignLeads && (
+            <div className="bg-blue-600 text-white p-3 rounded-lg flex items-center justify-between shadow-lg animate-in slide-in-from-bottom-2 z-10 sticky top-2">
+                <span className="font-semibold text-sm ml-2">{selectedLeads.size} leads selected</span>
+                <div className="flex gap-2">
+                    <Dialog open={isBulkAssignOpen} onOpenChange={setIsBulkAssignOpen}>
+                        <DialogTrigger asChild>
+                            <Button size="sm" variant="secondary" className="gap-2"><UserCheck className="h-4 w-4" /> Assign Agent</Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                            <DialogHeader><DialogTitle>Bulk Assign</DialogTitle></DialogHeader>
+                            <Select value={bulkAgentId} onValueChange={setBulkAgentId}>
+                                <SelectTrigger><SelectValue placeholder="Select Agent" /></SelectTrigger>
+                                <SelectContent>{agents.map(a => <SelectItem key={a.id} value={a.id}>{a.fullName}</SelectItem>)}</SelectContent>
+                            </Select>
+                            <Button onClick={handleBulkAssign} className="w-full mt-4">Confirm Assignment</Button>
+                        </DialogContent>
+                    </Dialog>
+                    <Button size="sm" variant="ghost" className="text-white hover:bg-blue-700" onClick={() => setSelectedLeads(new Set())}><X className="h-4 w-4" /></Button>
+                </div>
+            </div>
+        )}
 
         <div className="flex-1 overflow-y-auto pb-6">
           {loading ? (
@@ -380,10 +438,7 @@ export default function Leads() {
               <CardContent className="flex flex-col items-center justify-center py-16">
                 <Users className="h-12 w-12 text-muted-foreground/50 mb-4" />
                 <h3 className="text-lg font-semibold text-slate-700">No leads found</h3>
-                <p className="text-sm text-muted-foreground mb-4">You do not have any leads assigned matching these filters.</p>
-                <Button variant="outline" onClick={() => { setStageFilter('all'); setSearchQuery(''); }}>
-                  View All Leads
-                </Button>
+                <p className="text-sm text-muted-foreground mb-4">You do not have any leads matching these filters.</p>
               </CardContent>
             </Card>
           ) : (
@@ -394,7 +449,9 @@ export default function Leads() {
                   lead={lead} 
                   profiles={agents} 
                   onUpdate={fetchData} 
-                  onEdit={handleEditClick} 
+                  onEdit={(l) => { setLeadToEdit(l); setIsEditDialogOpen(true); }}
+                  selected={selectedLeads.has(lead.id)}
+                  onSelect={canAssignLeads ? () => toggleSelect(lead.id) : undefined}
                 />
               ))}
             </div>
