@@ -218,12 +218,26 @@ export default function Team() {
   async function handleCreateUser() {
     setIsSubmitting(true);
     try {
+      const payload = {
+        ...formData,
+        avatarUrl: formData.avatarUrl || null,
+        phone: formData.phone || null
+      };
       const res = await fetch(`${API_URL}/users`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(payload)
       });
-      if (!res.ok) throw new Error((await res.json()).error || 'Failed to create');
+      if (!res.ok) {
+        const errorData = await res.json();
+        let errorMessage = 'Failed to create';
+        if (Array.isArray(errorData.error)) {
+          errorMessage = errorData.error.map((e: any) => `${e.path?.join('.') || 'Field'}: ${e.message}`).join(', ');
+        } else if (errorData.error) {
+          errorMessage = errorData.error;
+        }
+        throw new Error(errorMessage);
+      }
       toast({ title: 'Success', description: 'Created successfully' });
       setIsAddDialogOpen(false);
       setFormData({ email: '', password: '', fullName: '', phone: '', role: 'sales_agent', avatarUrl: '' });
@@ -237,13 +251,28 @@ export default function Team() {
     setIsSubmitting(true);
     try {
       // Included phone in update payload
-      const updateData = { email: formData.email, fullName: formData.fullName, phone: formData.phone, role: formData.role, avatarUrl: formData.avatarUrl || null };
+      const updateData = { 
+        email: formData.email, 
+        fullName: formData.fullName, 
+        phone: formData.phone || null, 
+        role: formData.role, 
+        avatarUrl: formData.avatarUrl || null 
+      };
       const res = await fetch(`${API_URL}/users/${selectedUser.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify(updateData)
       });
-      if (!res.ok) throw new Error((await res.json()).error || 'Failed to update');
+      if (!res.ok) {
+        const errorData = await res.json();
+        let errorMessage = 'Failed to update';
+        if (Array.isArray(errorData.error)) {
+          errorMessage = errorData.error.map((e: any) => `${e.path?.join('.') || 'Field'}: ${e.message}`).join(', ');
+        } else if (errorData.error) {
+          errorMessage = errorData.error;
+        }
+        throw new Error(errorMessage);
+      }
       toast({ title: 'Success', description: 'Updated successfully' });
       setIsEditDialogOpen(false);
       fetchUsers();
