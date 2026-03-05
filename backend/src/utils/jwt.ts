@@ -1,7 +1,20 @@
 import * as jwt from 'jsonwebtoken';
+import * as crypto from 'crypto';
 
-const ACCESS_TOKEN_SECRET = process.env.JWT_ACCESS_SECRET || 'your-access-secret-key';
-const REFRESH_TOKEN_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key';
+// ✅ FIX G8: Never use hardcoded fallback strings — they allow anyone to forge JWT tokens.
+// In production, throw if the secret is not configured. In dev, use a random per-process secret.
+function getSecret(envVar: string): string {
+  const val = process.env[envVar];
+  if (val) return val;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(`FATAL: Environment variable ${envVar} is required in production`);
+  }
+  // Development only: generate a random secret per process start
+  return crypto.randomBytes(32).toString('hex');
+}
+
+const ACCESS_TOKEN_SECRET = getSecret('JWT_ACCESS_SECRET');
+const REFRESH_TOKEN_SECRET = getSecret('JWT_REFRESH_SECRET');
 
 export const generateTokens = (userId: string) => {
   const accessToken = jwt.sign(

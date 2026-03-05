@@ -59,10 +59,10 @@ export const getSiteVisits = async (req: AuthRequest, res: Response) => {
       where,
       include: {
         lead: {
-          select: { 
-            id: true, name: true, phone: true, stage: true, 
-            temperature: true, assignedToId: true, 
-            budgetMin: true, budgetMax: true, preferredLocation: true 
+          select: {
+            id: true, name: true, phone: true, stage: true,
+            temperature: true, assignedToId: true,
+            budgetMin: true, budgetMax: true, preferredLocation: true
           }
         },
         property: {
@@ -110,12 +110,12 @@ export const getSiteVisit = async (req: AuthRequest, res: Response) => {
 
     // SECURITY CHECK for Agents
     if (role === 'sales_agent') {
-       const isConductor = visit.conductedBy === userId;
-       const isLeadOwner = visit.lead.assignedToId === userId;
-       
-       if (!isConductor && !isLeadOwner) {
-         return res.status(403).json({ error: 'Access denied: You cannot view this site visit.' });
-       }
+      const isConductor = visit.conductedBy === userId;
+      const isLeadOwner = visit.lead.assignedToId === userId;
+
+      if (!isConductor && !isLeadOwner) {
+        return res.status(403).json({ error: 'Access denied: You cannot view this site visit.' });
+      }
     }
 
     return res.json(visit);
@@ -157,23 +157,23 @@ export const createSiteVisit = async (req: AuthRequest, res: Response) => {
     });
 
     if (['new', 'contacted'].includes(lead.stage)) {
-        await prisma.lead.update({
-            where: { id: lead.id },
-            data: { 
-                stage: 'site_visit',
-                temperature: lead.temperature === 'cold' ? 'warm' : lead.temperature 
-            }
-        });
+      await prisma.lead.update({
+        where: { id: lead.id },
+        data: {
+          stage: 'site_visit',
+          temperature: lead.temperature === 'cold' ? 'warm' : lead.temperature
+        }
+      });
     }
 
     await prisma.activityLog.create({
-        data: {
-            userId: userId,
-            action: 'site_visit_scheduled',
-            entityType: 'site_visit',
-            entityId: visit.id,
-            details: { leadName: lead.name, scheduledAt: data.scheduledAt }
-        }
+      data: {
+        userId: userId,
+        action: 'site_visit_scheduled',
+        entityType: 'site_visit',
+        entityId: visit.id,
+        details: { leadName: lead.name, scheduledAt: data.scheduledAt }
+      }
     });
 
     return res.status(201).json(visit);
@@ -193,7 +193,7 @@ export const updateSiteVisit = async (req: AuthRequest, res: Response) => {
     const userId = req.user!.userId;
     const role = req.user!.role;
 
-    const existingVisit = await prisma.siteVisit.findUnique({ where: { id } });
+    const existingVisit = await prisma.siteVisit.findUnique({ where: { id }, include: { lead: true } });
     if (!existingVisit) return res.status(404).json({ error: 'Visit not found' });
 
     if (role === 'sales_agent' && existingVisit.conductedBy !== userId) {
@@ -205,6 +205,32 @@ export const updateSiteVisit = async (req: AuthRequest, res: Response) => {
       data,
       include: { lead: true }
     });
+
+    // ✅ FIX C5: Create activity log for visit status changes so the activity timeline is accurate
+    if (data.status) {
+      const actionMap: Record<string, string> = {
+        completed: 'site_visit_completed',
+        rescheduled: 'site_visit_rescheduled',
+        cancelled: 'site_visit_cancelled',
+        scheduled: 'site_visit_scheduled'
+      };
+      const action = actionMap[data.status] || 'site_visit_updated';
+
+      await prisma.activityLog.create({
+        data: {
+          userId,
+          action,
+          entityType: 'site_visit',
+          entityId: id,
+          details: {
+            leadName: existingVisit.lead?.name,
+            status: data.status,
+            rating: data.rating,
+            scheduledAt: existingVisit.scheduledAt
+          }
+        }
+      });
+    }
 
     return res.json(updatedVisit);
   } catch (error) {
@@ -220,9 +246,9 @@ export const deleteSiteVisit = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     if (req.user!.role === 'sales_agent') {
-        return res.status(403).json({ error: 'Agents cannot delete records. Please mark as Cancelled instead.' });
+      return res.status(403).json({ error: 'Agents cannot delete records. Please mark as Cancelled instead.' });
     }
-    
+
     await prisma.siteVisit.delete({ where: { id } });
     return res.json({ message: 'Site visit deleted successfully' });
   } catch (error) {

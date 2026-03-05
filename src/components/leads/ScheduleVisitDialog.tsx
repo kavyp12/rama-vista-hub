@@ -26,11 +26,11 @@ function SearchableSelect({ options, value, onChange, placeholder = "Select...",
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const filteredOptions = options.filter((opt:any) => 
+  const filteredOptions = options.filter((opt: any) =>
     (opt.label || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
-  
-  const selectedLabel = options.find((opt:any) => opt.value === value)?.label;
+
+  const selectedLabel = options.find((opt: any) => opt.value === value)?.label;
 
   return (
     <div className="relative" ref={wrapperRef}>
@@ -61,7 +61,7 @@ function SearchableSelect({ options, value, onChange, placeholder = "Select...",
             {filteredOptions.length === 0 ? (
               <div className="py-6 text-center text-sm text-muted-foreground">No options found.</div>
             ) : (
-              filteredOptions.map((option:any) => (
+              filteredOptions.map((option: any) => (
                 <div
                   key={option.value}
                   className={cn(
@@ -89,15 +89,15 @@ function SearchableSelect({ options, value, onChange, placeholder = "Select...",
 export function ScheduleVisitDialog({ lead, open, onOpenChange, onSuccess }: any) {
   const { user, token } = useAuth();
   const { toast } = useToast();
-  
+
   const [allProperties, setAllProperties] = useState<any[]>([]);
   const [projects, setProjects] = useState<{ value: string; label: string }[]>([]);
   const [agents, setAgents] = useState<{ value: string; label: string }[]>([]);
-  
+
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [isSuccessState, setIsSuccessState] = useState(false);
-  
+
   const [selectedProject, setSelectedProject] = useState('');
   const [selectedProperty, setSelectedProperty] = useState('');
   const [selectedAgent, setSelectedAgent] = useState('');
@@ -137,23 +137,38 @@ export function ScheduleVisitDialog({ lead, open, onOpenChange, onSuccess }: any
     }
   }, [selectedProject, allProperties]);
 
-  // Conflict Checker
+  // ✅ FIX H2: Real conflict check — query the actual site-visits for the selected agent and date
   useEffect(() => {
     async function checkConflicts() {
-      if (!visitDate || !selectedAgent || !token) {
-          setConflictWarning('');
-          return;
+      if (!visitDate || !visitTime || !selectedAgent || !token) {
+        setConflictWarning('');
+        return;
       }
       try {
-          const res = await fetch(`${API_URL}/leads/dashboard/stats`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          // Note: Full conflict check needs a dedicated endpoint. For UI simulation based on requirements:
-          // We will mock a conflict if time is specifically "12:00" for demo, or assume safe.
-          // Ideally you'd call a `/users/${selectedAgent}/schedule?date=${visitDate}` here.
-          if (visitTime === '10:00') setConflictWarning('Warning: Agent may have overlapping visits at this time.');
-          else setConflictWarning('');
-      } catch(e) {}
+        const res = await fetch(`${API_URL}/site-visits`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) return;
+        const allVisits: any[] = await res.json();
+
+        const proposedTime = new Date(`${visitDate}T${visitTime}`).getTime();
+        const ONE_HOUR = 60 * 60 * 1000;
+
+        const conflicts = allVisits.filter(v => {
+          if (v.conductedBy !== selectedAgent) return false;
+          if (v.status === 'cancelled' || v.status === 'rescheduled') return false;
+          const vTime = new Date(v.scheduledAt).getTime();
+          return Math.abs(vTime - proposedTime) < ONE_HOUR;
+        });
+
+        if (conflicts.length > 0) {
+          setConflictWarning(`⚠️ Agent already has ${conflicts.length} visit(s) within 1 hour of this time.`);
+        } else {
+          setConflictWarning('');
+        }
+      } catch (e) {
+        // Silently fail — conflict check is non-critical
+      }
     }
     checkConflicts();
   }, [visitDate, visitTime, selectedAgent]);
@@ -203,7 +218,7 @@ export function ScheduleVisitDialog({ lead, open, onOpenChange, onSuccess }: any
 
       toast({ title: 'Success', description: `Site visit scheduled.` });
       setIsSuccessState(true);
-      onSuccess(); 
+      onSuccess();
     } catch (error: any) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } finally {
@@ -217,42 +232,42 @@ export function ScheduleVisitDialog({ lead, open, onOpenChange, onSuccess }: any
   }
 
   const exportToCalendar = () => {
-      const d = new Date(`${visitDate}T${visitTime}`);
-      const endD = new Date(d.getTime() + 60 * 60 * 1000); // 1 hr
-      
-      const formatGDate = (date: Date) => date.toISOString().replace(/-|:|\.\d\d\d/g, "");
-      const location = projects.find(p => p.value === selectedProject)?.label || "Site";
-      const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=Site+Visit+-+${encodeURIComponent(lead.name)}&dates=${formatGDate(d)}/${formatGDate(endD)}&details=Lead+Phone:+${lead.phone}&location=${encodeURIComponent(location)}`;
-      window.open(gcalUrl, '_blank');
+    const d = new Date(`${visitDate}T${visitTime}`);
+    const endD = new Date(d.getTime() + 60 * 60 * 1000); // 1 hr
+
+    const formatGDate = (date: Date) => date.toISOString().replace(/-|:|\.\d\d\d/g, "");
+    const location = projects.find(p => p.value === selectedProject)?.label || "Site";
+    const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=Site+Visit+-+${encodeURIComponent(lead.name)}&dates=${formatGDate(d)}/${formatGDate(endD)}&details=Lead+Phone:+${lead.phone}&location=${encodeURIComponent(location)}`;
+    window.open(gcalUrl, '_blank');
   };
 
   const sendWAConfirmation = () => {
-      const dateStr = format(new Date(`${visitDate}T${visitTime}`), 'MMM d, h:mm a');
-      const location = projects.find(p => p.value === selectedProject)?.label || "our project site";
-      const msg = `Hi ${lead.name}, your site visit is confirmed for ${dateStr} at ${location}. See you there!`;
-      const cleanPhone = lead.phone.replace(/\D/g, '');
-      window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+    const dateStr = format(new Date(`${visitDate}T${visitTime}`), 'MMM d, h:mm a');
+    const location = projects.find(p => p.value === selectedProject)?.label || "our project site";
+    const msg = `Hi ${lead.name}, your site visit is confirmed for ${dateStr} at ${location}. See you there!`;
+    const cleanPhone = lead.phone.replace(/\D/g, '');
+    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
   if (isSuccessState) {
-      return (
-        <Dialog open={open} onOpenChange={(val) => { resetForm(); onOpenChange(val); }}>
-          <DialogContent className="sm:max-w-md text-center py-10">
-            <Check className="h-16 w-16 text-green-500 mx-auto mb-4 bg-green-100 rounded-full p-2" />
-            <DialogTitle className="text-xl">Visit Scheduled Successfully!</DialogTitle>
-            <p className="text-muted-foreground mb-6">What would you like to do next?</p>
-            <div className="flex flex-col gap-3">
-               <Button className="bg-green-600 hover:bg-green-700" onClick={sendWAConfirmation}>
-                  <MessageCircle className="h-4 w-4 mr-2" /> Send WhatsApp Confirmation
-               </Button>
-               <Button variant="outline" onClick={exportToCalendar}>
-                  <CalendarPlus className="h-4 w-4 mr-2" /> Add to Google Calendar
-               </Button>
-               <Button variant="ghost" onClick={() => { resetForm(); onOpenChange(false); }}>Close</Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )
+    return (
+      <Dialog open={open} onOpenChange={(val) => { resetForm(); onOpenChange(val); }}>
+        <DialogContent className="sm:max-w-md text-center py-10">
+          <Check className="h-16 w-16 text-green-500 mx-auto mb-4 bg-green-100 rounded-full p-2" />
+          <DialogTitle className="text-xl">Visit Scheduled Successfully!</DialogTitle>
+          <p className="text-muted-foreground mb-6">What would you like to do next?</p>
+          <div className="flex flex-col gap-3">
+            <Button className="bg-green-600 hover:bg-green-700" onClick={sendWAConfirmation}>
+              <MessageCircle className="h-4 w-4 mr-2" /> Send WhatsApp Confirmation
+            </Button>
+            <Button variant="outline" onClick={exportToCalendar}>
+              <CalendarPlus className="h-4 w-4 mr-2" /> Add to Google Calendar
+            </Button>
+            <Button variant="ghost" onClick={() => { resetForm(); onOpenChange(false); }}>Close</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    )
   }
 
   return (
@@ -274,11 +289,11 @@ export function ScheduleVisitDialog({ lead, open, onOpenChange, onSuccess }: any
               <Input type="time" value={visitTime} onChange={(e) => setVisitTime(e.target.value)} />
             </div>
           </div>
-          
+
           {conflictWarning && (
-             <div className="flex items-center gap-2 p-2 bg-amber-50 text-amber-700 rounded text-xs border border-amber-200">
-                <AlertTriangle className="h-4 w-4" /> {conflictWarning}
-             </div>
+            <div className="flex items-center gap-2 p-2 bg-amber-50 text-amber-700 rounded text-xs border border-amber-200">
+              <AlertTriangle className="h-4 w-4" /> {conflictWarning}
+            </div>
           )}
 
           <div className="space-y-2">

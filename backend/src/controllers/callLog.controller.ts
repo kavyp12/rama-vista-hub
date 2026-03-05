@@ -18,22 +18,25 @@ const createCallLogSchema = z.object({
 export const initiateMcubeCall = async (req: AuthRequest, res: Response) => {
   try {
     const { leadPhone } = req.body;
-    
+
     // Find the current agent's phone number
     const agent = await prisma.user.findUnique({ where: { id: req.user!.userId } });
     if (!agent || !agent.phone) {
       return res.status(400).json({ error: 'Agent phone number not found in database' });
     }
 
-    // Your MCUBE token (Store this in your .env file)
-    const mcubeToken = process.env.MCUBE_TOKEN || 'YOUR_MCUBE_TOKEN'; 
+    // ✅ FIX G9: Throw if MCUBE_TOKEN is not configured — never silently use placeholder
+    const mcubeToken = process.env.MCUBE_TOKEN;
+    if (!mcubeToken) {
+      return res.status(503).json({ error: 'MCUBE dialer not configured. Please set MCUBE_TOKEN in environment variables.' });
+    }
 
     // Make the request to MCUBE Outbound API
     const response = await axios.post('https://api.mcube.com/Restmcube-api/outbound-calls', {
       HTTP_AUTHORIZATION: mcubeToken,
-      exenumber: agent.phone,     
-      custnumber: leadPhone,      
-      refurl: "1"                 
+      exenumber: agent.phone,
+      custnumber: leadPhone,
+      refurl: "1"
     }, {
       headers: { 'Content-Type': 'application/json' }
     });
@@ -48,37 +51,48 @@ export const initiateMcubeCall = async (req: AuthRequest, res: Response) => {
 // --- NEW FUNCTION 2: RECEIVE CALL DATA FROM MCUBE (WEBHOOK) ---
 export const mcubeWebhook = async (req: Request, res: Response) => {
   try {
-    const callData = req.body; 
-    
+    const callData = req.body;
+
     // Extract MCUBE payload data based on their docs
     const { callto, emp_phone, dialstatus, filename, answeredtime, callid } = callData;
+
+    // ✅ FIX C3: Guard against missing / too-short phone fields
+    // Always respond 200 first so MCUBE doesn't retry on validation failures
+    if (!callto || typeof callto !== 'string' || callto.length < 10) {
+      console.warn('MCUBE Webhook: invalid or missing callto field', callData);
+      return res.status(200).send('Webhook received (invalid callto)');
+    }
+    if (!emp_phone || typeof emp_phone !== 'string' || emp_phone.length < 10) {
+      console.warn('MCUBE Webhook: invalid or missing emp_phone field', callData);
+      return res.status(200).send('Webhook received (invalid emp_phone)');
+    }
 
     // 1. Find Lead and Agent by phone number (using contains to handle +91 formatting differences)
     const lead = await prisma.lead.findFirst({ where: { phone: { contains: callto.slice(-10) } } });
     const agent = await prisma.user.findFirst({ where: { phone: { contains: emp_phone.slice(-10) } } });
 
+    // ✅ FIX C3: Return 200 (not 404) so MCUBE doesn't retry when lead/agent isn't in CRM
     if (!lead || !agent) {
-      return res.status(404).json({ error: 'Lead or Agent not found' });
+      console.warn('MCUBE Webhook: Lead or Agent not found for phones', { callto, emp_phone });
+      return res.status(200).send('Webhook received (lead or agent not found in CRM)');
     }
 
     // 2. Map MCUBE dialstatus to CRM status
-    // 2. Map MCUBE dialstatus to CRM status
-    // Explicitly typing it satisfies Prisma's enum requirement
     let mappedStatus: "not_connected" | "connected_positive" = "not_connected";
-    
+
     if (dialstatus === 'ANSWER') {
-        mappedStatus = "connected_positive"; 
+      mappedStatus = "connected_positive";
     } else if (dialstatus === 'Busy' || dialstatus === 'NoAnswer' || dialstatus === 'CANCEL') {
-        mappedStatus = "not_connected";
+      mappedStatus = "not_connected";
     }
 
     // Convert answeredtime (e.g., "00:00:04") to seconds
     let durationInSeconds = null;
     if (answeredtime) {
-        const parts = answeredtime.split(':');
-        if(parts.length === 3) {
-            durationInSeconds = (+parts[0]) * 60 * 60 + (+parts[1]) * 60 + (+parts[2]); 
-        }
+      const parts = answeredtime.split(':');
+      if (parts.length === 3) {
+        durationInSeconds = (+parts[0]) * 60 * 60 + (+parts[1]) * 60 + (+parts[2]);
+      }
     }
 
     // 3. Auto-create the call log
@@ -107,11 +121,12 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
       });
     }
 
-    // MUST return 200 OK so MCUBE knows it was received
+    // ✅ MUST return 200 OK so MCUBE knows it was received
     return res.status(200).send('Webhook processed successfully');
   } catch (error) {
     console.error('MCUBE Webhook Error:', error);
-    return res.status(500).send('Webhook processing failed');
+    // ✅ FIX C3: Always return 200 even on internal errors to prevent MCUBE retries
+    return res.status(200).send('Webhook received (internal error during processing)');
   }
 };
 
@@ -197,7 +212,7 @@ export const createCallLog = async (req: AuthRequest, res: Response) => {
 
 export const getCallLogs = async (req: AuthRequest, res: Response) => {
   try {
-    const { leadId, view, search } = req.query; 
+    const { leadId, view, search } = req.query;
 
     const where: any = { deletedAt: null };
     if (leadId) where.leadId = leadId;
@@ -217,9 +232,9 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
       case 'qualified': where.callStatus = 'connected_positive'; break;
       case 'unqualified': where.callStatus = 'not_interested'; break;
       case 'archive': where.isArchived = true; break;
-      case 'deleted': 
-        delete where.deletedAt; 
-        where.deletedAt = { not: null }; 
+      case 'deleted':
+        delete where.deletedAt;
+        where.deletedAt = { not: null };
         break;
       default: break;
     }
@@ -270,22 +285,41 @@ export const getCallStats = async (req: AuthRequest, res: Response) => {
 };
 
 export const updateCallLog = async (req: AuthRequest, res: Response) => {
-    try {
-        const { id } = req.params;
-        const data = req.body;
-        const updatedLog = await prisma.callLog.update({ where: { id }, data });
-        return res.json(updatedLog);
-    } catch (error) {
-        return res.status(500).json({ error: 'Failed to update call log' });
+  try {
+    const { id } = req.params;
+    const userId = req.user!.userId;
+    const role = req.user!.role;
+
+    // ✅ FIX H8: Only allow updating safe fields — never allow leadId/agentId/callDate overwrites
+    const updateSchema = z.object({
+      notes: z.string().optional().nullable(),
+      isArchived: z.boolean().optional(),
+      callStatus: z.enum(['connected_positive', 'connected_callback', 'not_connected', 'not_interested']).optional()
+    });
+    const data = updateSchema.parse(req.body);
+
+    // ✅ FIX H8: Authorization — agents can only edit their own call logs
+    const existing = await prisma.callLog.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ error: 'Call log not found' });
+
+    if (role === 'sales_agent' && existing.agentId !== userId) {
+      return res.status(403).json({ error: 'You can only update your own call logs.' });
     }
+
+    const updatedLog = await prisma.callLog.update({ where: { id }, data });
+    return res.json(updatedLog);
+  } catch (error) {
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
+    return res.status(500).json({ error: 'Failed to update call log' });
+  }
 };
 
 export const deleteCallLog = async (req: AuthRequest, res: Response) => {
-    try {
-        const { id } = req.params;
-        await prisma.callLog.update({ where: { id }, data: { deletedAt: new Date() } });
-        return res.json({ success: true, message: 'Call log moved to trash' });
-    } catch (error) {
-        return res.status(500).json({ error: 'Failed to delete call log' });
-    }
+  try {
+    const { id } = req.params;
+    await prisma.callLog.update({ where: { id }, data: { deletedAt: new Date() } });
+    return res.json({ success: true, message: 'Call log moved to trash' });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to delete call log' });
+  }
 };

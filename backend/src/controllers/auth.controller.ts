@@ -10,7 +10,9 @@ export const register = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const { email, password, fullName, role } = req.body;
+    // ✅ FIX G5: Do NOT accept 'role' from request body — always default to 'sales_agent'
+    // This prevents anyone from self-registering as 'admin' via a direct API call.
+    const { email, password, fullName } = req.body;
 
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({
@@ -25,13 +27,13 @@ export const register = async (
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    // Create user
+    // Create user — role is always 'sales_agent' for public registration
     const user = await prisma.user.create({
       data: {
         email,
         password: hashedPassword,
         fullName,
-        role: role || 'sales_agent'
+        role: 'sales_agent'
       },
       select: {
         id: true,
@@ -49,7 +51,7 @@ export const register = async (
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: 'lax', // ✅ FIX G15: 'strict' blocks cross-origin cookies — breaks refresh in dev
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
 
@@ -97,7 +99,7 @@ export const login = async (
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: 'lax', // ✅ FIX G15: 'strict' blocks cross-origin cookies — breaks refresh in dev
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
 

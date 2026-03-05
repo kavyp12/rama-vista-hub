@@ -143,14 +143,14 @@ export default function SiteVisits() {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      
+
       if (res.ok && Array.isArray(data)) {
-        const sortedData = data.sort((a, b) => 
+        const sortedData = data.sort((a, b) =>
           new Date(b.createdAt || b.scheduledAt).getTime() - new Date(a.createdAt || a.scheduledAt).getTime()
         );
         setVisits(sortedData);
         calculateStats(sortedData);
-        
+
         const todayDate = format(new Date(), 'yyyy-MM-dd');
         setExpandedDates(new Set([todayDate]));
       }
@@ -180,17 +180,17 @@ export default function SiteVisits() {
     const tomorrowVisits = visitsData.filter(v => isTomorrow(parseISO(v.scheduledAt)));
     const weekStart = startOfWeek(now);
     const weekEnd = endOfWeek(now);
-    const weekVisits = visitsData.filter(v => 
+    const weekVisits = visitsData.filter(v =>
       isWithinInterval(parseISO(v.scheduledAt), { start: weekStart, end: weekEnd })
     );
-    
-    const missedVisits = visitsData.filter(v => 
+
+    const missedVisits = visitsData.filter(v =>
       v.status === 'scheduled' && isPast(parseISO(v.scheduledAt)) && !isToday(parseISO(v.scheduledAt))
     );
 
     const completedVisits = visitsData.filter(v => v.status === 'completed');
     const ratingsSum = completedVisits.reduce((sum, v) => sum + (v.rating || 0), 0);
-    
+
     setStats({
       total: visitsData.length,
       scheduled: visitsData.filter(v => v.status === 'scheduled').length,
@@ -211,7 +211,7 @@ export default function SiteVisits() {
 
     let filtered = visits.filter(visit => {
       const visitDate = parseISO(visit.scheduledAt);
-      
+
       // Tab filter
       switch (activeTab) {
         case 'missed':
@@ -301,7 +301,7 @@ export default function SiteVisits() {
     // Sorting
     filtered.sort((a, b) => {
       let comparison = 0;
-      
+
       switch (sortBy) {
         case 'date':
           comparison = new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime();
@@ -352,7 +352,7 @@ export default function SiteVisits() {
   function setQuickTime(type: string) {
     const now = new Date();
     let newDate;
-    
+
     switch (type) {
       case 'later_today':
         newDate = addHours(now, 3);
@@ -368,7 +368,7 @@ export default function SiteVisits() {
       default:
         return;
     }
-    
+
     setRescheduleDate(format(newDate, "yyyy-MM-dd'T'HH:mm"));
   }
 
@@ -431,7 +431,7 @@ export default function SiteVisits() {
             body: JSON.stringify({
               stage: nextStage,
               temperature: nextStage === 'token' || nextStage === 'negotiation' ? 'hot' :
-                           nextStage === 'lost' ? 'cold' : undefined
+                nextStage === 'lost' ? 'cold' : undefined
             })
           });
         }
@@ -440,11 +440,11 @@ export default function SiteVisits() {
           toast({ title: 'Date Required', description: 'Please select a new date/time', variant: 'destructive' });
           return;
         }
-        
+
         payload.status = 'rescheduled';
         payload.scheduledAt = new Date(rescheduleDate).toISOString();
-        payload.feedback = feedbackNotes ? 
-          `${selectedVisit.feedback || ''}\n[Rescheduled]: ${feedbackNotes}` : 
+        payload.feedback = feedbackNotes ?
+          `${selectedVisit.feedback || ''}\n[Rescheduled]: ${feedbackNotes}` :
           selectedVisit.feedback;
       }
 
@@ -468,7 +468,7 @@ export default function SiteVisits() {
       setShowActionDialog(false);
       resetForm();
       fetchVisits();
-      
+
     } catch (error: any) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } finally {
@@ -512,7 +512,7 @@ export default function SiteVisits() {
   return (
     <DashboardLayout title="Site Visits" description="Manage property viewing appointments">
       <div className="space-y-6">
-        
+
         {/* Stats Overview */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
           <Card className="hover-lift cursor-pointer" onClick={() => setActiveTab('today')}>
@@ -636,7 +636,7 @@ export default function SiteVisits() {
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label className="text-xs">Status</Label>
-                        <Select value={advancedFilters.status} onValueChange={(v) => setAdvancedFilters({...advancedFilters, status: v})}>
+                        <Select value={advancedFilters.status} onValueChange={(v) => setAdvancedFilters({ ...advancedFilters, status: v })}>
                           <SelectTrigger className="h-9 text-sm">
                             <SelectValue />
                           </SelectTrigger>
@@ -653,7 +653,7 @@ export default function SiteVisits() {
 
                       <div className="space-y-2">
                         <Label className="text-xs">Temperature</Label>
-                        <Select value={advancedFilters.temperature} onValueChange={(v) => setAdvancedFilters({...advancedFilters, temperature: v})}>
+                        <Select value={advancedFilters.temperature} onValueChange={(v) => setAdvancedFilters({ ...advancedFilters, temperature: v })}>
                           <SelectTrigger className="h-9 text-sm">
                             <SelectValue />
                           </SelectTrigger>
@@ -668,7 +668,7 @@ export default function SiteVisits() {
 
                       <div className="space-y-2">
                         <Label className="text-xs">Stage</Label>
-                        <Select value={advancedFilters.stage} onValueChange={(v) => setAdvancedFilters({...advancedFilters, stage: v})}>
+                        <Select value={advancedFilters.stage} onValueChange={(v) => setAdvancedFilters({ ...advancedFilters, stage: v })}>
                           <SelectTrigger className="h-9 text-sm">
                             <SelectValue />
                           </SelectTrigger>
@@ -687,7 +687,7 @@ export default function SiteVisits() {
 
                       <div className="space-y-2">
                         <Label className="text-xs">Min Rating</Label>
-                        <Select value={advancedFilters.rating} onValueChange={(v) => setAdvancedFilters({...advancedFilters, rating: v})}>
+                        <Select value={advancedFilters.rating} onValueChange={(v) => setAdvancedFilters({ ...advancedFilters, rating: v })}>
                           <SelectTrigger className="h-9 text-sm">
                             <SelectValue />
                           </SelectTrigger>
@@ -703,7 +703,7 @@ export default function SiteVisits() {
 
                       <div className="space-y-2">
                         <Label className="text-xs">Property Type</Label>
-                        <Select value={advancedFilters.propertyType} onValueChange={(v) => setAdvancedFilters({...advancedFilters, propertyType: v})}>
+                        <Select value={advancedFilters.propertyType} onValueChange={(v) => setAdvancedFilters({ ...advancedFilters, propertyType: v })}>
                           <SelectTrigger className="h-9 text-sm">
                             <SelectValue />
                           </SelectTrigger>
@@ -721,7 +721,7 @@ export default function SiteVisits() {
                           placeholder="Enter city..."
                           className="h-9 text-sm"
                           value={advancedFilters.city === 'all' ? '' : advancedFilters.city}
-                          onChange={(e) => setAdvancedFilters({...advancedFilters, city: e.target.value || 'all'})}
+                          onChange={(e) => setAdvancedFilters({ ...advancedFilters, city: e.target.value || 'all' })}
                         />
                       </div>
 
@@ -731,7 +731,7 @@ export default function SiteVisits() {
                           type="date"
                           className="h-9 text-sm"
                           value={advancedFilters.dateFrom}
-                          onChange={(e) => setAdvancedFilters({...advancedFilters, dateFrom: e.target.value})}
+                          onChange={(e) => setAdvancedFilters({ ...advancedFilters, dateFrom: e.target.value })}
                         />
                       </div>
 
@@ -741,7 +741,7 @@ export default function SiteVisits() {
                           type="date"
                           className="h-9 text-sm"
                           value={advancedFilters.dateTo}
-                          onChange={(e) => setAdvancedFilters({...advancedFilters, dateTo: e.target.value})}
+                          onChange={(e) => setAdvancedFilters({ ...advancedFilters, dateTo: e.target.value })}
                         />
                       </div>
                     </div>
@@ -814,37 +814,37 @@ export default function SiteVisits() {
               {advancedFilters.status !== 'all' && (
                 <Badge variant="secondary" className="gap-1">
                   Status: {advancedFilters.status}
-                  <X className="h-3 w-3 cursor-pointer" onClick={() => setAdvancedFilters({...advancedFilters, status: 'all'})} />
+                  <X className="h-3 w-3 cursor-pointer" onClick={() => setAdvancedFilters({ ...advancedFilters, status: 'all' })} />
                 </Badge>
               )}
               {advancedFilters.temperature !== 'all' && (
                 <Badge variant="secondary" className="gap-1">
                   Temp: {advancedFilters.temperature}
-                  <X className="h-3 w-3 cursor-pointer" onClick={() => setAdvancedFilters({...advancedFilters, temperature: 'all'})} />
+                  <X className="h-3 w-3 cursor-pointer" onClick={() => setAdvancedFilters({ ...advancedFilters, temperature: 'all' })} />
                 </Badge>
               )}
               {advancedFilters.stage !== 'all' && (
                 <Badge variant="secondary" className="gap-1">
                   Stage: {advancedFilters.stage}
-                  <X className="h-3 w-3 cursor-pointer" onClick={() => setAdvancedFilters({...advancedFilters, stage: 'all'})} />
+                  <X className="h-3 w-3 cursor-pointer" onClick={() => setAdvancedFilters({ ...advancedFilters, stage: 'all' })} />
                 </Badge>
               )}
               {advancedFilters.rating !== 'all' && (
                 <Badge variant="secondary" className="gap-1">
                   Min Rating: {advancedFilters.rating}★
-                  <X className="h-3 w-3 cursor-pointer" onClick={() => setAdvancedFilters({...advancedFilters, rating: 'all'})} />
+                  <X className="h-3 w-3 cursor-pointer" onClick={() => setAdvancedFilters({ ...advancedFilters, rating: 'all' })} />
                 </Badge>
               )}
               {advancedFilters.dateFrom && (
                 <Badge variant="secondary" className="gap-1">
                   From: {format(parseISO(advancedFilters.dateFrom), 'MMM dd')}
-                  <X className="h-3 w-3 cursor-pointer" onClick={() => setAdvancedFilters({...advancedFilters, dateFrom: ''})} />
+                  <X className="h-3 w-3 cursor-pointer" onClick={() => setAdvancedFilters({ ...advancedFilters, dateFrom: '' })} />
                 </Badge>
               )}
               {advancedFilters.dateTo && (
                 <Badge variant="secondary" className="gap-1">
                   To: {format(parseISO(advancedFilters.dateTo), 'MMM dd')}
-                  <X className="h-3 w-3 cursor-pointer" onClick={() => setAdvancedFilters({...advancedFilters, dateTo: ''})} />
+                  <X className="h-3 w-3 cursor-pointer" onClick={() => setAdvancedFilters({ ...advancedFilters, dateTo: '' })} />
                 </Badge>
               )}
               <Button variant="ghost" size="sm" onClick={clearAllFilters} className="text-xs h-6">
@@ -873,8 +873,8 @@ export default function SiteVisits() {
                   const isExpanded = expandedDates.has(date);
                   const dateObj = parseISO(date);
                   const dateLabel = isToday(dateObj) ? 'Today' :
-                                   isTomorrow(dateObj) ? 'Tomorrow' :
-                                   format(dateObj, 'EEEE, MMMM dd, yyyy');
+                    isTomorrow(dateObj) ? 'Tomorrow' :
+                      format(dateObj, 'EEEE, MMMM dd, yyyy');
 
                   return (
                     <div key={date}>
@@ -911,7 +911,7 @@ export default function SiteVisits() {
                                 className={`p-4 hover:bg-white transition-colors ${isMissed ? 'bg-red-50/50' : ''}`}
                               >
                                 <div className="flex items-start justify-between gap-4">
-                                  
+
                                   {/* Time */}
                                   <div className="flex items-center gap-3 min-w-0 flex-1">
                                     <div className="text-center min-w-[60px]">
@@ -926,7 +926,7 @@ export default function SiteVisits() {
                                         {visit.lead?.temperature === 'hot' && <Flame className="h-4 w-4 text-red-500" />}
                                         {visit.lead?.temperature === 'warm' && <TrendingUp className="h-4 w-4 text-orange-500" />}
                                       </div>
-                                      
+
                                       <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
                                         <Phone className="h-3 w-3" />
                                         <span>{visit.lead?.phone}</span>
@@ -976,7 +976,7 @@ export default function SiteVisits() {
                                   {/* Status & Actions */}
                                   <div className="flex flex-col items-end gap-2 shrink-0">
                                     {getStatusBadge(visit)}
-                                    
+
                                     {visit.status === 'completed' && visit.rating && (
                                       <div className="flex gap-0.5">
                                         {[...Array(5)].map((_, i) => (
@@ -988,24 +988,27 @@ export default function SiteVisits() {
                                       </div>
                                     )}
 
-                                    <Button
-                                      size="sm"
-                                      variant={visit.status === 'completed' ? 'outline' : 'default'}
-                                      className="gap-1"
-                                      onClick={() => openActionDialog(visit)}
-                                    >
-                                      {visit.status === 'completed' ? (
-                                        <>
-                                          <Star className="h-3.5 w-3.5" />
-                                          View
-                                        </>
-                                      ) : (
-                                        <>
-                                          <CheckCircle2 className="h-3.5 w-3.5" />
-                                          Update
-                                        </>
-                                      )}
-                                    </Button>
+                                    {/* ✅ FIX H6: Hide action button for agents who don't own this visit */}
+                                    {(user?.role !== 'sales_agent' || visit.conductedBy === user?.id) && (
+                                      <Button
+                                        size="sm"
+                                        variant={visit.status === 'completed' ? 'outline' : 'default'}
+                                        className="gap-1"
+                                        onClick={() => openActionDialog(visit)}
+                                      >
+                                        {visit.status === 'completed' ? (
+                                          <>
+                                            <Star className="h-3.5 w-3.5" />
+                                            View
+                                          </>
+                                        ) : (
+                                          <>
+                                            <CheckCircle2 className="h-3.5 w-3.5" />
+                                            Update
+                                          </>
+                                        )}
+                                      </Button>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -1063,11 +1066,11 @@ export default function SiteVisits() {
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {rating === 0 ? 'Tap to rate' :
-                     rating === 5 ? 'Extremely interested!' :
-                     rating === 4 ? 'Very interested' :
-                     rating === 3 ? 'Moderately interested' :
-                     rating === 2 ? 'Slightly interested' :
-                     'Not interested'}
+                      rating === 5 ? 'Extremely interested!' :
+                        rating === 4 ? 'Very interested' :
+                          rating === 3 ? 'Moderately interested' :
+                            rating === 2 ? 'Slightly interested' :
+                              'Not interested'}
                   </p>
                 </div>
 

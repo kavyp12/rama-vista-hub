@@ -2,6 +2,7 @@ import express, { Application } from 'express';
 import cors from 'cors';
 import * as dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
+import path from 'path';
 import routes from './routes';
 import { errorHandler } from './middlewares/error.middleware';
 import { prisma } from './utils/prisma';
@@ -19,6 +20,10 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
+// ✅ FIX G1: Serve uploaded files. Files are stored in backend/uplodall/ but
+// URLs returned by upload routes use /uploads/ prefix — this bridges the gap.
+app.use('/uploads', express.static(path.join(__dirname, '../uplodall')));
 
 // Health check
 app.get('/health', (_req, res) => {
@@ -40,13 +45,13 @@ const server = app.listen(PORT, () => {
 // Graceful shutdown
 const gracefulShutdown = async () => {
   console.log('\n🛑 Shutting down gracefully...');
-  
+
   server.close(async () => {
     console.log('✅ HTTP server closed');
-    
+
     await prisma.$disconnect();
     console.log('✅ Database connection closed');
-    
+
     process.exit(0);
   });
 

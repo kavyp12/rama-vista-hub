@@ -19,12 +19,12 @@ const updateDealSchema = createDealSchema.partial();
 export const getDeals = async (req: AuthRequest, res: Response) => {
   try {
     const { stage, assignedTo } = req.query;
-    
+
     const where: any = {};
-    
+
     if (stage) where.stage = stage;
     if (assignedTo) where.assignedToId = assignedTo;
-    
+
     if (req.user!.role === 'sales_agent') {
       where.assignedToId = req.user!.userId;
     }
@@ -61,7 +61,8 @@ export const getDeals = async (req: AuthRequest, res: Response) => {
 
     return res.json(deals);
   } catch (error) {
-    throw error;
+    console.error('Get Deals Error:', error);
+    return res.status(500).json({ error: 'Failed to fetch deals' });
   }
 };
 
@@ -100,7 +101,8 @@ export const getDeal = async (req: AuthRequest, res: Response) => {
 
     return res.json(deal);
   } catch (error) {
-    throw error;
+    console.error('Get Deal Error:', error);
+    return res.status(500).json({ error: 'Failed to fetch deal' });
   }
 };
 
@@ -135,16 +137,18 @@ export const createDeal = async (req: AuthRequest, res: Response) => {
         action: 'deal_created',
         entityType: 'deal',
         entityId: deal.id,
-        details: { 
+        details: {
           leadName: deal.lead.name,
-          dealValue: deal.dealValue 
+          dealValue: deal.dealValue
         }
       }
     });
 
     return res.status(201).json(deal);
   } catch (error) {
-    throw error;
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
+    console.error('Create Deal Error:', error);
+    return res.status(500).json({ error: 'Failed to create deal' });
   }
 };
 
@@ -188,16 +192,18 @@ export const updateDeal = async (req: AuthRequest, res: Response) => {
         action: 'deal_updated',
         entityType: 'deal',
         entityId: deal.id,
-        details: { 
+        details: {
           stage: deal.stage,
-          dealValue: deal.dealValue 
+          dealValue: deal.dealValue
         }
       }
     });
 
     return res.json(deal);
   } catch (error) {
-    throw error;
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
+    console.error('Update Deal Error:', error);
+    return res.status(500).json({ error: 'Failed to update deal' });
   }
 };
 
@@ -213,6 +219,7 @@ export const deleteDeal = async (req: AuthRequest, res: Response) => {
 
     return res.json({ message: 'Deal deleted successfully' });
   } catch (error) {
-    throw error;
+    console.error('Delete Deal Error:', error);
+    return res.status(500).json({ error: 'Failed to delete deal' });
   }
 };

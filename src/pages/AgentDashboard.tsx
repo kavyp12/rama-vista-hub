@@ -107,12 +107,12 @@ const COLORS = {
   primary: '#4f46e5'
 };
 
+// ✅ FIX H7: Values now match the backend Zod enum: connected_positive | connected_callback | not_connected | not_interested
 const CALL_OUTCOMES = [
-  { value: 'connected', label: 'Connected', icon: PhoneCall, color: 'text-green-600' },
-  { value: 'not_answered', label: 'Not Answered', icon: PhoneMissed, color: 'text-red-500' },
-  { value: 'busy', label: 'Busy', icon: PhoneOff, color: 'text-amber-500' },
-  { value: 'callback_requested', label: 'Callback Requested', icon: Clock, color: 'text-blue-500' },
-  { value: 'wrong_number', label: 'Wrong Number', icon: PhoneOff, color: 'text-gray-400' },
+  { value: 'connected_positive', label: 'Connected (Positive)', icon: PhoneCall, color: 'text-green-600' },
+  { value: 'not_connected', label: 'Not Answered', icon: PhoneMissed, color: 'text-red-500' },
+  { value: 'connected_callback', label: 'Callback Requested', icon: Clock, color: 'text-blue-500' },
+  { value: 'not_interested', label: 'Not Interested', icon: PhoneOff, color: 'text-gray-400' },
 ];
 
 const LEAD_STAGES = [
@@ -140,7 +140,8 @@ export default function AgentDashboard() {
   const [callLogDialog, setCallLogDialog] = useState(false);
   const [callLeadId, setCallLeadId] = useState('');
   const [callLeadName, setCallLeadName] = useState('');
-  const [callOutcome, setCallOutcome] = useState<CallLog['outcome']>('connected');
+  // ✅ FIX H7: Use callStatus (backend field name) with correct enum default
+  const [callStatus, setCallStatus] = useState<string>('connected_positive');
   const [callNotes, setCallNotes] = useState('');
   const [callDuration, setCallDuration] = useState('');
   const [loggingCall, setLoggingCall] = useState(false);
@@ -167,10 +168,10 @@ export default function AgentDashboard() {
 
       const myVisits = Array.isArray(visitsData)
         ? visitsData
-            .filter((v: SiteVisit) => v.status === 'scheduled')
-            .sort((a: SiteVisit, b: SiteVisit) =>
-              new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()
-            )
+          .filter((v: SiteVisit) => v.status === 'scheduled')
+          .sort((a: SiteVisit, b: SiteVisit) =>
+            new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()
+          )
         : [];
 
       setVisits(myVisits);
@@ -244,7 +245,8 @@ export default function AgentDashboard() {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
           leadId: callLeadId,
-          outcome: callOutcome,
+          // ✅ FIX H7: Use 'callStatus' (correct field name) with correct enum value
+          callStatus: callStatus,
           notes: callNotes,
           duration: callDuration ? parseInt(callDuration) : undefined,
         }),
@@ -265,7 +267,7 @@ export default function AgentDashboard() {
   function openCallLog(leadId: string, leadName: string) {
     setCallLeadId(leadId);
     setCallLeadName(leadName);
-    setCallOutcome('connected');
+    setCallStatus('connected_positive'); // ✅ FIX H7: correct default enum value
     setCallNotes('');
     setCallDuration('');
     setCallLogDialog(true);
@@ -281,7 +283,7 @@ export default function AgentDashboard() {
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, done: !t.done } : t));
   }
 
- // Derived Data (Added null checks so it doesn't crash on undefined dates)
+  // Derived Data (Added null checks so it doesn't crash on undefined dates)
   const todayVisits = visits.filter(v => v.scheduledAt && isToday(parseISO(v.scheduledAt)));
   const upcomingVisits = visits.filter(v => v.scheduledAt && !isToday(parseISO(v.scheduledAt)) && !isPast(parseISO(v.scheduledAt)));
   const overdueFollowUps = followUps.filter(l => l.nextFollowupAt && isPast(parseISO(l.nextFollowupAt)) && !isToday(parseISO(l.nextFollowupAt)));
@@ -293,22 +295,22 @@ export default function AgentDashboard() {
   const targetPct = stats?.monthlyTarget
     ? Math.min(100, Math.round(((stats.monthlyAchieved || 0) / stats.monthlyTarget) * 100))
     : stats
-    ? Math.min(100, Math.round((stats.dealStats.closed / Math.max(1, 5)) * 100))
-    : 0;
+      ? Math.min(100, Math.round((stats.dealStats.closed / Math.max(1, 5)) * 100))
+      : 0;
 
   // Charts
   const funnelData = stats
     ? stats.leadsByStage.map(item => ({
-        stage: item.stage.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-        count: item.count,
-      }))
+      stage: item.stage.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      count: item.count,
+    }))
     : [];
 
   const tempChartData = stats
     ? stats.leadsByTemperature.map(item => ({
-        name: item.temperature.charAt(0).toUpperCase() + item.temperature.slice(1),
-        value: item.count,
-      }))
+      name: item.temperature.charAt(0).toUpperCase() + item.temperature.slice(1),
+      value: item.count,
+    }))
     : [];
 
   const callOutcomeData = callLogs.reduce(
@@ -768,7 +770,7 @@ export default function AgentDashboard() {
             </div>
           </TabsContent>
 
-         
+
         </Tabs>
       </div>
 
@@ -791,13 +793,13 @@ export default function AgentDashboard() {
                     <button
                       key={opt.value}
                       type="button"
-                      onClick={() => setCallOutcome(opt.value as CallLog['outcome'])}
+                      onClick={() => setCallStatus(opt.value)}
                       className={`flex items-center gap-3 p-3 rounded-lg border text-left transition-all
-                        ${callOutcome === opt.value ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 hover:bg-slate-50'}`}
+                        ${callStatus === opt.value ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 hover:bg-slate-50'}`}
                     >
                       <Icon className={`h-4 w-4 shrink-0 ${opt.color}`} />
                       <span className="text-sm font-medium">{opt.label}</span>
-                      {callOutcome === opt.value && <CheckCircle2 className="h-4 w-4 text-indigo-500 ml-auto" />}
+                      {callStatus === opt.value && <CheckCircle2 className="h-4 w-4 text-indigo-500 ml-auto" />}
                     </button>
                   );
                 })}
@@ -975,7 +977,7 @@ function VisitCard({
   onLogCall: (leadId: string, leadName: string) => void;
 }) {
   const location = getLocationDetails(visit);
-  
+
   // Safe parsing
   const visitDate = visit.scheduledAt ? parseISO(visit.scheduledAt) : null;
 

@@ -35,9 +35,9 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
     }
 
     const { role, isActive, search } = req.query;
-    
+
     const where: any = {};
-    
+
     if (role) where.role = role;
     if (isActive !== undefined) where.isActive = isActive === 'true';
     if (search) {
@@ -160,7 +160,7 @@ export const getUserStats = async (req: AuthRequest, res: Response) => {
     });
 
     const connectedCalls = await prisma.callLog.count({
-      where: { 
+      where: {
         agentId: id,
         callStatus: 'connected_positive'
       }
@@ -172,7 +172,7 @@ export const getUserStats = async (req: AuthRequest, res: Response) => {
     });
 
     const closedDeals = await prisma.deal.count({
-      where: { 
+      where: {
         assignedToId: id,
         stage: 'closed'
       }
@@ -285,7 +285,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
         action: 'user_created',
         entityType: 'user',
         entityId: user.id,
-        details: { 
+        details: {
           userName: user.fullName,
           userRole: user.role,
           userEmail: user.email
@@ -438,9 +438,21 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Soft delete - mark as deleted (we'll add deletedAt field)
-    // For now, we'll actually delete since isActive doesn't exist
-    await prisma.user.delete({ where: { id } });
+    // ✅ FIX G10: Soft delete — deactivate the user instead of hard deleting.
+    // Hard delete would cascade-delete call logs, deals, and activity history.
+    await prisma.user.update({
+      where: { id },
+      data: {
+        isActive: false,
+        email: `_deactivated_${Date.now()}_${user.email}` // Prevent collision if re-registering
+      }
+    });
+
+    // Unassign their leads so managers can redistribute
+    await prisma.lead.updateMany({
+      where: { assignedToId: id },
+      data: { assignedToId: null }
+    });
 
     // Log activity
     await prisma.activityLog.create({
@@ -456,7 +468,7 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
     return res.json({ message: 'User deactivated successfully' });
   } catch (error) {
     console.error('Delete User Error:', error);
-    return res.status(500).json({ error: 'Failed to delete user' });
+    return res.status(500).json({ error: 'Failed to deactivate user' });
   }
 };
 
@@ -474,10 +486,10 @@ export const getUserCallLogs = async (req: AuthRequest, res: Response) => {
       where: { agentId: id },
       include: {
         lead: {
-          select: { 
-            id: true, 
-            name: true, 
-            phone: true, 
+          select: {
+            id: true,
+            name: true,
+            phone: true,
             email: true,
             stage: true,
             temperature: true

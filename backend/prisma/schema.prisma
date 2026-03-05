@@ -39,10 +39,12 @@ model User {
   id                  String                   @id @default(uuid())
   email               String                   @unique
   password            String
-  phone               String?                  // <--- ADD THIS LINE
+  phone               String?
   fullName            String                   @map("full_name")
   role                UserRole                 @default(sales_agent)
   avatarUrl           String?                  @map("avatar_url")
+  isActive            Boolean                  @default(true) @map("is_active")
+  deletedAt           DateTime?                @map("deleted_at")
   createdAt           DateTime                 @default(now()) @map("created_at")
   updatedAt           DateTime                 @updatedAt @map("updated_at")
   lastContactedAt     DateTime?                @map("last_contacted_at")

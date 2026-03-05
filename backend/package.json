@@ -3,11 +3,9 @@
   "version": "1.0.0",
   "description": "Backend API for Rama Realty CRM",
   "main": "dist/index.js",
-
-    "prisma": {
+  "prisma": {
     "seed": "ts-node prisma/seed.ts"
   },
-
   "scripts": {
     "dev": "nodemon src/index.ts",
     "build": "tsc",
@@ -23,6 +21,7 @@
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
+    "date-fns": "^4.1.0",
     "dotenv": "^16.6.1",
     "express": "^4.22.1",
     "jsonwebtoken": "^9.0.3",

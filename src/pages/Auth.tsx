@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
@@ -11,17 +10,18 @@ import { Building2, Shield, Users, TrendingUp } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
-type AppRole = 'admin' | 'sales_manager' | 'sales_agent';
-
 export default function Auth() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  
+
   const [isLoading, setIsLoading] = useState(false);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+
+  // ✅ FIX G11: Separate state for each form tab — prevents cross-contamination between Sign In and Sign Up
+  const [signInEmail, setSignInEmail] = useState('');
+  const [signInPassword, setSignInPassword] = useState('');
+  const [signUpEmail, setSignUpEmail] = useState('');
+  const [signUpPassword, setSignUpPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const [selectedRole, setSelectedRole] = useState<AppRole>('sales_agent');
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,7 +31,7 @@ export default function Auth() {
       const response = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: signInEmail, password: signInPassword }),
       });
 
       const data = await response.json();
@@ -41,17 +41,17 @@ export default function Auth() {
       }
 
       localStorage.setItem('accessToken', data.accessToken);
-      
+
       toast({
         title: 'Welcome back!',
         description: 'You have successfully signed in.',
       });
-      
+
       window.location.href = '/dashboard';
     } catch (error: any) {
       toast({
         title: 'Sign In Failed',
-        description: error.message === 'Invalid login credentials' 
+        description: error.message === 'Invalid login credentials'
           ? 'Invalid email or password. Please try again.'
           : error.message,
         variant: 'destructive',
@@ -69,11 +69,11 @@ export default function Auth() {
       const response = await fetch(`${API_URL}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          email, 
-          password, 
-          fullName, 
-          role: selectedRole 
+        // ✅ FIX G11: Do NOT send role — backend enforces sales_agent for all self-registrations
+        body: JSON.stringify({
+          email: signUpEmail,
+          password: signUpPassword,
+          fullName
         }),
       });
 
@@ -84,18 +84,18 @@ export default function Auth() {
       }
 
       localStorage.setItem('accessToken', data.accessToken);
-      
+
       toast({
         title: 'Account Created',
         description: 'Welcome to Rama Realty CRM!',
       });
-      
+
       window.location.href = '/dashboard';
     } catch (error: any) {
       const errorMessage = error.message.includes('already registered')
         ? 'This email is already registered. Please sign in instead.'
         : error.message;
-      
+
       toast({
         title: 'Sign Up Failed',
         description: errorMessage,
@@ -116,7 +116,7 @@ export default function Auth() {
             <span className="text-2xl font-bold tracking-tight">Rama Realty</span>
           </div>
         </div>
-        
+
         <div className="space-y-8">
           <h1 className="text-4xl font-bold leading-tight">
             Enterprise Real Estate<br />CRM System
@@ -124,7 +124,7 @@ export default function Auth() {
           <p className="text-lg text-primary-foreground/80 max-w-md">
             Manage leads, properties, and sales pipeline with our comprehensive CRM solution designed for real estate professionals.
           </p>
-          
+
           <div className="grid grid-cols-2 gap-6 pt-8">
             <div className="flex items-start gap-3">
               <div className="p-2 bg-primary-foreground/10 rounded-lg">
@@ -164,7 +164,7 @@ export default function Auth() {
             </div>
           </div>
         </div>
-        
+
         <p className="text-sm text-primary-foreground/50">
           © 2024 Rama Realty. All rights reserved.
         </p>
@@ -187,7 +187,7 @@ export default function Auth() {
                 <TabsTrigger value="signin">Sign In</TabsTrigger>
                 <TabsTrigger value="signup">Sign Up</TabsTrigger>
               </TabsList>
-              
+
               <TabsContent value="signin">
                 <form onSubmit={handleSignIn} className="space-y-4">
                   <div className="space-y-2">
@@ -196,8 +196,8 @@ export default function Auth() {
                       id="signin-email"
                       type="email"
                       placeholder="you@example.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      value={signInEmail}
+                      onChange={(e) => setSignInEmail(e.target.value)}
                       required
                     />
                   </div>
@@ -207,8 +207,8 @@ export default function Auth() {
                       id="signin-password"
                       type="password"
                       placeholder="••••••••"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
+                      value={signInPassword}
+                      onChange={(e) => setSignInPassword(e.target.value)}
                       required
                     />
                   </div>
@@ -217,7 +217,7 @@ export default function Auth() {
                   </Button>
                 </form>
               </TabsContent>
-              
+
               <TabsContent value="signup">
                 <form onSubmit={handleSignUp} className="space-y-4">
                   <div className="space-y-2">
@@ -237,8 +237,8 @@ export default function Auth() {
                       id="signup-email"
                       type="email"
                       placeholder="you@example.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      value={signUpEmail}
+                      onChange={(e) => setSignUpEmail(e.target.value)}
                       required
                     />
                   </div>
@@ -248,24 +248,12 @@ export default function Auth() {
                       id="signup-password"
                       type="password"
                       placeholder="••••••••"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
+                      value={signUpPassword}
+                      onChange={(e) => setSignUpPassword(e.target.value)}
                       required
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="role">Role</Label>
-                    <Select value={selectedRole} onValueChange={(value: AppRole) => setSelectedRole(value)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select your role" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="admin">Admin</SelectItem>
-                        <SelectItem value="sales_manager">Sales Manager</SelectItem>
-                        <SelectItem value="sales_agent">Sales Agent</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  {/* ✅ FIX G11: Role picker removed — backend always assigns sales_agent on self-registration */}
                   <Button type="submit" className="w-full" disabled={isLoading}>
                     {isLoading ? 'Creating account...' : 'Create Account'}
                   </Button>

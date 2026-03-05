@@ -204,7 +204,7 @@ export default function Pipeline() {
     }
   }
 
-  // ✅ EXPAND LEADS BY PROJECT - Show same lead multiple times
+  // ✅ FIX H4: Single pass — no second loop needed. The size===0 branch handles leads without site visits.
   function expandLeadsByProject() {
     const expanded: ProjectLead[] = [];
 
@@ -222,6 +222,7 @@ export default function Pipeline() {
       });
 
       if (projectsMap.size === 0) {
+        // Handles leads with 0 OR empty siteVisits — no second loop needed
         expanded.push({
           ...lead,
           displayProject: lead.project?.name || lead.property?.title || undefined,
@@ -237,21 +238,6 @@ export default function Pipeline() {
             projectVisitCount: visits.length
           });
         });
-      }
-    });
-
-    // Handle leads without projects
-    rawLeads.forEach(lead => {
-      if (!lead.siteVisits || lead.siteVisits.length === 0) {
-        const exists = expanded.find(e => e.id === lead.id);
-        if (!exists) {
-          expanded.push({
-            ...lead,
-            displayProject: lead.project?.name || lead.property?.title,
-            projectKey: lead.id,
-            projectVisitCount: lead.siteVisits?.length || 0
-          });
-        }
       }
     });
 
@@ -389,10 +375,18 @@ export default function Pipeline() {
     const { draggableId, destination } = result;
     const newStage = destination.droppableId;
 
-    // Find the actual lead ID (remove project key suffix if exists)
-    const leadId = draggableId.includes('-')
-      ? draggableId.split('-')[0]
-      : draggableId;
+    // ✅ FIX C4: Build a Map from projectKey → actual lead.id.
+    // We CANNOT split on '-' because UUIDs themselves contain '-' (e.g. "a1b2c3d4-e5f6-...").
+    // Using the Map ensures we always resolve to the full, correct UUID.
+    const keyToLeadId = new Map<string, string>(
+      expandedLeads.map(l => [l.projectKey || l.id, l.id])
+    );
+
+    const leadId = keyToLeadId.get(draggableId);
+    if (!leadId) {
+      console.error('handleDragEnd: could not resolve leadId for draggableId', draggableId);
+      return;
+    }
 
     handleStageUpdate(leadId, newStage);
   };
@@ -433,7 +427,7 @@ export default function Pipeline() {
     <DashboardLayout title="Sales Pipeline" description="Track deals and monitor team activity">
       <div className="space-y-6 h-full flex flex-col">
         <div className="flex flex-col sm:flex-row gap-4 items-center justify-between shrink-0">
-<div className="flex gap-3 w-full sm:w-auto ml-auto">
+          <div className="flex gap-3 w-full sm:w-auto ml-auto">
             <Select value={agentFilter} onValueChange={setAgentFilter}>
               <SelectTrigger className="w-48">
                 <Users className="h-4 w-4 mr-2" />
@@ -472,8 +466,8 @@ export default function Pipeline() {
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
-           {/* ... existing stats cards code ... */}
-           <Card className="border-l-4 border-l-blue-500">
+          {/* ... existing stats cards code ... */}
+          <Card className="border-l-4 border-l-blue-500">
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
@@ -738,276 +732,276 @@ export default function Pipeline() {
           </DialogHeader>
 
           <div className="flex-1 flex overflow-hidden">
-             {/* ... Dialog body content (no changes needed inside) ... */}
-             <div className="w-1/3 border-r overflow-y-auto bg-slate-50 p-4">
-                {/* ... existing dialog left panel ... */}
-                {/* Simplified for brevity as logic inside is fine */}
-                <div className="space-y-4">
-                    <div>
-                    <h3 className="text-sm font-semibold text-muted-foreground mb-2 flex items-center gap-2">
-                        <Building className="h-4 w-4" />
-                        Related Projects
-                    </h3>
-                    {loadingRelated ? (
-                        <div className="text-sm text-muted-foreground">Loading...</div>
-                    ) : relatedLeads.length === 0 ? (
-                        <div className="text-sm text-muted-foreground bg-white p-3 rounded-lg border">
-                        No other projects for this contact
-                        </div>
-                    ) : (
-                        <div className="space-y-2">
-                        {relatedLeads.map(rel => (
-                            <div
-                            key={rel.id}
-                            className="group p-3 rounded-lg border bg-white shadow-sm hover:border-blue-500 hover:shadow-md transition-all cursor-pointer"
-                            onClick={() => handleViewLead(rel as ProjectLead)}
-                            >
-                            <div className="flex justify-between items-start mb-1">
-                                <div className="font-semibold text-sm text-slate-800 truncate pr-2">
-                                {rel.project?.name || rel.property?.title || 'Unknown Project'}
-                                </div>
-                                {getTemperatureIcon(rel.temperature)}
-                            </div>
-                            <div className="flex justify-between items-center text-xs text-muted-foreground">
-                                <Badge variant="secondary" className="text-[10px] h-5 px-1.5">{rel.stage}</Badge>
-                                <span>{formatDistanceToNow(new Date(rel.createdAt))} ago</span>
-                            </div>
-                            </div>
-                        ))}
-                        </div>
-                    )}
+            {/* ... Dialog body content (no changes needed inside) ... */}
+            <div className="w-1/3 border-r overflow-y-auto bg-slate-50 p-4">
+              {/* ... existing dialog left panel ... */}
+              {/* Simplified for brevity as logic inside is fine */}
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-muted-foreground mb-2 flex items-center gap-2">
+                    <Building className="h-4 w-4" />
+                    Related Projects
+                  </h3>
+                  {loadingRelated ? (
+                    <div className="text-sm text-muted-foreground">Loading...</div>
+                  ) : relatedLeads.length === 0 ? (
+                    <div className="text-sm text-muted-foreground bg-white p-3 rounded-lg border">
+                      No other projects for this contact
                     </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {relatedLeads.map(rel => (
+                        <div
+                          key={rel.id}
+                          className="group p-3 rounded-lg border bg-white shadow-sm hover:border-blue-500 hover:shadow-md transition-all cursor-pointer"
+                          onClick={() => handleViewLead(rel as ProjectLead)}
+                        >
+                          <div className="flex justify-between items-start mb-1">
+                            <div className="font-semibold text-sm text-slate-800 truncate pr-2">
+                              {rel.project?.name || rel.property?.title || 'Unknown Project'}
+                            </div>
+                            {getTemperatureIcon(rel.temperature)}
+                          </div>
+                          <div className="flex justify-between items-center text-xs text-muted-foreground">
+                            <Badge variant="secondary" className="text-[10px] h-5 px-1.5">{rel.stage}</Badge>
+                            <span>{formatDistanceToNow(new Date(rel.createdAt))} ago</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-             </div>
-             
-             <div className="w-2/3 flex flex-col bg-white h-full min-h-0 overflow-hidden">
-                {/* ... existing dialog right panel logic ... */}
-                {/* I am omitting the massive getProjectGroups logic here as it is syntactically correct in your file. 
+              </div>
+            </div>
+
+            <div className="w-2/3 flex flex-col bg-white h-full min-h-0 overflow-hidden">
+              {/* ... existing dialog right panel logic ... */}
+              {/* I am omitting the massive getProjectGroups logic here as it is syntactically correct in your file. 
                     Ensure you keep the existing logic inside this div */
-                    (() => {
-                        const projectGroups = getProjectGroups();
-                        // ... rest of your IIFE function
-                        if (projectGroups.length === 0 || projectGroups.every(g => g.visits.length === 0)) {
-                            return (
-                                <Tabs defaultValue="history" className="flex-1 flex flex-col h-full min-h-0">
-                                   {/* Copy your TabsContent for History/Activity/Notes here */}
-                                   <div className="px-4 pt-2 border-b shrink-0">
-                                      <TabsList className="w-full justify-start h-10 bg-transparent p-0">
-                                        <TabsTrigger value="history" className="data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none h-10 px-4">
-                                            Full Timeline
-                                        </TabsTrigger>
-                                        <TabsTrigger value="activity" className="data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none h-10 px-4">
-                                            Activity Log
-                                        </TabsTrigger>
-                                        <TabsTrigger value="notes" className="data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none h-10 px-4">
-                                            Notes
-                                        </TabsTrigger>
-                                      </TabsList>
-                                   </div>
-                                   {/* ... Tabs Content ... */}
-                                   <div className="flex-1 overflow-y-auto p-4">
-                                      <TabsContent value="history" className="m-0 space-y-4">
-                                         {/* ... */}
-                                         {selectedLead && getUnifiedHistory(selectedLead).length === 0 ? (
-                                            <div className="text-center py-10 text-muted-foreground">
-                                                <History className="h-10 w-10 mx-auto mb-2 opacity-20" />
-                                                <p>No activity history yet.</p>
-                                            </div>
-                                         ) : (
-                                            selectedLead && getUnifiedHistory(selectedLead).map((item: any, i) => (
-                                               <div key={i} className="flex gap-4 group">
-                                                 {/* ... item render ... */}
-                                                 <div className="flex flex-col items-center">
-                                                     <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 
+                (() => {
+                  const projectGroups = getProjectGroups();
+                  // ... rest of your IIFE function
+                  if (projectGroups.length === 0 || projectGroups.every(g => g.visits.length === 0)) {
+                    return (
+                      <Tabs defaultValue="history" className="flex-1 flex flex-col h-full min-h-0">
+                        {/* Copy your TabsContent for History/Activity/Notes here */}
+                        <div className="px-4 pt-2 border-b shrink-0">
+                          <TabsList className="w-full justify-start h-10 bg-transparent p-0">
+                            <TabsTrigger value="history" className="data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none h-10 px-4">
+                              Full Timeline
+                            </TabsTrigger>
+                            <TabsTrigger value="activity" className="data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none h-10 px-4">
+                              Activity Log
+                            </TabsTrigger>
+                            <TabsTrigger value="notes" className="data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none h-10 px-4">
+                              Notes
+                            </TabsTrigger>
+                          </TabsList>
+                        </div>
+                        {/* ... Tabs Content ... */}
+                        <div className="flex-1 overflow-y-auto p-4">
+                          <TabsContent value="history" className="m-0 space-y-4">
+                            {/* ... */}
+                            {selectedLead && getUnifiedHistory(selectedLead).length === 0 ? (
+                              <div className="text-center py-10 text-muted-foreground">
+                                <History className="h-10 w-10 mx-auto mb-2 opacity-20" />
+                                <p>No activity history yet.</p>
+                              </div>
+                            ) : (
+                              selectedLead && getUnifiedHistory(selectedLead).map((item: any, i) => (
+                                <div key={i} className="flex gap-4 group">
+                                  {/* ... item render ... */}
+                                  <div className="flex flex-col items-center">
+                                    <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 
                                                                     ${item.type === 'visit'
-                                                          ? (item.status === 'completed' ? 'bg-green-100 text-green-600' : 'bg-purple-100 text-purple-600')
-                                                          : 'bg-blue-100 text-blue-600'
-                                                        }`}>
-                                                        {item.type === 'visit' ? <MapPin className="h-4 w-4" /> : <PhoneCall className="h-4 w-4" />}
-                                                      </div>
-                                                      {i < getUnifiedHistory(selectedLead!).length - 1 && (
-                                                        <div className="w-px h-full bg-slate-200 my-1 group-last:hidden" />
-                                                      )}
-                                                 </div>
-                                                 <div className="flex-1 pb-6">
-                                                      <div className="flex items-center justify-between mb-1">
-                                                        <span className="font-semibold text-sm">
-                                                          {item.type === 'visit' ? 'Site Visit' : 'Call Log'}
-                                                          <span className="font-normal text-muted-foreground ml-2 text-xs">
-                                                            - {item.type === 'visit' ? item.status : item.callStatus}
-                                                          </span>
-                                                        </span>
-                                                        <span className="text-xs text-muted-foreground">
-                                                          {format(parseISO(item.date), 'MMM dd, h:mm a')}
-                                                        </span>
-                                                      </div>
-                        
-                                                      <div className="bg-slate-50 rounded-lg border p-3 text-sm">
-                                                        {item.type === 'visit' && item.rating && (
-                                                          <div className="flex items-center gap-1 mb-2 text-yellow-500">
-                                                            {[...Array(5)].map((_, i) => (
-                                                              <Star key={i} className={`h-3 w-3 ${i < item.rating ? 'fill-current' : 'text-slate-200'}`} />
-                                                            ))}
-                                                          </div>
-                                                        )}
-                                                        <p className="text-slate-700 whitespace-pre-wrap">
-                                                          {item.feedback || item.notes || 'No notes provided.'}
-                                                        </p>
-                                                      </div>
-                                                 </div>
-                                               </div> 
-                                            ))
-                                         )}
-                                      </TabsContent>
-                                      
-                                      <TabsContent value="activity" className="m-0 space-y-4">
-                                            {selectedLead && getLeadActivities(selectedLead).map((activity, i) => {
-                                                // ... activity render logic
-                                                 const IconComponent = ACTION_ICONS[activity.action] || Activity;
-                                                 const actionLabel = ACTION_LABELS[activity.action] || activity.action;
-                                                 return (
-                                                    <div key={activity.id} className="flex gap-4 group">
-                                                        <div className="flex flex-col items-center">
-                                                            <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                                                              <IconComponent className="h-4 w-4 text-primary" />
-                                                            </div>
-                                                            {i < getLeadActivities(selectedLead!).length - 1 && (
-                                                              <div className="w-px h-full bg-slate-200 my-1 group-last:hidden" />
-                                                            )}
-                                                        </div>
-                                                        <div className="flex-1 pb-6">
-                                                            <div className="flex items-center justify-between mb-1">
-                                                              <span className="font-semibold text-sm">
-                                                                {actionLabel}
-                                                                {activity.user && (
-                                                                  <span className="font-normal text-muted-foreground ml-2 text-xs">
-                                                                    by {activity.user.fullName}
-                                                                  </span>
-                                                                )}
-                                                              </span>
-                                                              <span className="text-xs text-muted-foreground">
-                                                                {format(parseISO(activity.createdAt), 'MMM dd, h:mm a')}
-                                                              </span>
-                                                            </div>
-                                                            {/* ... details ... */}
-                                                        </div>
-                                                    </div>
-                                                 )
-                                            })}
-                                      </TabsContent>
+                                        ? (item.status === 'completed' ? 'bg-green-100 text-green-600' : 'bg-purple-100 text-purple-600')
+                                        : 'bg-blue-100 text-blue-600'
+                                      }`}>
+                                      {item.type === 'visit' ? <MapPin className="h-4 w-4" /> : <PhoneCall className="h-4 w-4" />}
+                                    </div>
+                                    {i < getUnifiedHistory(selectedLead!).length - 1 && (
+                                      <div className="w-px h-full bg-slate-200 my-1 group-last:hidden" />
+                                    )}
+                                  </div>
+                                  <div className="flex-1 pb-6">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <span className="font-semibold text-sm">
+                                        {item.type === 'visit' ? 'Site Visit' : 'Call Log'}
+                                        <span className="font-normal text-muted-foreground ml-2 text-xs">
+                                          - {item.type === 'visit' ? item.status : item.callStatus}
+                                        </span>
+                                      </span>
+                                      <span className="text-xs text-muted-foreground">
+                                        {format(parseISO(item.date), 'MMM dd, h:mm a')}
+                                      </span>
+                                    </div>
 
-                                      <TabsContent value="notes" className="m-0">
-                                        <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200 text-yellow-900 text-sm">
-                                            {selectedLead?.notes || 'No general notes for this lead.'}
+                                    <div className="bg-slate-50 rounded-lg border p-3 text-sm">
+                                      {item.type === 'visit' && item.rating && (
+                                        <div className="flex items-center gap-1 mb-2 text-yellow-500">
+                                          {[...Array(5)].map((_, i) => (
+                                            <Star key={i} className={`h-3 w-3 ${i < item.rating ? 'fill-current' : 'text-slate-200'}`} />
+                                          ))}
                                         </div>
-                                      </TabsContent>
-                                   </div>
-                                </Tabs>
-                            );
-                        }
+                                      )}
+                                      <p className="text-slate-700 whitespace-pre-wrap">
+                                        {item.feedback || item.notes || 'No notes provided.'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </TabsContent>
 
-                        // Return for Tabs with Projects
-                        return (
-                            <Tabs defaultValue={projectGroups[0].projectName} className="flex-1 flex flex-col h-full min-h-0">
-                                <div className="px-4 pt-2 border-b shrink-0 overflow-x-auto">
-                                  <TabsList className="w-full justify-start h-10 bg-transparent p-0 flex-nowrap">
-                                    {projectGroups.map((group) => (
-                                      <TabsTrigger
-                                        key={group.projectName}
-                                        value={group.projectName}
-                                        className="data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none h-10 px-4 flex items-center gap-1.5 whitespace-nowrap"
-                                      >
-                                        <Building className="h-3.5 w-3.5" />
-                                        {group.projectName}
-                                        <Badge variant="secondary" className="ml-1 text-[10px] h-4 px-1.5">
-                                          {group.visits.length}
-                                        </Badge>
-                                      </TabsTrigger>
-                                    ))}
-                                  </TabsList>
+                          <TabsContent value="activity" className="m-0 space-y-4">
+                            {selectedLead && getLeadActivities(selectedLead).map((activity, i) => {
+                              // ... activity render logic
+                              const IconComponent = ACTION_ICONS[activity.action] || Activity;
+                              const actionLabel = ACTION_LABELS[activity.action] || activity.action;
+                              return (
+                                <div key={activity.id} className="flex gap-4 group">
+                                  <div className="flex flex-col items-center">
+                                    <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                                      <IconComponent className="h-4 w-4 text-primary" />
+                                    </div>
+                                    {i < getLeadActivities(selectedLead!).length - 1 && (
+                                      <div className="w-px h-full bg-slate-200 my-1 group-last:hidden" />
+                                    )}
+                                  </div>
+                                  <div className="flex-1 pb-6">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <span className="font-semibold text-sm">
+                                        {actionLabel}
+                                        {activity.user && (
+                                          <span className="font-normal text-muted-foreground ml-2 text-xs">
+                                            by {activity.user.fullName}
+                                          </span>
+                                        )}
+                                      </span>
+                                      <span className="text-xs text-muted-foreground">
+                                        {format(parseISO(activity.createdAt), 'MMM dd, h:mm a')}
+                                      </span>
+                                    </div>
+                                    {/* ... details ... */}
+                                  </div>
                                 </div>
-                                <div className="flex-1 overflow-y-auto">
-                                   {projectGroups.map((group) => (
-                                        <TabsContent key={group.projectName} value={group.projectName} className="m-0 p-4 space-y-4">
-                                            {/* ... content for project visits ... */}
-                                            <div className="flex items-center justify-between pb-2 border-b">
-                                                <div className="flex items-center gap-2">
-                                                  <Badge variant={group.lead.stage === 'closed' ? 'default' : 'outline'} className="text-xs">
-                                                    {group.lead.stage.replace('_', ' ').toUpperCase()}
-                                                  </Badge>
-                                                  {getTemperatureIcon(group.lead.temperature)}
-                                                </div>
-                                                <span className="text-xs text-muted-foreground">
-                                                  {group.visits.length} visit{group.visits.length !== 1 ? 's' : ''}
-                                                </span>
-                                            </div>
-                                            
-                                            {group.visits.length === 0 ? (
-                                                <div className="text-center py-10 text-muted-foreground">
-                                                  <History className="h-10 w-10 mx-auto mb-2 opacity-20" />
-                                                  <p>No site visits yet for this project.</p>
-                                                </div>
-                                            ) : (
-                                                <div className="space-y-4">
-                                                    {group.visits
-                                                        .sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime())
-                                                        .map((visit, idx) => (
-                                                            <div key={visit.id || idx} className="flex gap-4 group">
-                                                                {/* ... visit render ... */}
-                                                                <div className="flex flex-col items-center">
-                                                                  <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 
+                              )
+                            })}
+                          </TabsContent>
+
+                          <TabsContent value="notes" className="m-0">
+                            <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200 text-yellow-900 text-sm">
+                              {selectedLead?.notes || 'No general notes for this lead.'}
+                            </div>
+                          </TabsContent>
+                        </div>
+                      </Tabs>
+                    );
+                  }
+
+                  // Return for Tabs with Projects
+                  return (
+                    <Tabs defaultValue={projectGroups[0].projectName} className="flex-1 flex flex-col h-full min-h-0">
+                      <div className="px-4 pt-2 border-b shrink-0 overflow-x-auto">
+                        <TabsList className="w-full justify-start h-10 bg-transparent p-0 flex-nowrap">
+                          {projectGroups.map((group) => (
+                            <TabsTrigger
+                              key={group.projectName}
+                              value={group.projectName}
+                              className="data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none h-10 px-4 flex items-center gap-1.5 whitespace-nowrap"
+                            >
+                              <Building className="h-3.5 w-3.5" />
+                              {group.projectName}
+                              <Badge variant="secondary" className="ml-1 text-[10px] h-4 px-1.5">
+                                {group.visits.length}
+                              </Badge>
+                            </TabsTrigger>
+                          ))}
+                        </TabsList>
+                      </div>
+                      <div className="flex-1 overflow-y-auto">
+                        {projectGroups.map((group) => (
+                          <TabsContent key={group.projectName} value={group.projectName} className="m-0 p-4 space-y-4">
+                            {/* ... content for project visits ... */}
+                            <div className="flex items-center justify-between pb-2 border-b">
+                              <div className="flex items-center gap-2">
+                                <Badge variant={group.lead.stage === 'closed' ? 'default' : 'outline'} className="text-xs">
+                                  {group.lead.stage.replace('_', ' ').toUpperCase()}
+                                </Badge>
+                                {getTemperatureIcon(group.lead.temperature)}
+                              </div>
+                              <span className="text-xs text-muted-foreground">
+                                {group.visits.length} visit{group.visits.length !== 1 ? 's' : ''}
+                              </span>
+                            </div>
+
+                            {group.visits.length === 0 ? (
+                              <div className="text-center py-10 text-muted-foreground">
+                                <History className="h-10 w-10 mx-auto mb-2 opacity-20" />
+                                <p>No site visits yet for this project.</p>
+                              </div>
+                            ) : (
+                              <div className="space-y-4">
+                                {group.visits
+                                  .sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime())
+                                  .map((visit, idx) => (
+                                    <div key={visit.id || idx} className="flex gap-4 group">
+                                      {/* ... visit render ... */}
+                                      <div className="flex flex-col items-center">
+                                        <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 
                                                                                 ${visit.status === 'completed'
-                                                                      ? 'bg-green-100 text-green-600'
-                                                                      : visit.status === 'cancelled'
-                                                                        ? 'bg-red-100 text-red-600'
-                                                                        : 'bg-purple-100 text-purple-600'
-                                                                    }`}>
-                                                                    <MapPin className="h-4 w-4" />
-                                                                  </div>
-                                                                  {idx < group.visits.length - 1 && (
-                                                                    <div className="w-px h-full bg-slate-200 my-1" />
-                                                                  )}
-                                                                </div>
-                                                                <div className="flex-1 pb-6">
-                                                                    <div className="flex items-center justify-between mb-1">
-                                                                        <span className="font-semibold text-sm">
-                                                                          Site Visit
-                                                                          <span className="font-normal text-muted-foreground ml-2 text-xs capitalize">
-                                                                            - {visit.status}
-                                                                          </span>
-                                                                        </span>
-                                                                        <span className="text-xs text-muted-foreground">
-                                                                          {format(parseISO(visit.scheduledAt), 'MMM dd, h:mm a')}
-                                                                        </span>
-                                                                    </div>
-                                                                    <div className="bg-slate-50 rounded-lg border p-3 text-sm">
-                                                                        {visit.rating && (
-                                                                          <div className="flex items-center gap-1 mb-2 text-yellow-500">
-                                                                            {[...Array(5)].map((_, i) => (
-                                                                              <Star key={i} className={`h-3 w-3 ${i < visit.rating! ? 'fill-current' : 'text-slate-200'}`} />
-                                                                            ))}
-                                                                          </div>
-                                                                        )}
-                                                                        <p className="text-slate-700 whitespace-pre-wrap">
-                                                                          {visit.feedback || 'No notes provided.'}
-                                                                        </p>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                </div>
-                                            )}
-                                        </TabsContent>
-                                   ))}
-                                </div>
-                            </Tabs>
-                        )
-                    })()
-                }
-             </div>
+                                            ? 'bg-green-100 text-green-600'
+                                            : visit.status === 'cancelled'
+                                              ? 'bg-red-100 text-red-600'
+                                              : 'bg-purple-100 text-purple-600'
+                                          }`}>
+                                          <MapPin className="h-4 w-4" />
+                                        </div>
+                                        {idx < group.visits.length - 1 && (
+                                          <div className="w-px h-full bg-slate-200 my-1" />
+                                        )}
+                                      </div>
+                                      <div className="flex-1 pb-6">
+                                        <div className="flex items-center justify-between mb-1">
+                                          <span className="font-semibold text-sm">
+                                            Site Visit
+                                            <span className="font-normal text-muted-foreground ml-2 text-xs capitalize">
+                                              - {visit.status}
+                                            </span>
+                                          </span>
+                                          <span className="text-xs text-muted-foreground">
+                                            {format(parseISO(visit.scheduledAt), 'MMM dd, h:mm a')}
+                                          </span>
+                                        </div>
+                                        <div className="bg-slate-50 rounded-lg border p-3 text-sm">
+                                          {visit.rating && (
+                                            <div className="flex items-center gap-1 mb-2 text-yellow-500">
+                                              {[...Array(5)].map((_, i) => (
+                                                <Star key={i} className={`h-3 w-3 ${i < visit.rating! ? 'fill-current' : 'text-slate-200'}`} />
+                                              ))}
+                                            </div>
+                                          )}
+                                          <p className="text-slate-700 whitespace-pre-wrap">
+                                            {visit.feedback || 'No notes provided.'}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                              </div>
+                            )}
+                          </TabsContent>
+                        ))}
+                      </div>
+                    </Tabs>
+                  )
+                })()
+              }
+            </div>
           </div>
         </DialogContent>
       </Dialog>
     </DashboardLayout>
-  );    
+  );
 }

@@ -18,6 +18,26 @@ const createLeadSchema = z.object({
   assignedToId: z.string().optional().nullable()
 });
 
+// ✅ FIX H3: Define explicit update schema — no raw body passthrough to Prisma
+const updateLeadSchema = z.object({
+  name: z.string().min(2).optional(),
+  email: z.string().email().optional().nullable(),
+  phone: z.string().optional(),
+  source: z.string().optional(),
+  stage: z.string().optional(),
+  temperature: z.enum(['hot', 'warm', 'cold']).optional(),
+  budgetMin: z.number().optional().nullable(),
+  budgetMax: z.number().optional().nullable(),
+  preferredLocation: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+  agentNotes: z.string().optional().nullable(),
+  assignedToId: z.string().optional().nullable(),
+  nextFollowupAt: z.string().optional().nullable(),
+  lostReason: z.string().optional().nullable(),
+  interestLevel: z.string().optional().nullable(),
+  preferredPropertyType: z.string().optional().nullable()
+});
+
 const logCallSchema = z.object({
   callStatus: z.enum(['connected_positive', 'connected_callback', 'not_connected', 'not_interested']),
   type: z.enum(['call', 'whatsapp']).default('call'),
@@ -61,7 +81,7 @@ export const getLeads = async (req: AuthRequest, res: Response) => {
     if (assignedTo) where.assignedToId = assignedTo;
 
     if (phone) {
-        where.phone = { contains: String(phone) };
+      where.phone = { contains: String(phone) };
     }
 
     if (needsFollowup === 'true') {
@@ -94,14 +114,14 @@ export const getLeads = async (req: AuthRequest, res: Response) => {
             project: { select: { name: true, location: true } }
           },
           orderBy: { scheduledAt: 'desc' },
-          take: 5 
+          take: 5
         },
         callLogs: {
-           select: { id: true, callStatus: true, callDate: true, notes: true, type: true },
-           orderBy: { callDate: 'desc' },
+          select: { id: true, callStatus: true, callDate: true, notes: true, type: true },
+          orderBy: { callDate: 'desc' },
         },
         propertyRecommendations: {
-            select: { propertyId: true }
+          select: { propertyId: true }
         }
       },
       orderBy: { createdAt: 'desc' }
@@ -142,8 +162,8 @@ export const getLead = async (req: AuthRequest, res: Response) => {
           orderBy: { scheduledAt: 'desc' }
         },
         propertyRecommendations: {
-            include: { property: true },
-            orderBy: { sentAt: 'desc' }
+          include: { property: true },
+          orderBy: { sentAt: 'desc' }
         }
       }
     });
@@ -191,7 +211,8 @@ export const createLead = async (req: AuthRequest, res: Response) => {
 export const updateLead = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const data = req.body; 
+    // ✅ FIX H3: Validate against explicit schema — raw body is never passed to Prisma
+    const data = updateLeadSchema.parse(req.body);
 
     const existingLead = await prisma.lead.findUnique({ where: { id } });
     if (!existingLead) return res.status(404).json({ error: 'Lead not found' });
@@ -200,27 +221,27 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
     const isOwner = existingLead.assignedToId === req.user!.userId;
 
     if (isAgent) {
-        if (!isOwner) {
-            return res.status(403).json({ error: 'You can only update your own leads.' });
-        }
-        // ADDED AGENT SPECIFIC FIELDS
-        const allowedUpdates = ['notes', 'stage', 'temperature', 'budgetMin', 'budgetMax', 'preferredLocation', 'nextFollowupAt', 'lostReason', 'agentNotes', 'interestLevel', 'preferredPropertyType'];
-        const updates = Object.keys(data);
-        const hasIllegalUpdates = updates.some(key => !allowedUpdates.includes(key));
-
-        if (hasIllegalUpdates) {
-            return res.status(403).json({ error: 'Agents can only update basic properties.' });
-        }
+      if (!isOwner) {
+        return res.status(403).json({ error: 'You can only update your own leads.' });
+      }
+      // Agents are additionally restricted to only safe fields
+      const agentAllowed = ['notes', 'stage', 'temperature', 'budgetMin', 'budgetMax',
+        'preferredLocation', 'nextFollowupAt', 'lostReason', 'agentNotes', 'interestLevel', 'preferredPropertyType'] as const;
+      const updates = Object.keys(data) as string[];
+      if (updates.some(k => !agentAllowed.includes(k as any))) {
+        return res.status(403).json({ error: 'Agents can only update basic lead properties.' });
+      }
     }
 
     const lead = await prisma.lead.update({
       where: { id },
-      data,
+      data: data as any,
       include: { assignedTo: true }
     });
 
     return res.json(lead);
   } catch (error) {
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
     console.error('Update Lead Error:', error);
     return res.status(500).json({ error: 'Failed to update lead' });
   }
@@ -243,7 +264,7 @@ export const deleteLead = async (req: AuthRequest, res: Response) => {
 
 export const logCall = async (req: AuthRequest, res: Response) => {
   try {
-    const { id } = req.params; 
+    const { id } = req.params;
     const data = logCallSchema.parse(req.body);
 
     const callLog = await prisma.callLog.create({
@@ -260,26 +281,26 @@ export const logCall = async (req: AuthRequest, res: Response) => {
     });
 
     let leadUpdates: any = { lastContactedAt: new Date() };
-    
+
     // Auto Advance logic
     if (data.callStatus === 'connected_positive') {
-        leadUpdates.temperature = 'hot';
-        leadUpdates.stage = 'contacted'; 
+      leadUpdates.temperature = 'hot';
+      leadUpdates.stage = 'contacted';
     } else if (data.callStatus === 'connected_callback') {
-        leadUpdates.stage = 'contacted';
-        if (data.callbackScheduledAt) {
-            leadUpdates.nextFollowupAt = new Date(data.callbackScheduledAt);
-        }
-    } else if (data.callStatus === 'not_interested') {
-        leadUpdates.stage = 'closed';
-        leadUpdates.lostReason = data.rejectionReason || 'Not Interested';
-    } else if (data.callbackScheduledAt) {
+      leadUpdates.stage = 'contacted';
+      if (data.callbackScheduledAt) {
         leadUpdates.nextFollowupAt = new Date(data.callbackScheduledAt);
+      }
+    } else if (data.callStatus === 'not_interested') {
+      leadUpdates.stage = 'closed';
+      leadUpdates.lostReason = data.rejectionReason || 'Not Interested';
+    } else if (data.callbackScheduledAt) {
+      leadUpdates.nextFollowupAt = new Date(data.callbackScheduledAt);
     }
 
     await prisma.lead.update({
-        where: { id },
-        data: leadUpdates
+      where: { id },
+      data: leadUpdates
     });
 
     return res.status(201).json(callLog);
@@ -291,11 +312,11 @@ export const logCall = async (req: AuthRequest, res: Response) => {
 
 export const recommendProperties = async (req: AuthRequest, res: Response) => {
   try {
-    const { id } = req.params; 
+    const { id } = req.params;
     const { propertyIds } = recommendationSchema.parse(req.body);
 
     await prisma.$transaction(
-      propertyIds.map((propId) => 
+      propertyIds.map((propId) =>
         prisma.propertyRecommendation.create({
           data: {
             leadId: id,
@@ -306,9 +327,9 @@ export const recommendProperties = async (req: AuthRequest, res: Response) => {
       )
     );
 
-    return res.status(201).json({ 
-      success: true, 
-      message: `${propertyIds.length} properties recommended` 
+    return res.status(201).json({
+      success: true,
+      message: `${propertyIds.length} properties recommended`
     });
   } catch (error) {
     console.error('Recommendation Error:', error);
