@@ -34,7 +34,7 @@ const updateLeadSchema = z.object({
   assignedToId: z.string().optional().nullable(),
   nextFollowupAt: z.string().optional().nullable(),
   lostReason: z.string().optional().nullable(),
-  interestLevel: z.string().optional().nullable(),
+  interestLevel: z.number().optional().nullable(),
   preferredPropertyType: z.string().optional().nullable()
 });
 
@@ -406,6 +406,15 @@ export const getAgentDashboardStats = async (req: AuthRequest, res: Response) =>
       }
     });
 
+    // Get number of missed calls (callback follow-up tasks)
+    const missedCalls = await prisma.followUpTask.count({
+      where: {
+        agentId: agentId,
+        taskType: 'callback',
+        status: 'pending' // Only count tasks that haven't been completed yet
+      }
+    });
+
     const missedVisits = await prisma.siteVisit.count({
       where: {
         OR: [
@@ -425,7 +434,7 @@ export const getAgentDashboardStats = async (req: AuthRequest, res: Response) =>
       }
     });
 
-    return res.json({ missedFollowups, missedVisits, stagnantLeads });
+    return res.json({ missedFollowups, missedVisits, stagnantLeads, missedCalls });
   } catch (error) {
     console.error('Agent Stats Error:', error);
     return res.status(500).json({ error: 'Failed to fetch agent stats' });

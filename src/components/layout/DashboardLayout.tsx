@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Bell, X, AlertTriangle, Calendar, Users,
-  Clock, TrendingDown, UserX, ChevronRight, RefreshCw
+  Clock, TrendingDown, UserX, ChevronRight, RefreshCw, PhoneMissed
 } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
@@ -29,6 +29,7 @@ interface AgentStats {
   missedFollowups: number;
   missedVisits: number;
   stagnantLeads: number;
+  missedCalls?: number; // Optional since it might be new from backend
 }
 
 interface DashboardLayoutProps {
@@ -102,6 +103,18 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
               bg: 'bg-red-50',
               icon: AlertTriangle,
               href: '/leads',
+            });
+          }
+          if (data.missedCalls && data.missedCalls > 0) {
+            items.push({
+              id: 'missed_calls',
+              title: 'Missed Calls',
+              subtitle: 'Customers called you but you were busy',
+              count: data.missedCalls,
+              color: 'text-rose-600',
+              bg: 'bg-rose-50',
+              icon: PhoneMissed,
+              href: '/leads', // Direct them to leads page to see pending followups
             });
           }
           if (data.missedVisits > 0) {
@@ -266,12 +279,13 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
 
       // Sort highest count first, critical items first
       const priority: Record<string, number> = {
-        unassigned_lead: 0,
-        overdue_followup: 1,
-        missed_visit: 2,
-        stagnant_lead: 3,
-        today_visit: 4,
-        new_leads_today: 5,
+        missed_calls: 0,
+        unassigned_lead: 1,
+        overdue_followup: 2,
+        missed_visit: 3,
+        stagnant_lead: 4,
+        today_visit: 5,
+        new_leads_today: 6,
       };
       items.sort((a, b) => (priority[a.id] ?? 9) - (priority[b.id] ?? 9));
 
@@ -324,9 +338,8 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
               onClick={() => setNotifOpen(prev => !prev)}
             >
               <Bell
-                className={`h-5 w-5 transition-colors ${
-                  totalCount > 0 ? 'text-slate-800' : 'text-slate-400'
-                }`}
+                className={`h-5 w-5 transition-colors ${totalCount > 0 ? 'text-slate-800' : 'text-slate-400'
+                  }`}
               />
               {totalCount > 0 && (
                 <span className="absolute -top-1 -right-1 h-5 min-w-[20px] px-1 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center leading-none shadow-sm">

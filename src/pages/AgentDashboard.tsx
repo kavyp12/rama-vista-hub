@@ -75,6 +75,7 @@ interface PerformanceStats {
   conversionRate: number;
   monthlyTarget?: number;
   monthlyAchieved?: number;
+  missedCalls?: number;
 }
 
 interface CallLog {
@@ -368,7 +369,20 @@ export default function AgentDashboard() {
       <div className="space-y-6">
 
         {/* === DAILY SUMMARY BANNER === */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {stats?.missedCalls !== undefined && stats.missedCalls > 0 && (
+            <div className="bg-rose-50 border border-rose-100 rounded-xl p-4 flex items-center gap-3">
+              <div className="h-10 w-10 bg-rose-100 rounded-full flex items-center justify-center shrink-0">
+                <PhoneMissed className="h-5 w-5 text-rose-600" />
+              </div>
+              <div>
+                <p className="text-xs text-rose-500 font-medium">Missed Calls</p>
+                <p className="text-2xl font-bold text-rose-700">{stats.missedCalls}</p>
+                <p className="text-[10px] text-rose-400">Needs Ringback</p>
+              </div>
+            </div>
+          )}
+
           <div className="bg-red-50 border border-red-100 rounded-xl p-4 flex items-center gap-3">
             <div className="h-10 w-10 bg-red-100 rounded-full flex items-center justify-center shrink-0">
               <AlertTriangle className="h-5 w-5 text-red-600" />

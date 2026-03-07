@@ -14,6 +14,52 @@ const createCallLogSchema = z.object({
   rejectionReason: z.string().optional().nullable()
 });
 
+// --- NEW FUNCTION 3: MCUBE DYNAMIC ROUTING ---
+export const mcubeRouting = async (req: Request, res: Response) => {
+  try {
+    const callerNumber = (req.query.callfrom || req.body.callfrom || req.query.caller_id || req.body.caller_id || '') as string;
+
+    if (!callerNumber) {
+      return res.status(200).json({ status: "success", exenumber: "7874755553" });
+    }
+
+    const cleanCaller = callerNumber.slice(-10);
+
+    const lead = await prisma.lead.findFirst({
+      where: { phone: { contains: cleanCaller } },
+      include: { assignedTo: true }
+    });
+
+    // 1. If assigned to a sales agent, route directly to them
+    if (lead?.assignedTo && lead.assignedTo.role === 'sales_agent' && lead.assignedTo.phone) {
+      return res.status(200).json({ status: "success", exenumber: lead.assignedTo.phone });
+    }
+
+    // 2. Otherwise (unassigned or assigned to someone else), round-robin across admins for sequential hunting
+    const admins = await prisma.user.findMany({
+      where: { role: 'admin', isActive: true, phone: { not: null } },
+      orderBy: { lastContactedAt: 'asc' }
+    });
+
+    if (admins.length > 0) {
+      const selectedAdmin = admins[0];
+      await prisma.user.update({
+        where: { id: selectedAdmin.id },
+        data: { lastContactedAt: new Date() }
+      });
+
+      // Sequential comma-separated hunting list for admins: 1st, 2nd, 3rd, etc.
+      const exeNumbers = admins.map(a => a.phone).join(',');
+      return res.status(200).json({ status: "success", exenumber: exeNumbers });
+    }
+
+    return res.status(200).json({ status: "success", exenumber: "7874755553" });
+  } catch (error) {
+    console.error('MCUBE Routing Error:', error);
+    return res.status(200).json({ status: "success", exenumber: "7874755553" });
+  }
+};
+
 // --- NEW FUNCTION 1: INITIATE CALL VIA MCUBE ---
 export const initiateMcubeCall = async (req: AuthRequest, res: Response) => {
   try {
@@ -118,6 +164,19 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
       await prisma.lead.update({
         where: { id: lead.id },
         data: { stage: nextStage as any, temperature: 'hot' }
+      });
+    }
+
+    // 5. Auto-schedule a FollowUpTask (Notification) for missed calls
+    if (mappedStatus === 'not_connected') {
+      await prisma.followUpTask.create({
+        data: {
+          leadId: lead.id,
+          agentId: agent.id,
+          taskType: 'callback',
+          scheduledAt: addHours(new Date(), 2),
+          notes: 'Missed incoming call from Lead. Please call back when free.',
+        }
       });
     }
 

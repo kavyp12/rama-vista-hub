@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/lib/auth-context';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -9,35 +11,41 @@ import { ArrowRight, MapPin, Bed, Bath, Square } from 'lucide-react';
 interface Property {
   id: string;
   title: string;
-  property_type: string;
+  propertyType: string;
   location: string;
   bedrooms: number | null;
   bathrooms: number | null;
-  area_sqft: number | null;
+  areaSqft: number | null;
   price: number;
   status: string;
 }
 
 export function PropertyOverview() {
+  const { token } = useAuth();
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function fetchProperties() {
-      const { data, error } = await supabase
-        .from('properties')
-        .select('id, title, property_type, location, bedrooms, bathrooms, area_sqft, price, status')
-        .order('created_at', { ascending: false })
-        .limit(4);
-
-      if (!error && data) {
-        setProperties(data);
+      if (!token) return;
+      try {
+        const res = await fetch(`${API_URL}/properties`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const sorted = data.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          setProperties(sorted.slice(0, 4));
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     }
 
     fetchProperties();
-  }, []);
+  }, [token]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -127,7 +135,7 @@ export function PropertyOverview() {
                 <div className="flex items-center gap-4 text-sm text-muted-foreground mt-3">
                   <span className="flex items-center gap-1">
                     <Badge variant="outline" className="font-normal">
-                      {formatPropertyType(property.property_type)}
+                      {formatPropertyType(property.propertyType)}
                     </Badge>
                   </span>
                   {property.bedrooms && (
@@ -142,10 +150,10 @@ export function PropertyOverview() {
                       {property.bathrooms}
                     </span>
                   )}
-                  {property.area_sqft && (
+                  {property.areaSqft && (
                     <span className="flex items-center gap-1">
                       <Square className="h-3.5 w-3.5" />
-                      {property.area_sqft} sqft
+                      {property.areaSqft} sqft
                     </span>
                   )}
                 </div>

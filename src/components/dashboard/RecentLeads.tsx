@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/lib/auth-context';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -16,29 +18,35 @@ interface Lead {
   stage: string;
   temperature: string;
   source: string;
-  created_at: string;
+  createdAt: string;
 }
 
 export function RecentLeads() {
+  const { token } = useAuth();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function fetchLeads() {
-      const { data, error } = await supabase
-        .from('leads')
-        .select('id, name, email, phone, stage, temperature, source, created_at')
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      if (!error && data) {
-        setLeads(data);
+      if (!token) return;
+      try {
+        const res = await fetch(`${API_URL}/leads`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          // API returns sorted correctly, we just need to slice
+          setLeads(data.slice(0, 5));
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     }
 
     fetchLeads();
-  }, []);
+  }, [token]);
 
   const getTemperatureBadge = (temp: string) => {
     switch (temp) {
@@ -152,7 +160,7 @@ export function RecentLeads() {
                 <div className="text-right hidden sm:block">
                   {getStageBadge(lead.stage)}
                   <p className="text-xs text-muted-foreground mt-1">
-                    {formatDistanceToNow(new Date(lead.created_at), { addSuffix: true })}
+                    {formatDistanceToNow(new Date(lead.createdAt), { addSuffix: true })}
                   </p>
                 </div>
               </Link>
