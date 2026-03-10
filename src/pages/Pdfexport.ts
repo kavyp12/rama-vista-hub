@@ -48,12 +48,12 @@ export const exportToPDF = (
   // ===== HEADER =====
   doc.setFillColor(COLORS.primary);
   doc.rect(0, 0, 210, 35, 'F');
-  
+
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(24);
   doc.setFont('helvetica', 'bold');
   doc.text('SALES PERFORMANCE REPORT', 105, 15, { align: 'center' });
-  
+
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.text(`Generated: ${format(new Date(), 'dd MMM yyyy, HH:mm')}`, 105, 22, { align: 'center' });
@@ -63,7 +63,7 @@ export const exportToPDF = (
 
   // ===== KEY METRICS CARDS =====
   const metrics = [
-    { label: 'Total Leads', value: filteredLeads.length.toString(), color: COLORS.primary },
+    { label: 'Assigned Leads', value: filteredLeads.length.toString(), color: COLORS.primary },
     { label: 'Closed Deals', value: closedDeals.length.toString(), color: COLORS.success },
     { label: 'Total Revenue', value: `₹${formatPrice(totalRevenue)}`, color: COLORS.purple },
     { label: 'Conversion Rate', value: `${conversionRate.toFixed(1)}%`, color: COLORS.warning },
@@ -76,15 +76,15 @@ export const exportToPDF = (
 
   metrics.forEach((metric, idx) => {
     const x = startX + (cardWidth + gap) * idx;
-    
+
     doc.setFillColor(metric.color);
     doc.roundedRect(x, yPos, cardWidth, cardHeight, 2, 2, 'F');
-    
+
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
     doc.text(metric.label, x + cardWidth / 2, yPos + 6, { align: 'center' });
-    
+
     doc.setFontSize(16);
     doc.setFont('helvetica', 'bold');
     doc.text(metric.value, x + cardWidth / 2, yPos + 15, { align: 'center' });
@@ -104,7 +104,7 @@ export const exportToPDF = (
 
   const leadStats = [
     ['Temperature', 'Hot', 'Warm', 'Cold'],
-    ['Count', 
+    ['Count',
       filteredLeads.filter(l => l.temperature === 'hot').length.toString(),
       filteredLeads.filter(l => l.temperature === 'warm').length.toString(),
       filteredLeads.filter(l => l.temperature === 'cold').length.toString()
@@ -148,7 +148,7 @@ export const exportToPDF = (
 
   const activityStats = [
     ['Metric', 'Total Calls', 'Connected', 'Connect Rate', 'Site Visits', 'Completed', 'Avg Rating'],
-    ['Value', 
+    ['Value',
       filteredCalls.length.toString(),
       connectedCalls.toString(),
       filteredCalls.length > 0 ? `${((connectedCalls / filteredCalls.length) * 100).toFixed(1)}%` : '0%',
@@ -237,6 +237,49 @@ export const exportToPDF = (
       theme: 'striped',
       styles: { fontSize: 8, cellPadding: 2 },
       headStyles: { fillColor: COLORS.success, textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: COLORS.lightGray },
+      margin: { left: 15, right: 15 },
+    });
+  }
+
+  yPos = (doc as any).lastAutoTable ? (doc as any).lastAutoTable.finalY + 15 : yPos + 15;
+
+  // ===== SITE VISITS TABLE =====
+  if (filteredVisits.length > 0) {
+    if (yPos > 240) {
+      doc.addPage();
+      yPos = 20;
+    }
+
+    doc.setFillColor(COLORS.dark);
+    doc.rect(15, yPos, 180, 8, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(11);
+    doc.text('SITE VISITS SUMMARY', 20, yPos + 5.5);
+
+    yPos += 12;
+
+    const visitsTableData = filteredVisits.slice(0, 30).map(visit => {
+      const lead = filteredLeads.find(l => l.id === visit.leadId);
+      const project = projects.find(p => p.id === visit.projectId);
+      const locationName = project?.name || visit.project?.name || visit.property?.title || 'Unknown Location';
+
+      return [
+        lead?.name || 'Unknown',
+        format(new Date(visit.scheduledAt), 'dd MMM yy'),
+        locationName,
+        visit.status.toUpperCase(),
+        visit.conductedBy ? agents.find(a => a.id === visit.conductedBy)?.fullName || 'Unknown' : 'Unassigned'
+      ];
+    });
+
+    autoTable(doc, {
+      startY: yPos,
+      head: [['Lead Name', 'Date', 'Location / Project', 'Status', 'Conducted By']],
+      body: visitsTableData,
+      theme: 'striped',
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: COLORS.warning, textColor: 255, fontStyle: 'bold' },
       alternateRowStyles: { fillColor: COLORS.lightGray },
       margin: { left: 15, right: 15 },
     });

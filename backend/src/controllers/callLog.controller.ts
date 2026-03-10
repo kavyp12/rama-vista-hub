@@ -100,26 +100,27 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
     const callData = req.body;
 
     // Extract MCUBE payload data based on their docs
-    const { callto, emp_phone, dialstatus, filename, answeredtime, callid } = callData;
+    const { callfrom, callto, dialstatus, filename, duration, callid } = callData;
 
     // ✅ FIX C3: Guard against missing / too-short phone fields
     // Always respond 200 first so MCUBE doesn't retry on validation failures
+    if (!callfrom || typeof callfrom !== 'string' || callfrom.length < 10) {
+      console.warn('MCUBE Webhook: invalid or missing callfrom field', callData);
+      return res.status(200).send('Webhook received (invalid callfrom)');
+    }
     if (!callto || typeof callto !== 'string' || callto.length < 10) {
       console.warn('MCUBE Webhook: invalid or missing callto field', callData);
       return res.status(200).send('Webhook received (invalid callto)');
     }
-    if (!emp_phone || typeof emp_phone !== 'string' || emp_phone.length < 10) {
-      console.warn('MCUBE Webhook: invalid or missing emp_phone field', callData);
-      return res.status(200).send('Webhook received (invalid emp_phone)');
-    }
 
     // 1. Find Lead and Agent by phone number (using contains to handle +91 formatting differences)
-    const lead = await prisma.lead.findFirst({ where: { phone: { contains: callto.slice(-10) } } });
-    const agent = await prisma.user.findFirst({ where: { phone: { contains: emp_phone.slice(-10) } } });
+    // callfrom = Customer (Lead), callto = Agent
+    const lead = await prisma.lead.findFirst({ where: { phone: { contains: callfrom.slice(-10) } } });
+    const agent = await prisma.user.findFirst({ where: { phone: { contains: callto.slice(-10) } } });
 
     // ✅ FIX C3: Return 200 (not 404) so MCUBE doesn't retry when lead/agent isn't in CRM
     if (!lead || !agent) {
-      console.warn('MCUBE Webhook: Lead or Agent not found for phones', { callto, emp_phone });
+      console.warn('MCUBE Webhook: Lead or Agent not found for phones', { callfrom, callto });
       return res.status(200).send('Webhook received (lead or agent not found in CRM)');
     }
 
@@ -132,10 +133,10 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
       mappedStatus = "not_connected";
     }
 
-    // Convert answeredtime (e.g., "00:00:04") to seconds
+    // Convert duration (e.g., "00:00:04") to seconds
     let durationInSeconds = null;
-    if (answeredtime) {
-      const parts = answeredtime.split(':');
+    if (duration) {
+      const parts = duration.split(':');
       if (parts.length === 3) {
         durationInSeconds = (+parts[0]) * 60 * 60 + (+parts[1]) * 60 + (+parts[2]);
       }

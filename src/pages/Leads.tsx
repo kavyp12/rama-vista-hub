@@ -9,8 +9,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { LeadCard } from '@/components/leads/LeadCard'; 
-import { EditLeadDialog } from '@/components/leads/EditLeadDialog'; 
+import { LeadCard } from '@/components/leads/LeadCard';
+import { EditLeadDialog } from '@/components/leads/EditLeadDialog';
 import { Plus, Search, Users, RefreshCw, MapPin, Filter, X, Upload, CheckSquare, UserCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
@@ -53,19 +53,28 @@ export default function Leads() {
   const { user, token } = useAuth();
   const { canAssignLeads } = usePermissions();
   const { toast } = useToast();
-  
+
   const [leads, setLeads] = useState<Lead[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
-  
+
+  // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
   const [stageFilter, setStageFilter] = useState('active_open');
   const [sourceFilter, setSourceFilter] = useState('all');
+  const [temperatureFilter, setTemperatureFilter] = useState('all');
+  const [assignedAgentFilter, setAssignedAgentFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  
+  // New UI State for Filter Dropdown
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
 
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
   const [isBulkAssignOpen, setIsBulkAssignOpen] = useState(false);
   const [bulkAgentId, setBulkAgentId] = useState('');
-  
+
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [leadToEdit, setLeadToEdit] = useState<Lead | null>(null);
@@ -79,12 +88,21 @@ export default function Leads() {
     preferredLocation: '', notes: '', assignedToId: ''
   });
 
+  // Calculate active filters to show on the badge
+  const activeFiltersCount = [
+    stageFilter !== 'active_open',
+    sourceFilter !== 'all',
+    temperatureFilter !== 'all',
+    assignedAgentFilter !== 'all',
+    dateFilter !== 'all'
+  ].filter(Boolean).length;
+
   useEffect(() => {
     if (token) {
       fetchData();
       if (canAssignLeads) fetchAgents();
     }
-  }, [token, canAssignLeads]); 
+  }, [token, canAssignLeads]);
 
   async function fetchData() {
     setLoading(true);
@@ -121,7 +139,7 @@ export default function Leads() {
       const data = await res.json();
       if (data.success) {
         toast({ title: 'Sync Complete', description: data.message });
-        fetchData(); 
+        fetchData();
       } else {
         throw new Error(data.error);
       }
@@ -140,7 +158,7 @@ export default function Leads() {
     reader.onload = async (e) => {
       const text = e.target?.result as string;
       const rows = text.split('\n').slice(1);
-      
+
       const parsedLeads = rows.filter(row => row.trim() !== '').map(row => {
         const [name, phone, email, budget, source] = row.split(',');
         return {
@@ -156,21 +174,21 @@ export default function Leads() {
 
       try {
         const res = await fetch(`${API_URL}/leads/import`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ leads: parsedLeads })
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ leads: parsedLeads })
         });
         const data = await res.json();
         if (data.success) {
-            toast({ title: 'Import Successful', description: `${data.count} leads added.` });
-            fetchData();
+          toast({ title: 'Import Successful', description: `${data.count} leads added.` });
+          fetchData();
         }
       } catch (err) {
         toast({ title: 'Import Failed', variant: 'destructive' });
       }
     };
     reader.readAsText(file);
-    if(fileInputRef.current) fileInputRef.current.value = '';
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const toggleSelect = (id: string) => {
@@ -188,15 +206,15 @@ export default function Leads() {
   const handleBulkAssign = async () => {
     if (!bulkAgentId) return;
     try {
-        await fetch(`${API_URL}/leads/bulk-assign`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ leadIds: Array.from(selectedLeads), agentId: bulkAgentId })
-        });
-        toast({ title: 'Bulk Assign', description: 'Leads reassigned successfully.' });
-        setSelectedLeads(new Set());
-        setIsBulkAssignOpen(false);
-        fetchData();
+      await fetch(`${API_URL}/leads/bulk-assign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ leadIds: Array.from(selectedLeads), agentId: bulkAgentId })
+      });
+      toast({ title: 'Bulk Assign', description: 'Leads reassigned successfully.' });
+      setSelectedLeads(new Set());
+      setIsBulkAssignOpen(false);
+      fetchData();
     } catch (e) { toast({ title: 'Error', variant: 'destructive' }); }
   };
 
@@ -232,7 +250,7 @@ export default function Leads() {
       setFormData({
         name: '', phone: '', email: '', source: 'Website',
         temperature: 'warm', budgetMin: '', budgetMax: '',
-        preferredLocation: '', notes: '', assignedToId: '' 
+        preferredLocation: '', notes: '', assignedToId: ''
       });
       fetchData();
     } catch (error) {
@@ -247,185 +265,322 @@ export default function Leads() {
       if (stageFilter === 'active_open') matchesStage = !['closed', 'lost', 'completed'].includes(lead.stage);
       else if (stageFilter !== 'all') matchesStage = lead.stage === stageFilter;
       const matchesSource = sourceFilter === 'all' ? true : lead.source === sourceFilter;
-      return matchesSearch && matchesStage && matchesSource;
+      const matchesTemperature = temperatureFilter === 'all' ? true : lead.temperature === temperatureFilter;
+
+      let matchesAgent = true;
+      if (assignedAgentFilter === 'unassigned') matchesAgent = !lead.assignedToId;
+      else if (assignedAgentFilter !== 'all') matchesAgent = lead.assignedToId === assignedAgentFilter;
+
+      let matchesDate = true;
+      if (dateFilter !== 'all') {
+        const leadDate = new Date(lead.createdAt);
+        const now = new Date();
+        if (dateFilter === 'today') {
+          matchesDate = leadDate.toDateString() === now.toDateString();
+        } else if (dateFilter === 'yesterday') {
+          const yesterday = new Date();
+          yesterday.setDate(now.getDate() - 1);
+          matchesDate = leadDate.toDateString() === yesterday.toDateString();
+        } else if (dateFilter === 'last_7_days') {
+          const msInWeek = 7 * 24 * 60 * 60 * 1000;
+          matchesDate = (now.getTime() - leadDate.getTime()) <= msInWeek;
+        } else if (dateFilter === 'last_30_days') {
+          const msIn30Days = 30 * 24 * 60 * 60 * 1000;
+          matchesDate = (now.getTime() - leadDate.getTime()) <= msIn30Days;
+        } else if (dateFilter === 'this_month') {
+          matchesDate = leadDate.getMonth() === now.getMonth() && leadDate.getFullYear() === now.getFullYear();
+        } else if (dateFilter === 'custom') {
+          if (startDate) {
+            const start = new Date(startDate);
+            start.setHours(0, 0, 0, 0);
+            matchesDate = matchesDate && leadDate >= start;
+          }
+          if (endDate) {
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+            matchesDate = matchesDate && leadDate <= end;
+          }
+        }
+      }
+
+      return matchesSearch && matchesStage && matchesSource && matchesTemperature && matchesAgent && matchesDate;
     })
     .sort((a, b) => {
-        if (a.isPriority && !b.isPriority) return -1;
-        if (!a.isPriority && b.isPriority) return 1;
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      if (a.isPriority && !b.isPriority) return -1;
+      if (!a.isPriority && b.isPriority) return 1;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
 
   return (
     <DashboardLayout title="Leads" description={canAssignLeads ? "Manage and track your potential customers" : "My Assigned Leads & Action Items"}>
       <div className="space-y-4 h-full flex flex-col relative">
-        
-        <div className="flex flex-col gap-4 shrink-0 bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
-          <div className="flex flex-col sm:flex-row gap-4 justify-between items-center">
-             <div className="relative w-full sm:w-80">
+
+        <div className="flex flex-col gap-4 shrink-0 bg-white p-4 rounded-lg border border-slate-200 shadow-sm relative z-20">
+          <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
+            
+            {/* Left Side: Search & Filter Trigger */}
+            <div className="flex flex-1 items-center gap-2 w-full">
+              <div className="relative flex-1 sm:max-w-md">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input placeholder="Search..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-             </div>
-             
-             <div className="flex gap-2 w-full sm:w-auto">
-                <Button variant="outline" onClick={handleSync} disabled={isSyncing} className="gap-2 border-blue-200 text-blue-700 hover:bg-blue-50 hidden sm:flex">
-                  <RefreshCw className={`h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} /> Sync
+                <Input placeholder="Search leads..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+              </div>
+
+              <div className="relative">
+                <Button 
+                  variant={activeFiltersCount > 0 ? "secondary" : "outline"} 
+                  onClick={() => setIsFilterOpen(!isFilterOpen)} 
+                  className="gap-2"
+                >
+                  <Filter className="h-4 w-4" />
+                  <span className="hidden sm:inline">Filters</span>
+                  {activeFiltersCount > 0 && (
+                    <Badge variant="default" className="ml-1 px-1.5 h-5 rounded-full text-xs">
+                      {activeFiltersCount}
+                    </Badge>
+                  )}
                 </Button>
 
-                {canAssignLeads && (
-                    <>
-                        <Button variant="outline" className="gap-2" onClick={() => fileInputRef.current?.click()}>
-                            <Upload className="h-4 w-4" /> Import CSV
+                {/* The Consolidated Filter Box */}
+                {isFilterOpen && (
+                  <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-2 w-[calc(100vw-2rem)] sm:w-[320px] bg-white border border-slate-200 rounded-lg shadow-xl p-4 z-50 flex flex-col gap-4 animate-in fade-in slide-in-from-top-2">
+                    
+                    <div className="flex justify-between items-center mb-1">
+                      <h4 className="font-semibold text-sm">Filter Leads</h4>
+                      {activeFiltersCount > 0 && (
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => {
+                            setStageFilter('active_open');
+                            setSourceFilter('all');
+                            setDateFilter('all');
+                            setTemperatureFilter('all');
+                            setAssignedAgentFilter('all');
+                            setStartDate('');
+                            setEndDate('');
+                          }} 
+                          className="h-8 px-2 text-xs text-muted-foreground hover:text-red-600"
+                        >
+                          <X className="h-3 w-3 mr-1" /> Clear All
                         </Button>
-                        <input type="file" accept=".csv" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
-                    </>
-                )}
+                      )}
+                    </div>
 
-                <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-                    <DialogTrigger asChild><Button className="gap-2"><Plus className="h-4 w-4" /> Add Lead</Button></DialogTrigger>
-                    <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
-                      <DialogHeader>
-                        <DialogTitle>Add New Lead</DialogTitle>
-                        <DialogDescription>Enter the details of the potential customer.</DialogDescription>
-                      </DialogHeader>
-                      <form onSubmit={handleCreateLead} className="space-y-4 py-4">
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-2"><Label>Full Name *</Label><Input required value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} /></div>
-                          <div className="space-y-2"><Label>Phone Number *</Label><Input required value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} /></div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-2"><Label>Email</Label><Input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} /></div>
-                          <div className="space-y-2">
-                            <Label>Source</Label>
-                            <Select value={formData.source} onValueChange={(val) => setFormData({ ...formData, source: val })}>
-                              <SelectTrigger><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                {['Website','Referral','Social Media','Walk-in','Other'].map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Budget Range</Label>
-                          <div className="flex gap-2">
-                            <Input type="number" placeholder="Min" value={formData.budgetMin} onChange={(e) => setFormData({ ...formData, budgetMin: e.target.value })} />
-                            <Input type="number" placeholder="Max" value={formData.budgetMax} onChange={(e) => setFormData({ ...formData, budgetMax: e.target.value })} />
-                            <Select value={budgetUnit} onValueChange={(val: any) => setBudgetUnit(val)}>
-                              <SelectTrigger className="w-[110px]"><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="L">Lakhs</SelectItem>
-                                <SelectItem value="Cr">Crores</SelectItem>
-                                <SelectItem value="K">Thousands</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Preferred Location</Label>
-                          <div className="relative">
-                            <MapPin className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                            <Input className="pl-9" placeholder="e.g. Gota, Satellite" value={formData.preferredLocation} onChange={(e) => setFormData({ ...formData, preferredLocation: e.target.value })} />
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Assign To</Label>
-                          <Select value={formData.assignedToId} onValueChange={(val) => setFormData({ ...formData, assignedToId: val })}>
-                            <SelectTrigger><SelectValue placeholder="Select Agent (Optional)" /></SelectTrigger>
+                    <div className="space-y-3">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs text-muted-foreground">Status</Label>
+                        <Select value={stageFilter} onValueChange={setStageFilter}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="active_open">Active (Open)</SelectItem>
+                            <SelectItem value="all">All Leads</SelectItem>
+                            <SelectItem value="new">New</SelectItem>
+                            <SelectItem value="contacted">Contacted</SelectItem>
+                            <SelectItem value="site_visit">Site Visit</SelectItem>
+                            <SelectItem value="negotiation">Negotiation</SelectItem>
+                            <SelectItem value="token">Token</SelectItem>
+                            <SelectItem value="closed" className="text-red-600">Closed</SelectItem>
+                            <SelectItem value="lost" className="text-slate-500">Lost</SelectItem>
+                            <SelectItem value="completed" className="text-green-600">Completed</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs text-muted-foreground">Source</Label>
+                          <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
                             <SelectContent>
-                              {agents.map((agent) => (
-                                <SelectItem key={agent.id} value={agent.id}>{agent.fullName}</SelectItem>
-                              ))}
+                              <SelectItem value="all">All Sources</SelectItem>
+                              <SelectItem value="Website">Website</SelectItem>
+                              <SelectItem value="Referral">Referral</SelectItem>
+                              <SelectItem value="Social Media">Social Media</SelectItem>
+                              <SelectItem value="Walk-in">Walk-in</SelectItem>
+                              <SelectItem value="Other">Other</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
-                        <div className="space-y-2"><Label>Notes & Requirements</Label><Textarea placeholder="What does the agent need to know?" value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} /></div>
-                        <div className="flex justify-end gap-2 pt-4">
-                          <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
-                          <Button type="submit">Create Lead</Button>
+                        
+                        <div className="space-y-1.5">
+                          <Label className="text-xs text-muted-foreground">Temperature</Label>
+                          <Select value={temperatureFilter} onValueChange={setTemperatureFilter}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Temps</SelectItem>
+                              <SelectItem value="hot">Hot</SelectItem>
+                              <SelectItem value="warm">Warm</SelectItem>
+                              <SelectItem value="cold">Cold</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
-                      </form>
-                    </DialogContent>
-                </Dialog>
-             </div>
+                      </div>
+
+                      {canAssignLeads && (
+                        <div className="space-y-1.5">
+                          <Label className="text-xs text-muted-foreground">Assigned Agent</Label>
+                          <Select value={assignedAgentFilter} onValueChange={setAssignedAgentFilter}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Agents</SelectItem>
+                              <SelectItem value="unassigned">Unassigned</SelectItem>
+                              {agents.map(a => <SelectItem key={a.id} value={a.id}>{a.fullName}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      <div className="space-y-1.5">
+                        <Label className="text-xs text-muted-foreground">Date Created</Label>
+                        <Select value={dateFilter} onValueChange={setDateFilter}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Time</SelectItem>
+                            <SelectItem value="today">Today</SelectItem>
+                            <SelectItem value="yesterday">Yesterday</SelectItem>
+                            <SelectItem value="last_7_days">Last 7 Days</SelectItem>
+                            <SelectItem value="last_30_days">Last 30 Days</SelectItem>
+                            <SelectItem value="this_month">This Month</SelectItem>
+                            <SelectItem value="custom">Custom Range</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {dateFilter === 'custom' && (
+                        <div className="flex items-center gap-2 pt-1">
+                          <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-8 text-xs" />
+                          <span className="text-xs text-muted-foreground">to</span>
+                          <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-8 text-xs" />
+                        </div>
+                      )}
+
+                      <div className="pt-2">
+                        <Button className="w-full" onClick={() => setIsFilterOpen(false)}>Apply Filters</Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right Side Actions: Sync, Import, Add Lead */}
+            <div className="flex gap-2 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0 shrink-0">
+              <Button variant="outline" onClick={handleSync} disabled={isSyncing} className="gap-2 border-blue-200 text-blue-700 hover:bg-blue-50 hidden xl:flex">
+                <RefreshCw className={`h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} /> Sync
+              </Button>
+
+              {canAssignLeads && (
+                <>
+                  <Button variant="outline" className="gap-2 shrink-0" onClick={() => fileInputRef.current?.click()}>
+                    <Upload className="h-4 w-4" /> <span className="hidden sm:inline">Import CSV</span>
+                  </Button>
+                  <input type="file" accept=".csv" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
+                </>
+              )}
+
+              <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+                <DialogTrigger asChild><Button className="gap-2 shrink-0"><Plus className="h-4 w-4" /> Add Lead</Button></DialogTrigger>
+                <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Add New Lead</DialogTitle>
+                    <DialogDescription>Enter the details of the potential customer.</DialogDescription>
+                  </DialogHeader>
+                  <form onSubmit={handleCreateLead} className="space-y-4 py-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2"><Label>Full Name *</Label><Input required value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} /></div>
+                      <div className="space-y-2"><Label>Phone Number *</Label><Input required value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} /></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2"><Label>Email</Label><Input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} /></div>
+                      <div className="space-y-2">
+                        <Label>Source</Label>
+                        <Select value={formData.source} onValueChange={(val) => setFormData({ ...formData, source: val })}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {['Website', 'Referral', 'Social Media', 'Walk-in', 'Other'].map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Budget Range</Label>
+                      <div className="flex gap-2">
+                        <Input type="number" placeholder="Min" value={formData.budgetMin} onChange={(e) => setFormData({ ...formData, budgetMin: e.target.value })} />
+                        <Input type="number" placeholder="Max" value={formData.budgetMax} onChange={(e) => setFormData({ ...formData, budgetMax: e.target.value })} />
+                        <Select value={budgetUnit} onValueChange={(val: any) => setBudgetUnit(val)}>
+                          <SelectTrigger className="w-[110px]"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="L">Lakhs</SelectItem>
+                            <SelectItem value="Cr">Crores</SelectItem>
+                            <SelectItem value="K">Thousands</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Preferred Location</Label>
+                      <div className="relative">
+                        <MapPin className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Input className="pl-9" placeholder="e.g. Gota, Satellite" value={formData.preferredLocation} onChange={(e) => setFormData({ ...formData, preferredLocation: e.target.value })} />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Assign To</Label>
+                      <Select value={formData.assignedToId} onValueChange={(val) => setFormData({ ...formData, assignedToId: val })}>
+                        <SelectTrigger><SelectValue placeholder="Select Agent (Optional)" /></SelectTrigger>
+                        <SelectContent>
+                          {agents.map((agent) => (
+                            <SelectItem key={agent.id} value={agent.id}>{agent.fullName}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2"><Label>Notes & Requirements</Label><Textarea placeholder="What does the agent need to know?" value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} /></div>
+                    <div className="flex justify-end gap-2 pt-4">
+                      <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
+                      <Button type="submit">Create Lead</Button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
-             {canAssignLeads && (
-                <Button variant="ghost" size="sm" onClick={selectAll} className="gap-2">
-                    <CheckSquare className={`h-4 w-4 ${selectedLeads.size > 0 ? 'text-blue-600' : 'text-slate-400'}`} />
-                    {selectedLeads.size === filteredLeads.length && filteredLeads.length > 0 ? 'Deselect All' : 'Select All'}
-                </Button>
-             )}
-             
-             <div className="w-[180px]">
-               <Select value={stageFilter} onValueChange={setStageFilter}>
-                 <SelectTrigger className="h-8 text-xs bg-slate-50 border-slate-200">
-                    <div className="flex gap-2">
-                     <span className="text-muted-foreground">Status:</span>
-                     <SelectValue />
-                   </div>
-                 </SelectTrigger>
-                 <SelectContent>
-                   <SelectItem value="active_open">Active (Open)</SelectItem>
-                   <SelectItem value="all">All Leads</SelectItem>
-                   <SelectItem value="new">New</SelectItem>
-                   <SelectItem value="contacted">Contacted</SelectItem>
-                   <SelectItem value="site_visit">Site Visit</SelectItem>
-                   <SelectItem value="negotiation">Negotiation</SelectItem>
-                   <SelectItem value="token">Token</SelectItem>
-                   <SelectItem value="closed" className="text-red-600">Closed</SelectItem>
-                   <SelectItem value="lost" className="text-slate-500">Lost</SelectItem>
-                   <SelectItem value="completed" className="text-green-600">Completed</SelectItem>
-                 </SelectContent>
-               </Select>
-             </div>
-
-             <div className="w-[160px]">
-                <Select value={sourceFilter} onValueChange={setSourceFilter}>
-                 <SelectTrigger className="h-8 text-xs bg-slate-50 border-slate-200">
-                   <div className="flex gap-2">
-                     <span className="text-muted-foreground">Source:</span>
-                     <SelectValue />
-                   </div>
-                 </SelectTrigger>
-                 <SelectContent>
-                   <SelectItem value="all">All Sources</SelectItem>
-                   <SelectItem value="Website">Website</SelectItem>
-                   <SelectItem value="Referral">Referral</SelectItem>
-                   <SelectItem value="Social Media">Social Media</SelectItem>
-                   <SelectItem value="Walk-in">Walk-in</SelectItem>
-                   <SelectItem value="Other">Other</SelectItem>
-                 </SelectContent>
-               </Select>
-             </div>
-
-             {(stageFilter !== 'active_open' || sourceFilter !== 'all' || searchQuery) && (
-               <Button variant="ghost" size="sm" onClick={() => { setStageFilter('active_open'); setSourceFilter('all'); setSearchQuery(''); }} className="h-8 px-2 text-xs text-muted-foreground hover:text-red-600">
-                 <X className="h-3 w-3 mr-1" /> Clear
-               </Button>
-             )}
-          </div>
+          {/* Clean row for Select All (Only shows for admins who can assign leads) */}
+          {canAssignLeads && (
+            <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+              <Button variant="ghost" size="sm" onClick={selectAll} className="gap-2 text-muted-foreground hover:text-slate-900 -ml-2">
+                <CheckSquare className={`h-4 w-4 ${selectedLeads.size > 0 ? 'text-blue-600' : 'text-slate-400'}`} />
+                {selectedLeads.size === filteredLeads.length && filteredLeads.length > 0 ? 'Deselect All' : 'Select All Visible'}
+              </Button>
+              {selectedLeads.size > 0 && (
+                <span className="text-xs text-muted-foreground font-medium">{selectedLeads.size} selected</span>
+              )}
+            </div>
+          )}
         </div>
 
+        {/* Bulk Assign Floating Action Bar */}
         {selectedLeads.size > 0 && canAssignLeads && (
-            <div className="bg-blue-600 text-white p-3 rounded-lg flex items-center justify-between shadow-lg animate-in slide-in-from-bottom-2 z-10 sticky top-2">
-                <span className="font-semibold text-sm ml-2">{selectedLeads.size} leads selected</span>
-                <div className="flex gap-2">
-                    <Dialog open={isBulkAssignOpen} onOpenChange={setIsBulkAssignOpen}>
-                        <DialogTrigger asChild>
-                            <Button size="sm" variant="secondary" className="gap-2"><UserCheck className="h-4 w-4" /> Assign Agent</Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                            <DialogHeader><DialogTitle>Bulk Assign</DialogTitle></DialogHeader>
-                            <Select value={bulkAgentId} onValueChange={setBulkAgentId}>
-                                <SelectTrigger><SelectValue placeholder="Select Agent" /></SelectTrigger>
-                                <SelectContent>{agents.map(a => <SelectItem key={a.id} value={a.id}>{a.fullName}</SelectItem>)}</SelectContent>
-                            </Select>
-                            <Button onClick={handleBulkAssign} className="w-full mt-4">Confirm Assignment</Button>
-                        </DialogContent>
-                    </Dialog>
-                    <Button size="sm" variant="ghost" className="text-white hover:bg-blue-700" onClick={() => setSelectedLeads(new Set())}><X className="h-4 w-4" /></Button>
-                </div>
+          <div className="bg-blue-600 text-white p-3 rounded-lg flex items-center justify-between shadow-lg animate-in slide-in-from-bottom-2 z-10 sticky top-2">
+            <span className="font-semibold text-sm ml-2">{selectedLeads.size} leads selected for reassignment</span>
+            <div className="flex gap-2">
+              <Dialog open={isBulkAssignOpen} onOpenChange={setIsBulkAssignOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm" variant="secondary" className="gap-2"><UserCheck className="h-4 w-4" /> Assign Agent</Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader><DialogTitle>Bulk Assign</DialogTitle></DialogHeader>
+                  <Select value={bulkAgentId} onValueChange={setBulkAgentId}>
+                    <SelectTrigger><SelectValue placeholder="Select Agent" /></SelectTrigger>
+                    <SelectContent>{agents.map(a => <SelectItem key={a.id} value={a.id}>{a.fullName}</SelectItem>)}</SelectContent>
+                  </Select>
+                  <Button onClick={handleBulkAssign} className="w-full mt-4">Confirm Assignment</Button>
+                </DialogContent>
+              </Dialog>
+              <Button size="sm" variant="ghost" className="text-white hover:bg-blue-700" onClick={() => setSelectedLeads(new Set())}><X className="h-4 w-4" /></Button>
             </div>
+          </div>
         )}
 
         <div className="flex-1 overflow-y-auto pb-6">
@@ -444,11 +599,11 @@ export default function Leads() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {filteredLeads.map((lead) => (
-                <LeadCard 
-                  key={lead.id} 
-                  lead={lead} 
-                  profiles={agents} 
-                  onUpdate={fetchData} 
+                <LeadCard
+                  key={lead.id}
+                  lead={lead}
+                  profiles={agents}
+                  onUpdate={fetchData}
                   onEdit={(l) => { setLeadToEdit(l); setIsEditDialogOpen(true); }}
                   selected={selectedLeads.has(lead.id)}
                   onSelect={canAssignLeads ? () => toggleSelect(lead.id) : undefined}
@@ -458,11 +613,11 @@ export default function Leads() {
           )}
         </div>
 
-        <EditLeadDialog 
-          lead={leadToEdit} 
-          open={isEditDialogOpen} 
-          onOpenChange={setIsEditDialogOpen} 
-          onSuccess={fetchData} 
+        <EditLeadDialog
+          lead={leadToEdit}
+          open={isEditDialogOpen}
+          onOpenChange={setIsEditDialogOpen}
+          onSuccess={fetchData}
         />
       </div>
     </DashboardLayout>

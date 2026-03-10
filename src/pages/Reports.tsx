@@ -23,11 +23,11 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, PieChart as RechartsPie, Pie, Cell, Area, AreaChart
 } from 'recharts';
-import { 
-  startOfMonth, endOfMonth, startOfWeek, endOfWeek, startOfYear, 
-  endOfYear, subMonths, format, parseISO, differenceInDays 
+import {
+  startOfMonth, endOfMonth, startOfWeek, endOfWeek, startOfYear,
+  endOfYear, subMonths, format, parseISO, differenceInDays
 } from 'date-fns';
-  import { exportToPDF } from '@/pages/Pdfexport';
+import { exportToPDF } from '@/pages/Pdfexport';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
@@ -183,6 +183,7 @@ export default function Reports() {
   const isAgent = user?.role === 'sales_agent';
 
   const [period, setPeriod] = useState('month');
+  const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [agentDialogOpen, setAgentDialogOpen] = useState(false);
@@ -263,10 +264,19 @@ export default function Reports() {
   const getPeriodDates = (p: string) => {
     const now = new Date();
     switch (p) {
+      case 'today': {
+        const start = new Date(now);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(now);
+        end.setHours(23, 59, 59, 999);
+        return { start, end };
+      }
       case 'week':
         return { start: startOfWeek(now), end: endOfWeek(now) };
       case 'year':
         return { start: startOfYear(now), end: endOfYear(now) };
+      case 'all':
+        return { start: new Date(2000, 0, 1), end: now };
       default:
         return { start: startOfMonth(now), end: endOfMonth(now) };
     }
@@ -275,12 +285,23 @@ export default function Reports() {
   const getPreviousPeriodDates = (p: string) => {
     const now = new Date();
     switch (p) {
+      case 'today': {
+        const prevDayStart = new Date(now);
+        prevDayStart.setDate(now.getDate() - 1);
+        prevDayStart.setHours(0, 0, 0, 0);
+        const prevDayEnd = new Date(now);
+        prevDayEnd.setDate(now.getDate() - 1);
+        prevDayEnd.setHours(23, 59, 59, 999);
+        return { start: prevDayStart, end: prevDayEnd };
+      }
       case 'week':
         const prevWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
         return { start: startOfWeek(prevWeek), end: endOfWeek(prevWeek) };
       case 'year':
         const prevYear = new Date(now.getFullYear() - 1, 0, 1);
         return { start: startOfYear(prevYear), end: endOfYear(prevYear) };
+      case 'all':
+        return { start: new Date(2000, 0, 1), end: now };
       default:
         const prevMonth = subMonths(now, 1);
         return { start: startOfMonth(prevMonth), end: endOfMonth(prevMonth) };
@@ -335,13 +356,13 @@ export default function Reports() {
 
   // ========== EXPORT FUNCTIONS ==========
 
-   const exportReport = (agentId?: string) => {
+  const exportReport = (agentId?: string) => {
     setExporting(true);
     try {
-      const agentName = agentId 
-        ? agents.find(a => a.id === agentId)?.fullName 
+      const agentName = agentId
+        ? agents.find(a => a.id === agentId)?.fullName
         : 'All_Agents';
-      
+
       exportToPDF(
         leads,
         deals,
@@ -353,18 +374,18 @@ export default function Reports() {
         agentId,
         agentName
       );
-      
-      toast({ 
-        title: 'Success', 
+
+      toast({
+        title: 'Success',
         description: 'PDF report generated successfully',
         className: 'bg-green-50 border-green-200'
       });
     } catch (error) {
       console.error('Export error:', error);
-      toast({ 
-        title: 'Error', 
-        description: 'Failed to generate PDF', 
-        variant: 'destructive' 
+      toast({
+        title: 'Error',
+        description: 'Failed to generate PDF',
+        variant: 'destructive'
       });
     } finally {
       setExporting(false);
@@ -408,40 +429,68 @@ export default function Reports() {
     }, {} as Record<string, number>)
   ).map(([name, value]) => ({ name, value }));
 
-  const monthlyTrend = Array.from({ length: 6 }, (_, i) => {
-    const month = subMonths(new Date(), 5 - i);
-    const monthLeads = leads.filter(l => {
-      const date = new Date(l.createdAt);
-      return date.getMonth() === month.getMonth() && date.getFullYear() === month.getFullYear();
-    });
-    const monthDeals = deals.filter(d => {
-      const date = new Date(d.createdAt);
-      return date.getMonth() === month.getMonth() && date.getFullYear() === month.getFullYear() && d.stage === 'closed';
-    });
+  const lenTrend = period === 'today' || period === 'week' ? 7 : (period === 'year' || period === 'all' ? 12 : 6);
+  const monthlyTrend = Array.from({ length: lenTrend }, (_, i) => {
+    if (period === 'today' || period === 'week') {
+      const date = new Date();
+      date.setDate(date.getDate() - (lenTrend - 1 - i));
+      const dayLeads = leads.filter(l => new Date(l.createdAt).toDateString() === date.toDateString());
+      const dayDeals = deals.filter(d => d.stage === 'closed' && new Date(d.createdAt).toDateString() === date.toDateString());
+      return {
+        timeLabel: format(date, 'EEE'),
+        leads: dayLeads.length,
+        deals: dayDeals.length,
+        revenue: dayDeals.reduce((sum, d) => sum + (Number(d.dealValue) || 0), 0) / 100000,
+      };
+    } else {
+      const month = subMonths(new Date(), lenTrend - 1 - i);
+      const monthLeads = leads.filter(l => {
+        const date = new Date(l.createdAt);
+        return date.getMonth() === month.getMonth() && date.getFullYear() === month.getFullYear();
+      });
+      const monthDeals = deals.filter(d => {
+        const date = new Date(d.createdAt);
+        return date.getMonth() === month.getMonth() && date.getFullYear() === month.getFullYear() && d.stage === 'closed';
+      });
 
-    return {
-      month: format(month, 'MMM'),
-      leads: monthLeads.length,
-      deals: monthDeals.length,
-      revenue: monthDeals.reduce((sum, d) => sum + (Number(d.dealValue) || 0), 0) / 100000,
-    };
+      return {
+        timeLabel: format(month, 'MMM'),
+        leads: monthLeads.length,
+        deals: monthDeals.length,
+        revenue: monthDeals.reduce((sum, d) => sum + (Number(d.dealValue) || 0), 0) / 100000,
+      };
+    }
   });
 
-  const callMetrics = Array.from({ length: 7 }, (_, i) => {
-    const date = new Date();
-    date.setDate(date.getDate() - (6 - i));
-    const dayCalls = callLogs.filter(c => {
-      const callDate = new Date(c.callDate);
-      return callDate.toDateString() === date.toDateString();
-    });
+  const lenCalls = period === 'today' || period === 'week' ? 7 : (period === 'year' || period === 'all' ? 12 : 6);
+  const callMetrics = Array.from({ length: lenCalls }, (_, i) => {
+    if (period === 'today' || period === 'week') {
+      const date = new Date();
+      date.setDate(date.getDate() - (lenCalls - 1 - i));
+      const dayCalls = callLogs.filter(c => new Date(c.callDate).toDateString() === date.toDateString());
 
-    return {
-      day: format(date, 'EEE'),
-      total: dayCalls.length,
-      connected: dayCalls.filter(c => c.callStatus?.startsWith('connected')).length,
-      positive: dayCalls.filter(c => c.callStatus === 'connected_positive').length,
-      callbacks: dayCalls.filter(c => c.callStatus === 'connected_callback').length,
-    };
+      return {
+        timeLabel: format(date, 'EEE'),
+        total: dayCalls.length,
+        connected: dayCalls.filter(c => c.callStatus?.startsWith('connected')).length,
+        positive: dayCalls.filter(c => c.callStatus === 'connected_positive').length,
+        callbacks: dayCalls.filter(c => c.callStatus === 'connected_callback').length,
+      };
+    } else {
+      const month = subMonths(new Date(), lenCalls - 1 - i);
+      const monthCalls = callLogs.filter(c => {
+        const callDate = new Date(c.callDate);
+        return callDate.getMonth() === month.getMonth() && callDate.getFullYear() === month.getFullYear();
+      });
+
+      return {
+        timeLabel: format(month, 'MMM'),
+        total: monthCalls.length,
+        connected: monthCalls.filter(c => c.callStatus?.startsWith('connected')).length,
+        positive: monthCalls.filter(c => c.callStatus === 'connected_positive').length,
+        callbacks: monthCalls.filter(c => c.callStatus === 'connected_callback').length,
+      };
+    }
   });
 
   // Agent Performance Data
@@ -464,27 +513,40 @@ export default function Reports() {
 
   const selectedAgentData = agentPerformance.find(a => a.id === selectedAgentId);
 
-  const selectedAgentMonthly = Array.from({ length: 5 }, (_, i) => {
-    const month = subMonths(new Date(), 4 - i);
-    const monthLeads = leads.filter(l => {
-      const date = new Date(l.createdAt);
-      return l.assignedToId === selectedAgentId && 
-             date.getMonth() === month.getMonth() && 
-             date.getFullYear() === month.getFullYear();
-    });
-    const monthDeals = deals.filter(d => {
-      const date = new Date(d.createdAt);
-      return d.assignedToId === selectedAgentId && 
-             d.stage === 'closed' &&
-             date.getMonth() === month.getMonth() && 
-             date.getFullYear() === month.getFullYear();
-    });
+  const lenAgent = period === 'today' || period === 'week' ? 7 : (period === 'year' || period === 'all' ? 12 : 5);
+  const selectedAgentMonthly = Array.from({ length: lenAgent }, (_, i) => {
+    if (period === 'today' || period === 'week') {
+      const date = new Date();
+      date.setDate(date.getDate() - (lenAgent - 1 - i));
+      const dayLeads = leads.filter(l => l.assignedToId === selectedAgentId && new Date(l.createdAt).toDateString() === date.toDateString());
+      const dayDeals = deals.filter(d => d.assignedToId === selectedAgentId && d.stage === 'closed' && new Date(d.createdAt).toDateString() === date.toDateString());
+      return {
+        timeLabel: format(date, 'EEE'),
+        leads: dayLeads.length,
+        conversions: dayDeals.length,
+      };
+    } else {
+      const month = subMonths(new Date(), lenAgent - 1 - i);
+      const monthLeads = leads.filter(l => {
+        const date = new Date(l.createdAt);
+        return l.assignedToId === selectedAgentId &&
+          date.getMonth() === month.getMonth() &&
+          date.getFullYear() === month.getFullYear();
+      });
+      const monthDeals = deals.filter(d => {
+        const date = new Date(d.createdAt);
+        return d.assignedToId === selectedAgentId &&
+          d.stage === 'closed' &&
+          date.getMonth() === month.getMonth() &&
+          date.getFullYear() === month.getFullYear();
+      });
 
-    return {
-      month: format(month, 'MMM'),
-      leads: monthLeads.length,
-      conversions: monthDeals.length,
-    };
+      return {
+        timeLabel: format(month, 'MMM'),
+        leads: monthLeads.length,
+        conversions: monthDeals.length,
+      };
+    }
   });
 
   const filteredAgents = agentPerformance.filter(agent =>
@@ -509,7 +571,7 @@ export default function Reports() {
   return (
     <DashboardLayout title="Reports & Analytics" description="Comprehensive sales performance insights">
       <div className="space-y-6">
-        
+
         {/* HEADER CONTROLS */}
         <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
           <div className="flex gap-2">
@@ -518,14 +580,16 @@ export default function Reports() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="today">Today</SelectItem>
                 <SelectItem value="week">This Week</SelectItem>
                 <SelectItem value="month">This Month</SelectItem>
                 <SelectItem value="year">This Year</SelectItem>
+                <SelectItem value="all">All Time</SelectItem>
               </SelectContent>
             </Select>
 
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={handleRefresh}
               disabled={refreshing}
               className="gap-2"
@@ -535,7 +599,7 @@ export default function Reports() {
             </Button>
           </div>
 
-           <Button 
+          <Button
             onClick={() => exportReport(isAgent ? user?.id : undefined)}
             disabled={exporting}
             className="gap-2 bg-green-600 hover:bg-green-700"
@@ -621,7 +685,7 @@ export default function Reports() {
         </div>
 
         {/* TABS */}
-        <Tabs defaultValue="overview" className="space-y-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="leads">Leads</TabsTrigger>
@@ -646,34 +710,34 @@ export default function Reports() {
                     <AreaChart data={monthlyTrend}>
                       <defs>
                         <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor={COLORS.primary} stopOpacity={0.8}/>
-                          <stop offset="95%" stopColor={COLORS.primary} stopOpacity={0}/>
+                          <stop offset="5%" stopColor={COLORS.primary} stopOpacity={0.8} />
+                          <stop offset="95%" stopColor={COLORS.primary} stopOpacity={0} />
                         </linearGradient>
                         <linearGradient id="colorLeads" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor={COLORS.success} stopOpacity={0.8}/>
-                          <stop offset="95%" stopColor={COLORS.success} stopOpacity={0}/>
+                          <stop offset="5%" stopColor={COLORS.success} stopOpacity={0.8} />
+                          <stop offset="95%" stopColor={COLORS.success} stopOpacity={0} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis dataKey="month" className="text-xs" />
+                      <XAxis dataKey="timeLabel" className="text-xs" />
                       <YAxis yAxisId="left" className="text-xs" />
                       <YAxis yAxisId="right" orientation="right" className="text-xs" />
                       <Tooltip />
-                      <Area 
+                      <Area
                         yAxisId="left"
-                        type="monotone" 
-                        dataKey="revenue" 
-                        stroke={COLORS.primary} 
-                        fillOpacity={1} 
-                        fill="url(#colorRevenue)" 
+                        type="monotone"
+                        dataKey="revenue"
+                        stroke={COLORS.primary}
+                        fillOpacity={1}
+                        fill="url(#colorRevenue)"
                         name="Revenue (L)"
                       />
-                      <Area 
+                      <Area
                         yAxisId="right"
-                        type="monotone" 
-                        dataKey="leads" 
-                        stroke={COLORS.success} 
-                        fillOpacity={1} 
+                        type="monotone"
+                        dataKey="leads"
+                        stroke={COLORS.success}
+                        fillOpacity={1}
                         fill="url(#colorLeads)"
                         name="Leads"
                       />
@@ -747,7 +811,7 @@ export default function Reports() {
                           {leads.filter(l => l.temperature === 'hot').length}
                         </p>
                         <p className="text-xs text-red-600 mt-1">
-                          {leads.length > 0 
+                          {leads.length > 0
                             ? `${((leads.filter(l => l.temperature === 'hot').length / leads.length) * 100).toFixed(0)}%`
                             : '0%'}
                         </p>
@@ -761,7 +825,7 @@ export default function Reports() {
                           {leads.filter(l => l.temperature === 'warm').length}
                         </p>
                         <p className="text-xs text-yellow-600 mt-1">
-                          {leads.length > 0 
+                          {leads.length > 0
                             ? `${((leads.filter(l => l.temperature === 'warm').length / leads.length) * 100).toFixed(0)}%`
                             : '0%'}
                         </p>
@@ -775,7 +839,7 @@ export default function Reports() {
                           {leads.filter(l => l.temperature === 'cold').length}
                         </p>
                         <p className="text-xs text-blue-600 mt-1">
-                          {leads.length > 0 
+                          {leads.length > 0
                             ? `${((leads.filter(l => l.temperature === 'cold').length / leads.length) * 100).toFixed(0)}%`
                             : '0%'}
                         </p>
@@ -793,28 +857,28 @@ export default function Reports() {
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Users className="h-5 w-5 text-blue-500" />
-                  Monthly Lead Generation
+                  Lead Generation Trend
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
                   <LineChart data={monthlyTrend}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis dataKey="month" className="text-xs" />
+                    <XAxis dataKey="timeLabel" className="text-xs" />
                     <YAxis className="text-xs" />
                     <Tooltip />
-                    <Line 
-                      type="monotone" 
-                      dataKey="leads" 
-                      stroke={COLORS.primary} 
+                    <Line
+                      type="monotone"
+                      dataKey="leads"
+                      stroke={COLORS.primary}
                       strokeWidth={3}
                       dot={{ fill: COLORS.primary, r: 6 }}
                       name="Leads"
                     />
-                    <Line 
-                      type="monotone" 
-                      dataKey="deals" 
-                      stroke={COLORS.success} 
+                    <Line
+                      type="monotone"
+                      dataKey="deals"
+                      stroke={COLORS.success}
                       strokeWidth={3}
                       dot={{ fill: COLORS.success, r: 6 }}
                       name="Closed Deals"
@@ -878,14 +942,14 @@ export default function Reports() {
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Phone className="h-5 w-5 text-blue-500" />
-                  Daily Call Activity
+                  Call Activity
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
                   <BarChart data={callMetrics}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis dataKey="day" className="text-xs" />
+                    <XAxis dataKey="timeLabel" className="text-xs" />
                     <YAxis className="text-xs" />
                     <Tooltip />
                     <Bar dataKey="total" fill={COLORS.primary} name="Total Calls" radius={[8, 8, 0, 0]} />
@@ -998,8 +1062,8 @@ export default function Reports() {
                           <p className="text-sm text-muted-foreground">Win Rate</p>
                           <p className="text-2xl font-bold mt-1">
                             {leads.filter(l => l.assignedToId === user?.id).length > 0
-                              ? ((deals.filter(d => d.assignedToId === user?.id && d.stage === 'closed').length / 
-                                  leads.filter(l => l.assignedToId === user?.id).length) * 100).toFixed(0)
+                              ? ((deals.filter(d => d.assignedToId === user?.id && d.stage === 'closed').length /
+                                leads.filter(l => l.assignedToId === user?.id).length) * 100).toFixed(0)
                               : 0}%
                           </p>
                         </CardContent>
@@ -1024,8 +1088,8 @@ export default function Reports() {
                             <span className="text-sm">Connect Rate</span>
                             <span className="font-bold text-blue-600">
                               {callLogs.filter(c => c.agentId === user?.id).length > 0
-                                ? `${((callLogs.filter(c => c.agentId === user?.id && c.callStatus?.startsWith('connected')).length / 
-                                    callLogs.filter(c => c.agentId === user?.id).length) * 100).toFixed(1)}%`
+                                ? `${((callLogs.filter(c => c.agentId === user?.id && c.callStatus?.startsWith('connected')).length /
+                                  callLogs.filter(c => c.agentId === user?.id).length) * 100).toFixed(1)}%`
                                 : '0%'}
                             </span>
                           </div>
@@ -1050,8 +1114,8 @@ export default function Reports() {
                             <span className="font-bold text-blue-600">
                               {siteVisits.filter(v => v.conductedBy === user?.id && v.rating).length > 0
                                 ? (siteVisits.filter(v => v.conductedBy === user?.id && v.rating)
-                                    .reduce((sum, v) => sum + (v.rating || 0), 0) / 
-                                    siteVisits.filter(v => v.conductedBy === user?.id && v.rating).length).toFixed(1)
+                                  .reduce((sum, v) => sum + (v.rating || 0), 0) /
+                                  siteVisits.filter(v => v.conductedBy === user?.id && v.rating).length).toFixed(1)
                                 : 'N/A'} ⭐
                             </span>
                           </div>
@@ -1060,7 +1124,7 @@ export default function Reports() {
                     </div>
 
                     <div className="mt-6 flex justify-end">
-                      <Button 
+                      <Button
                         onClick={() => exportReport(user?.id)}
                         disabled={exporting}
                         className="gap-2 bg-green-600 hover:bg-green-700"
@@ -1089,8 +1153,8 @@ export default function Reports() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {filteredAgents.map((agent) => (
-                    <Card 
-                      key={agent.id} 
+                    <Card
+                      key={agent.id}
                       className="hover:shadow-lg transition-shadow cursor-pointer group"
                       onClick={() => {
                         setSelectedAgentId(agent.id);
@@ -1138,8 +1202,8 @@ export default function Reports() {
                           </div>
                         </div>
 
-                        <Button 
-                          variant="outline" 
+                        <Button
+                          variant="outline"
                           size="sm"
                           className="w-full mt-4"
                           onClick={(e) => {
@@ -1214,28 +1278,28 @@ export default function Reports() {
                   {/* Monthly Performance */}
                   <Card>
                     <CardHeader>
-                      <CardTitle className="text-lg">Monthly Performance (Last 5 Months)</CardTitle>
+                      <CardTitle className="text-lg">Performance Trend</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <ResponsiveContainer width="100%" height={200}>
                         <LineChart data={selectedAgentMonthly}>
                           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                          <XAxis dataKey="month" className="text-xs" />
+                          <XAxis dataKey="timeLabel" className="text-xs" />
                           <YAxis className="text-xs" />
                           <Tooltip />
-                          <Line 
-                            type="monotone" 
-                            dataKey="conversions" 
-                            stroke={COLORS.success} 
-                            strokeWidth={2} 
-                            name="Conversions" 
+                          <Line
+                            type="monotone"
+                            dataKey="conversions"
+                            stroke={COLORS.success}
+                            strokeWidth={2}
+                            name="Conversions"
                             dot={{ fill: COLORS.success, r: 4 }}
                           />
-                          <Line 
-                            type="monotone" 
-                            dataKey="leads" 
-                            stroke={COLORS.primary} 
-                            strokeWidth={2} 
+                          <Line
+                            type="monotone"
+                            dataKey="leads"
+                            stroke={COLORS.primary}
+                            strokeWidth={2}
                             name="Leads"
                             dot={{ fill: COLORS.primary, r: 4 }}
                           />
@@ -1248,7 +1312,7 @@ export default function Reports() {
                     <Button variant="outline" onClick={() => setAgentDialogOpen(false)}>
                       Close
                     </Button>
-  <Button 
+                    <Button
                       className="gap-2 bg-green-600 hover:bg-green-700"
                       onClick={() => exportReport(selectedAgentId!)}
                       disabled={exporting}
