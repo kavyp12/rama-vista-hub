@@ -133,12 +133,19 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
       mappedStatus = "not_connected";
     }
 
-    // Convert duration (e.g., "00:00:04") to seconds
+    // Convert duration to seconds (can be "00:00:04" or just "7")
     let durationInSeconds = null;
     if (duration) {
-      const parts = duration.split(':');
-      if (parts.length === 3) {
-        durationInSeconds = (+parts[0]) * 60 * 60 + (+parts[1]) * 60 + (+parts[2]);
+      const durationStr = String(duration);
+      if (durationStr.includes(':')) {
+        const parts = durationStr.split(':');
+        if (parts.length === 3) {
+          durationInSeconds = (+parts[0]) * 60 * 60 + (+parts[1]) * 60 + (+parts[2]);
+        } else if (parts.length === 2) {
+          durationInSeconds = (+parts[0]) * 60 + (+parts[1]);
+        }
+      } else {
+        durationInSeconds = parseInt(durationStr, 10);
       }
     }
 

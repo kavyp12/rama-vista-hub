@@ -11,7 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import { 
   Phone, Flame, Thermometer, Snowflake, 
   Home, CalendarPlus, UserCheck, MapPin, Calendar, Building2, Pencil, Wallet, FileText,
-  CheckCircle2, MessageCircle, Pin, PinOff
+  CheckCircle2, MessageCircle, Pin, PinOff, Trash2
 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { PropertyMatchModal } from './PropertyMatchModal';
@@ -51,7 +51,7 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
   if (lead.assignedTo) {
     assignedProfile = { id: lead.assignedTo.id, fullName: lead.assignedTo.fullName, avatarUrl: lead.assignedTo.avatarUrl };
   } else if (assignedId && profiles.length > 0) {
-    const found = profiles.find((p:any) => p.id === assignedId);
+    const found = profiles.find((p: any) => p.id === assignedId);
     if (found) assignedProfile = { id: found.id, fullName: found.fullName, avatarUrl: null };
   }
 
@@ -59,9 +59,9 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
 
   const getTemperatureIcon = (temp: string) => {
     switch (temp) {
-      case 'hot': return <Flame className="h-3 w-3 text-red-500" />;
-      case 'warm': return <Thermometer className="h-3 w-3 text-amber-500" />;
-      case 'cold': return <Snowflake className="h-3 w-3 text-blue-500" />;
+      case 'hot': return <Flame className="h-4 w-4 text-red-500 shrink-0" />;
+      case 'warm': return <Thermometer className="h-4 w-4 text-amber-500 shrink-0" />;
+      case 'cold': return <Snowflake className="h-4 w-4 text-blue-500 shrink-0" />;
       default: return null;
     }
   };
@@ -90,6 +90,23 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
     } catch (e) { toast({ title: "Failed", variant: "destructive" }); }
   };
 
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('Are you sure you want to delete this lead? This action cannot be undone.')) return;
+    
+    try {
+        const res = await fetch(`${API_URL}/leads/${lead.id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to delete lead');
+        toast({ title: 'Success', description: 'Lead deleted successfully' });
+        onUpdate();
+    } catch (error) {
+        toast({ title: 'Error', description: 'Failed to delete lead', variant: 'destructive' });
+    }
+  };
+
   const handleStageChange = async (newStage: string) => {
     if (newStage === 'lost') {
         setIsLostReasonOpen(true);
@@ -109,6 +126,7 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
       
       toast({ title: 'Updated', description: `Stage changed to ${stage}` });
       setIsLostReasonOpen(false);
+      setLostReasonInput('');
       onUpdate();
     } catch (error) {
       toast({ title: 'Error', description: 'Failed to update stage', variant: 'destructive' });
@@ -143,49 +161,55 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
   const daysOld = Math.floor((Date.now() - createdDate.getTime()) / (1000 * 3600 * 24));
   const nextVisit = lead.siteVisits && lead.siteVisits.length > 0 ? lead.siteVisits[0] : null;
   const visitLocationName = nextVisit?.project?.name || nextVisit?.property?.title || "Site Visit";
-  
-  // Get last call log
   const lastCall = lead.callLogs && lead.callLogs.length > 0 ? lead.callLogs[0] : null;
 
   return (
     <>
-      <Card className={`flex flex-col h-full hover:shadow-lg transition-all duration-200 border-slate-200 group relative overflow-hidden bg-white ${lead.isPriority ? 'bg-amber-50/20' : ''}`}>
-        <div className={`h-1 w-full ${lead.temperature === 'hot' ? 'bg-red-500' : lead.temperature === 'warm' ? 'bg-amber-500' : 'bg-blue-400'}`} />
-        
-        {/* Priority Pin */}
-        <button onClick={handlePriorityToggle} className="absolute top-2 right-8 p-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
-            {lead.isPriority ? <Pin className="h-4 w-4 text-amber-600 fill-amber-100" /> : <PinOff className="h-4 w-4 text-slate-300 hover:text-slate-500" />}
-        </button>
-
-        {onEdit && (
-            <Button 
-                variant="ghost" 
-                size="icon" 
-                className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                onClick={(e) => { e.stopPropagation(); onEdit(lead); }}
-            >
-                <Pencil className="h-3 w-3 text-slate-400 hover:text-blue-600" />
-            </Button>
-        )}
+      <Card className={`flex flex-col h-full hover:shadow-lg transition-all duration-200 border-slate-200 group overflow-hidden bg-white ${lead.isPriority ? 'bg-amber-50/20' : ''}`}>
+        {/* Top Temperature Bar */}
+        <div className={`h-1 w-full shrink-0 ${lead.temperature === 'hot' ? 'bg-red-500' : lead.temperature === 'warm' ? 'bg-amber-500' : 'bg-blue-400'}`} />
         
         <CardContent className="p-4 flex-1 flex flex-col gap-3">
-          <div className="flex justify-between items-start gap-3">
-            <Avatar className="h-10 w-10 border bg-slate-50">
-              <AvatarFallback className="text-xs font-bold text-slate-600">{getInitials(lead.name)}</AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-sm truncate text-slate-900 pr-4" title={lead.name}>{lead.name}</h3>
-                {getTemperatureIcon(lead.temperature)}
-                {lead.isPriority && <Pin className="h-3 w-3 text-amber-500 fill-amber-500 shrink-0" />}
+          
+          {/* HEADER ROW: User Info + Action Buttons */}
+          <div className="flex justify-between items-start gap-2">
+            
+            {/* User Info */}
+            <div className="flex gap-3 items-start flex-1 min-w-0">
+              <Avatar className="h-10 w-10 border bg-slate-50 shrink-0">
+                <AvatarFallback className="text-xs font-bold text-slate-600">{getInitials(lead.name)}</AvatarFallback>
+              </Avatar>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-semibold text-sm truncate text-slate-900" title={lead.name}>{lead.name}</h3>
+                  {getTemperatureIcon(lead.temperature)}
+                </div>
+                <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5 truncate">
+                   <Badge variant="outline" className="text-[9px] h-4 px-1">{daysOld}d old</Badge>
+                   <span className="truncate">• {lead.source}</span>
+                </div>
               </div>
-              <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5 truncate">
-                 <Badge variant="outline" className="text-[9px] h-4 px-1">{daysOld}d old</Badge>
-                 <span>• {lead.source}</span>
-              </div>
+            </div>
+
+            {/* Action Buttons (Inline Flexbox instead of absolute) */}
+            <div className={`flex items-center gap-0.5 shrink-0 transition-opacity duration-200 ${lead.isPriority ? 'opacity-100' : 'md:opacity-0 md:group-hover:opacity-100'}`}>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handlePriorityToggle} title="Toggle Priority">
+                    {lead.isPriority ? <Pin className="h-4 w-4 text-amber-600 fill-amber-100" /> : <PinOff className="h-4 w-4 text-slate-400 hover:text-slate-600" />}
+                </Button>
+                {onEdit && (
+                  <>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); onEdit(lead); }} title="Edit Lead">
+                        <Pencil className="h-3.5 w-3.5 text-slate-400 hover:text-blue-600" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleDelete} title="Delete Lead">
+                        <Trash2 className="h-3.5 w-3.5 text-slate-400 hover:text-red-600" />
+                    </Button>
+                  </>
+                )}
             </div>
           </div>
 
+          {/* Details Section */}
           <div className="grid gap-1.5 py-2 border-t border-slate-100 my-1">
              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs font-medium text-slate-700">
@@ -202,13 +226,14 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
             )}
 
             {lastCall && (
-                <div className="flex items-center gap-2 text-[10px] text-slate-500 bg-slate-50 p-1.5 rounded border border-slate-100">
-                    {lastCall.callStatus === 'connected_positive' ? <CheckCircle2 className="h-3 w-3 text-green-500" /> : <Phone className="h-3 w-3 text-blue-500" />}
+                <div className="flex items-center gap-2 text-[10px] text-slate-500 bg-slate-50 p-1.5 rounded border border-slate-100 mt-1">
+                    {lastCall.callStatus === 'connected_positive' ? <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" /> : <Phone className="h-3 w-3 text-blue-500 shrink-0" />}
                     <span className="truncate">Last call: {lastCall.callStatus.replace('_', ' ')}</span>
                 </div>
              )}
           </div>
 
+          {/* Notes Section */}
           {lead.notes && (
              <div className="bg-amber-50 rounded-md p-2 border border-amber-100">
                <div className="flex items-start gap-2">
@@ -220,65 +245,66 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
              </div>
           )}
           
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-xs text-slate-500">
-              <Phone className="h-3 w-3 shrink-0" />{lead.phone}
-            </div>
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <Phone className="h-3 w-3 shrink-0" />{lead.phone}
           </div>
           
+          {/* Site Visit Block */}
           {nextVisit && (
             <div className="bg-blue-50 rounded-md p-2 mt-1 border border-blue-100">
               <div className="flex items-center gap-2 mb-1">
-                <Calendar className="h-3 w-3 text-blue-600" />
+                <Calendar className="h-3 w-3 text-blue-600 shrink-0" />
                 <span className="text-xs font-medium text-blue-700">{format(new Date(nextVisit.scheduledAt), 'MMM d, h:mm a')}</span>
               </div>
               <div className="flex items-center gap-2">
-                <Building2 className="h-3 w-3 text-blue-500" />
+                <Building2 className="h-3 w-3 text-blue-500 shrink-0" />
                 <span className="text-xs text-blue-600 truncate font-medium" title={visitLocationName}>{visitLocationName}</span>
               </div>
             </div>
           )}
 
-          <div className="mt-auto flex items-center justify-between pt-2 border-t border-slate-50 relative">
+          {/* Bottom Card Controls (Stage & Agent) */}
+          <div className="mt-auto flex items-center justify-between pt-3 border-t border-slate-50">
             
-            {/* Lost Reason Popover */}
+            {/* Stage Selector with Popover */}
             <Popover open={isLostReasonOpen} onOpenChange={setIsLostReasonOpen}>
-                <PopoverTrigger asChild><div className="absolute top-0 left-0 w-0 h-0" /></PopoverTrigger>
-                <PopoverContent className="w-64 p-3 z-50 mb-8" side="top">
+                <PopoverTrigger asChild>
+                  <div onClick={(e) => e.stopPropagation()}>
+                    <Select value={lead.stage} onValueChange={handleStageChange}>
+                      <SelectTrigger className="h-6 w-auto border-0 p-0 text-[10px] font-medium bg-transparent shadow-none gap-1 focus:ring-0">
+                        <Badge variant="secondary" className="text-[10px] h-5 px-1.5 capitalize font-normal bg-slate-100 text-slate-700 hover:bg-slate-200">
+                          {lead.stage.replace('_', ' ')}
+                        </Badge>
+                      </SelectTrigger>
+                      <SelectContent>
+                          <SelectItem value="new">New</SelectItem>
+                          <SelectItem value="contacted">Contacted</SelectItem>
+                          <SelectItem value="site_visit">Site Visit</SelectItem>
+                          <SelectItem value="negotiation">Negotiation</SelectItem>
+                          <SelectItem value="token">Token</SelectItem>
+                          <SelectItem value="completed">Completed</SelectItem>
+                          <SelectItem value="closed" className="text-green-600">Closed</SelectItem>
+                          <SelectItem value="lost" className="text-red-600">Lost</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-3 z-50" side="top">
                     <h4 className="font-medium text-sm mb-2">Why was this lead lost?</h4>
                     <Input 
                         placeholder="Reason (e.g. Budget issue)" 
                         value={lostReasonInput} 
                         onChange={(e) => setLostReasonInput(e.target.value)} 
-                        className="h-8 text-xs mb-2"
+                        className="h-8 text-xs mb-3"
                     />
                     <div className="flex gap-2">
-                        <Button variant="outline" size="sm" className="w-full h-8" onClick={() => { setIsLostReasonOpen(false); }}>Cancel</Button>
-                        <Button size="sm" className="w-full h-8" onClick={() => updateStage('lost', lostReasonInput)}>Confirm</Button>
+                        <Button variant="outline" size="sm" className="w-full h-8 text-xs" onClick={() => setIsLostReasonOpen(false)}>Cancel</Button>
+                        <Button size="sm" className="w-full h-8 text-xs" onClick={() => updateStage('lost', lostReasonInput)}>Confirm</Button>
                     </div>
                 </PopoverContent>
             </Popover>
-
-            <div onClick={(e) => e.stopPropagation()}>
-              <Select value={lead.stage} onValueChange={handleStageChange}>
-                <SelectTrigger className="h-6 w-auto border-0 p-0 text-[10px] font-medium bg-transparent shadow-none gap-1 focus:ring-0">
-                  <Badge variant="secondary" className="text-[10px] h-5 px-1.5 capitalize font-normal bg-slate-100 text-slate-700 hover:bg-slate-200">
-                    {lead.stage.replace('_', ' ')}
-                  </Badge>
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="new">New</SelectItem>
-                    <SelectItem value="contacted">Contacted</SelectItem>
-                    <SelectItem value="site_visit">Site Visit</SelectItem>
-                    <SelectItem value="negotiation">Negotiation</SelectItem>
-                    <SelectItem value="token">Token</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="closed" className="text-red-600">Closed</SelectItem>
-                    <SelectItem value="lost" className="text-slate-500">Lost</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
             
+            {/* Assignment Dropdown */}
             <div className="flex items-center">
               {canAssignLeads ? (
                  <Select value={assignedId || ''} onValueChange={handleReassign} disabled={isReassigning}>
@@ -291,7 +317,7 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
                          </Avatar>
                        </div>
                     ) : (
-                      <div className="flex items-center gap-1 text-muted-foreground"><UserCheck className="h-4 w-4" /><span>Assign</span></div>
+                      <div className="flex items-center gap-1 text-muted-foreground"><UserCheck className="h-4 w-4 shrink-0" /><span>Assign</span></div>
                     )}
                   </SelectTrigger>
                   <SelectContent align="end">{profiles.map(p => <SelectItem key={p.id} value={p.id} className="text-xs">{p.fullName}</SelectItem>)}</SelectContent>
@@ -310,19 +336,19 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
           </div>
         </CardContent>
 
-        {/* 4-Grid Footer */}
-        <CardFooter className="p-0 border-t bg-slate-50/50 grid grid-cols-4 divide-x divide-slate-200">
-           <Button variant="ghost" className="h-9 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowQuickCall(true)}>
-             <Phone className="h-3.5 w-3.5" />
+        {/* 4-Grid Action Footer */}
+        <CardFooter className="p-0 border-t bg-slate-50/50 grid grid-cols-4 divide-x divide-slate-200 shrink-0">
+           <Button variant="ghost" className="h-10 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowQuickCall(true)} title="Quick Call">
+             <Phone className="h-4 w-4" />
            </Button>
-           <Button variant="ghost" className="h-9 rounded-none text-slate-500 hover:text-green-600 hover:bg-green-50" onClick={openWhatsApp}>
-             <MessageCircle className="h-3.5 w-3.5" />
+           <Button variant="ghost" className="h-10 rounded-none text-slate-500 hover:text-green-600 hover:bg-green-50" onClick={openWhatsApp} title="WhatsApp">
+             <MessageCircle className="h-4 w-4" />
            </Button>
-           <Button variant="ghost" className="h-9 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowPropertyMatch(true)}>
-             <Home className="h-3.5 w-3.5" />
+           <Button variant="ghost" className="h-10 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowPropertyMatch(true)} title="Property Match">
+             <Home className="h-4 w-4" />
            </Button>
-           <Button variant="ghost" className="h-9 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowScheduleVisit(true)}>
-             <CalendarPlus className="h-3.5 w-3.5" />
+           <Button variant="ghost" className="h-10 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowScheduleVisit(true)} title="Schedule Visit">
+             <CalendarPlus className="h-4 w-4" />
            </Button>
         </CardFooter>
       </Card>

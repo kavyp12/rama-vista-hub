@@ -276,6 +276,27 @@ export default function Telecalling() {
     }
   };
 
+  const handleDeleteLead = async (id: string) => {
+    if (confirm('Are you sure you want to delete this lead? This action cannot be undone.')) {
+        try {
+            const res = await fetch(`${API_URL}/leads/${id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            if (!res.ok) throw new Error('Failed to delete lead');
+
+            toast({ title: "Deleted", description: "Lead deleted successfully." });
+            
+            // Remove from current view locally
+            setTableData(prev => prev.filter(row => row.leadId !== id));
+            fetchStats();
+        } catch (error) {
+            toast({ title: "Error", description: "Could not delete lead.", variant: "destructive" });
+        }
+    }
+  };
+
   return (
     <DashboardLayout title="Telecalling Center" description="Manage your call operations">
       <div className="flex flex-col lg:flex-row h-[calc(100vh-140px)] gap-4 lg:gap-6">
@@ -429,10 +450,16 @@ export default function Telecalling() {
                                  </DropdownMenuTrigger>
                                  <DropdownMenuContent align="end" className="w-48">
                                    {row.isLeadRow ? (
+                                       <>
                                        <DropdownMenuItem onClick={() => handleCallAction(row)} className="text-blue-600 font-medium">
                                           <Phone className="h-4 w-4 mr-2" />
                                           Call Now
                                        </DropdownMenuItem>
+                                       <DropdownMenuItem className="text-red-600 focus:text-red-600 focus:bg-red-50" onClick={() => handleDeleteLead(row.leadId)}>
+                                         <Trash2 className="h-4 w-4 mr-2" />
+                                         Delete Lead
+                                       </DropdownMenuItem>
+                                       </>
                                    ) : null}
                                    
                                    <DropdownMenuItem onClick={() => handleViewDetails(row)}>
