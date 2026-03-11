@@ -364,13 +364,13 @@ export default function Team() {
 
         {/* Action Bar */}
         <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
             <div className="relative w-full sm:w-72">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Search team members..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 bg-slate-50 border-slate-200" />
             </div>
             <Select value={roleFilter} onValueChange={setRoleFilter}>
-              <SelectTrigger className="w-40 bg-slate-50 border-slate-200"><SelectValue placeholder="All Roles" /></SelectTrigger>
+              <SelectTrigger className="w-full sm:w-40 bg-slate-50 border-slate-200"><SelectValue placeholder="All Roles" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Roles</SelectItem>
                 <SelectItem value="sales_agent">Sales Agent</SelectItem>
@@ -602,7 +602,7 @@ export default function Team() {
 
                   {/* Tabbed Data */}
                   <Tabs defaultValue="leads" className="w-full">
-                    <TabsList className="bg-white border shadow-sm p-1 rounded-xl grid grid-cols-4 mb-4 h-auto">
+                    <TabsList className="bg-white border shadow-sm p-1 rounded-xl grid grid-cols-2 sm:grid-cols-4 mb-4 h-auto gap-1">
                       <TabsTrigger value="leads" className="gap-2 py-2 text-xs data-[state=active]:shadow-sm">
                         <Target className="h-3.5 w-3.5" /> Leads
                         <Badge variant="secondary" className="text-[9px] h-4 px-1.5 ml-0.5">{agentDetails.leads.length}</Badge>

@@ -142,7 +142,7 @@ export function PropertyMatchModal({ lead, open, onOpenChange, onSuccess }: any)
         <Dialog open={open} onOpenChange={(val) => { setIsComparing(false); onOpenChange(val); }}>
             <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
                <DialogHeader><DialogTitle>Property Comparison</DialogTitle></DialogHeader>
-               <div className="grid grid-cols-2 gap-6 pt-4">
+               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4">
                   {[p1, p2].map((p, idx) => p ? (
                       <div key={p.id} className="border rounded-lg p-4 space-y-4">
                           <h3 className="font-bold text-lg">{p.title}</h3>
@@ -189,13 +189,14 @@ export function PropertyMatchModal({ lead, open, onOpenChange, onSuccess }: any)
           </div>
           
           {/* Filter Bar */}
-          <div className="flex items-center gap-4 mt-4 bg-slate-50 p-2 rounded border border-slate-100">
-             <div className="flex items-center space-x-2">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 mt-4 bg-slate-50 p-2 rounded border border-slate-100">
+             <div className="flex items-center space-x-2 w-full sm:w-auto">
                 <Switch id="show-all" checked={showAll} onCheckedChange={setShowAll} />
                 <Label htmlFor="show-all" className="text-xs">Ignore Preferences</Label>
              </div>
-             <div className="w-[120px]">
-                <Select value={filterBhk} onValueChange={setFilterBhk}>
+             <div className="flex items-center gap-2 w-full sm:w-auto">
+               <div className="w-full sm:w-[120px]">
+                  <Select value={filterBhk} onValueChange={setFilterBhk}>
                     <SelectTrigger className="h-8 text-xs bg-white"><SelectValue placeholder="BHK" /></SelectTrigger>
                     <SelectContent>
                         <SelectItem value="all">All BHK</SelectItem>
@@ -216,6 +217,7 @@ export function PropertyMatchModal({ lead, open, onOpenChange, onSuccess }: any)
                         <SelectItem value="plot">Plot</SelectItem>
                     </SelectContent>
                 </Select>
+               </div>
              </div>
           </div>
         </DialogHeader>
@@ -236,10 +238,10 @@ export function PropertyMatchModal({ lead, open, onOpenChange, onSuccess }: any)
                 const isShown = recommendedIds.has(property.id);
 
                 return (
-                <div key={property.id} className={`flex items-center gap-4 p-4 rounded-lg border transition-colors ${isSelected ? 'border-blue-500 bg-blue-50/30' : 'hover:bg-slate-50'} ${isShown ? 'opacity-70' : ''}`}>
+                <div key={property.id} className={`flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 rounded-lg border transition-colors ${isSelected ? 'border-blue-500 bg-blue-50/30' : 'hover:bg-slate-50'} ${isShown ? 'opacity-70' : ''}`}>
                   
                   {/* Selection for Mass Action */}
-                  <div className="flex flex-col gap-4 items-center justify-center h-full">
+                  <div className="flex items-center gap-3 sm:gap-4 sm:flex-col justify-center w-full sm:w-auto">
                       <Checkbox checked={isSelected} onCheckedChange={() => toggleProperty(property.id)} />
                   </div>
 

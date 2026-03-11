@@ -313,7 +313,7 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b bg-background px-6">
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b bg-background px-4 md:px-6">
           <SidebarTrigger className="-ml-2" />
           <Separator orientation="vertical" className="mr-2 h-4" />
           <Breadcrumb>
@@ -350,7 +350,7 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
 
             {/* ===== DROPDOWN PANEL ===== */}
             {notifOpen && (
-              <div className="absolute right-0 top-12 w-[370px] bg-white rounded-xl border border-slate-200 shadow-2xl z-[100] overflow-hidden">
+              <div className="absolute right-0 top-12 w-[300px] sm:w-[370px] bg-white rounded-xl border border-slate-200 shadow-2xl z-[100] overflow-hidden">
 
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
@@ -455,7 +455,7 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
           {/* ===== END NOTIFICATION BELL ===== */}
         </header>
 
-        <main className="flex-1 overflow-auto p-6">
+        <main className="flex-1 overflow-auto p-4 md:p-6">
           <div className="animate-fade-in">
             {children}
           </div>

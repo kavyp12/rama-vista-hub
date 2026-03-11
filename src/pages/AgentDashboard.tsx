@@ -630,19 +630,22 @@ export default function AgentDashboard() {
           </Card>
         </div>
 
-        {/* === MAIN TABS === */}
         <Tabs defaultValue="tasks" className="w-full">
-          <TabsList className="grid w-full grid-cols-4 lg:w-[600px]">
-            <TabsTrigger value="tasks" className="relative">
-              Today's Tasks
+          <TabsList className="grid w-full grid-cols-3 h-auto p-1 lg:w-[600px]">
+            <TabsTrigger value="tasks" className="relative text-xs sm:text-sm py-2">
+              <span className="truncate">Today's Tasks</span>
               {pendingTasks > 0 && (
                 <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 text-white text-[9px] rounded-full flex items-center justify-center font-bold">
                   {pendingTasks}
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="followups">Follow-ups</TabsTrigger>
-            <TabsTrigger value="schedule">My Schedule</TabsTrigger>
+            <TabsTrigger value="followups" className="text-xs sm:text-sm py-2">
+              <span className="truncate">Follow-ups</span>
+            </TabsTrigger>
+            <TabsTrigger value="schedule" className="text-xs sm:text-sm py-2">
+              <span className="truncate">My Schedule</span>
+            </TabsTrigger>
           </TabsList>
 
           {/* === TODAY'S TASKS TAB === */}

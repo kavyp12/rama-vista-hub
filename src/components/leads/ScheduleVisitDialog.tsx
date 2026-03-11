@@ -279,7 +279,7 @@ export function ScheduleVisitDialog({ lead, open, onOpenChange, onSuccess }: any
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Date *</Label>
               <Input type="date" value={visitDate} onChange={(e) => setVisitDate(e.target.value)} min={new Date().toISOString().split('T')[0]} />

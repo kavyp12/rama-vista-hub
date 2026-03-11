@@ -573,10 +573,10 @@ export default function Reports() {
       <div className="space-y-6">
 
         {/* HEADER CONTROLS */}
-        <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-          <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between w-full">
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
             <Select value={period} onValueChange={setPeriod}>
-              <SelectTrigger className="w-[180px]">
+              <SelectTrigger className="w-full sm:w-[180px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -602,7 +602,7 @@ export default function Reports() {
           <Button
             onClick={() => exportReport(isAgent ? user?.id : undefined)}
             disabled={exporting}
-            className="gap-2 bg-green-600 hover:bg-green-700"
+            className="w-full sm:w-auto gap-2 bg-green-600 hover:bg-green-700 mt-2 sm:mt-0"
           >
             <FileText className="h-4 w-4" />
             {exporting ? 'Generating...' : isAgent ? 'Download PDF Report' : 'Download PDF Report'}
@@ -686,7 +686,7 @@ export default function Reports() {
 
         {/* TABS */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid">
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 lg:w-auto lg:inline-grid">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="leads">Leads</TabsTrigger>
             <TabsTrigger value="calls">Calls</TabsTrigger>

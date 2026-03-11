@@ -192,13 +192,13 @@ export default function Properties() {
               <Input placeholder="Search projects or properties..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
             </div>
             
-            <div className="flex gap-2">
+            <div className="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
               {canCreateProjects && (
                 <Button 
                   variant="outline" 
                   onClick={handleSync} 
                   disabled={isSyncing} 
-                  className="gap-2 border-blue-200 text-blue-700 hover:bg-blue-50"
+                  className="gap-2 flex-1 sm:flex-none border-blue-200 text-blue-700 hover:bg-blue-50"
                 >
                   <RefreshCw className={`h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
                   {isSyncing ? 'Syncing' : 'Sync'}
@@ -232,7 +232,7 @@ export default function Properties() {
             </div>
           </div>
 
-          <div className="flex space-x-1 border-b">
+          <div className="flex space-x-1 border-b overflow-x-auto whitespace-nowrap scrollbar-hide pb-px">
             {/* ADDED 'Land' TAB HERE */}
             {[ 
               { id: 'all', label: 'All', icon: Filter }, 

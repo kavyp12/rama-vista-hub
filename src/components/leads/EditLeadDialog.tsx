@@ -107,24 +107,24 @@ export function EditLeadDialog({ lead, open, onOpenChange, onSuccess }: any) {
         
         <form onSubmit={handleSubmit} className="space-y-6 py-2">
           
-          <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-100">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-100">
             <div className="space-y-2"><Label>Name {isLocked && <Lock className="h-3 w-3 inline text-muted-foreground ml-1"/>}</Label><Input required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} disabled={isLocked} className={isLocked ? "bg-muted" : "bg-white"} /></div>
             <div className="space-y-2"><Label>Phone {isLocked && <Lock className="h-3 w-3 inline text-muted-foreground ml-1"/>}</Label><Input required value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} disabled={isLocked} className={isLocked ? "bg-muted" : "bg-white"} /></div>
             <div className="space-y-2"><Label>Email {isLocked && <Lock className="h-3 w-3 inline text-muted-foreground ml-1"/>}</Label><Input type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} disabled={isLocked} className={isLocked ? "bg-muted" : "bg-white"} /></div>
             
             <div className="space-y-2">
               <Label className="flex items-center gap-2">Budget {isLocked && <Lock className="h-3 w-3 inline text-muted-foreground"/>}</Label>
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <Input type="number" placeholder="Min" value={formData.budgetMin} onChange={(e) => setFormData({ ...formData, budgetMin: e.target.value })} disabled={isLocked} className={isLocked ? "bg-muted" : "bg-white"} />
                 <Input type="number" placeholder="Max" value={formData.budgetMax} onChange={(e) => setFormData({ ...formData, budgetMax: e.target.value })} disabled={isLocked} className={isLocked ? "bg-muted" : "bg-white"} />
                 <Select value={budgetUnit} onValueChange={(val: any) => setBudgetUnit(val)} disabled={isLocked}>
-                  <SelectTrigger className={`w-[100px] ${isLocked ? "bg-muted" : "bg-white"}`}><SelectValue /></SelectTrigger>
+                  <SelectTrigger className={`w-full sm:w-[100px] shrink-0 ${isLocked ? "bg-muted" : "bg-white"}`}><SelectValue /></SelectTrigger>
                   <SelectContent><SelectItem value="L">Lakhs</SelectItem><SelectItem value="Cr">Crores</SelectItem></SelectContent>
                 </Select>
               </div>
             </div>
             
-            <div className="space-y-2 col-span-2">
+            <div className="space-y-2 sm:col-span-2">
               <Label>Location {isLocked && <Lock className="h-3 w-3 inline text-muted-foreground ml-1"/>}</Label>
               <div className="relative">
                 <MapPin className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -133,7 +133,7 @@ export function EditLeadDialog({ lead, open, onOpenChange, onSuccess }: any) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label className="text-blue-600 font-semibold">Stage</Label>
               <Select value={formData.stage} onValueChange={(val) => setFormData({ ...formData, stage: val })}>
@@ -166,7 +166,7 @@ export function EditLeadDialog({ lead, open, onOpenChange, onSuccess }: any) {
           <div className="space-y-4 p-4 rounded-lg border border-blue-100 bg-blue-50/30">
              <h4 className="font-semibold text-sm text-blue-800 flex items-center gap-2"><FileText className="h-4 w-4"/> Agent Workspace</h4>
              
-             <div className="grid grid-cols-2 gap-4">
+             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                  <div className="space-y-2">
                     <Label>Follow-up Scheduler</Label>
                     <div className="relative">

@@ -350,9 +350,9 @@ const handleImport = async () => {
               />
             </div>
             
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto mt-2 sm:mt-0">
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-[130px]">
+                <SelectTrigger className="w-full sm:w-[130px]">
                   <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
@@ -363,7 +363,7 @@ const handleImport = async () => {
               </Select>
 
               <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                <SelectTrigger className="w-[160px]">
+                <SelectTrigger className="w-full sm:w-[160px]">
                   <Building2 className="h-4 w-4 mr-2 text-muted-foreground" />
                   <SelectValue placeholder="Category" />
                 </SelectTrigger>
@@ -423,8 +423,8 @@ const handleImport = async () => {
                     ))}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="col-span-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="col-span-1 sm:col-span-2">
                         <Label>Project Name *</Label>
                         <Input 
                             value={newProject.name} 
@@ -461,7 +461,7 @@ const handleImport = async () => {
                     ) : (
                     /* --- RESIDENTIAL / COMMERCIAL FIELDS --- */
                         <>
-                            <div className="col-span-2">
+                            <div className="col-span-1 sm:col-span-2">
                                 <Label>Location (Area) *</Label>
                                 <Input value={newProject.location} onChange={e => setNewProject({...newProject, location: e.target.value})} required />
                             </div>
@@ -515,12 +515,12 @@ const handleImport = async () => {
                         </div>
                     )}
                     
-                    <div className="col-span-2">
+                    <div className="col-span-1 sm:col-span-2">
                         <Label>State</Label>
                         <Input value={newProject.state} onChange={e => setNewProject({...newProject, state: e.target.value})} placeholder="e.g. Gujarat" />
                     </div>
 
-                    <div className="col-span-2">
+                    <div className="col-span-1 sm:col-span-2">
                         <Label>Status</Label>
                         <Select value={newProject.status} onValueChange={v => setNewProject({...newProject, status: v})}>
                             <SelectTrigger><SelectValue /></SelectTrigger>

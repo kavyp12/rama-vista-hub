@@ -216,7 +216,7 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: any) {
 
               <div className="space-y-2">
                 <Label>Call Outcome</Label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {callOutcomes.map((outcome) => {
                     const Icon = outcome.icon;
                     return (

@@ -299,14 +299,14 @@ export default function Telecalling() {
 
   return (
     <DashboardLayout title="Telecalling Center" description="Manage your call operations">
-      <div className="flex flex-col lg:flex-row h-[calc(100vh-140px)] gap-4 lg:gap-6">
+      <div className="flex flex-col lg:flex-row h-[calc(100vh-110px)] md:h-[calc(100vh-140px)] gap-4 lg:gap-6">
         
         {/* --- SIDEBAR NAVIGATION --- */}
         <Card className="w-full lg:w-64 flex-shrink-0 h-auto lg:h-full overflow-hidden flex flex-col border-r bg-card">
           <CardHeader className="pb-2 pt-4 px-4">
             <CardTitle className="text-sm uppercase text-muted-foreground font-bold tracking-wider">Filters</CardTitle>
           </CardHeader>
-          <ScrollArea className="flex-1">
+          <ScrollArea className="flex-1 max-h-[250px] lg:max-h-none">
             <div className="p-2 space-y-1">
               {menuItems.map((item, idx) => (
                 item.type === 'separator' ? (
@@ -353,7 +353,7 @@ export default function Telecalling() {
                     </h2>
                   </div>
 
-                  <div className="relative w-full sm:w-72">
+                  <div className="relative w-full sm:w-72 mt-2 sm:mt-0">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input 
                       placeholder="Search name or phone..." 

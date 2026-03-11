@@ -598,7 +598,7 @@ export default function SiteVisits() {
 
               {canAssignLeads && (
                 <Select value={selectedAgent} onValueChange={setSelectedAgent}>
-                  <SelectTrigger className="w-[160px]">
+                  <SelectTrigger className="w-full sm:w-[160px]">
                     <SelectValue placeholder="All Agents" />
                   </SelectTrigger>
                   <SelectContent>
@@ -622,7 +622,7 @@ export default function SiteVisits() {
                     )}
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-[500px] p-6" align="start">
+                <PopoverContent className="w-[calc(100vw-2rem)] sm:w-[500px] p-4 sm:p-6" align="start">
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
                       <h4 className="font-semibold">Advanced Filters</h4>
@@ -633,7 +633,7 @@ export default function SiteVisits() {
                       )}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label className="text-xs">Status</Label>
                         <Select value={advancedFilters.status} onValueChange={(v) => setAdvancedFilters({ ...advancedFilters, status: v })}>

@@ -429,7 +429,7 @@ export default function Pipeline() {
         <div className="flex flex-col sm:flex-row gap-4 items-center justify-between shrink-0">
           <div className="flex gap-3 w-full sm:w-auto ml-auto">
             <Select value={agentFilter} onValueChange={setAgentFilter}>
-              <SelectTrigger className="w-48">
+              <SelectTrigger className="w-full sm:w-48">
                 <Users className="h-4 w-4 mr-2" />
                 <SelectValue placeholder="All Agents" />
               </SelectTrigger>
@@ -731,9 +731,9 @@ export default function Pipeline() {
             </div>
           </DialogHeader>
 
-          <div className="flex-1 flex overflow-hidden">
+          <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
             {/* ... Dialog body content (no changes needed inside) ... */}
-            <div className="w-1/3 border-r overflow-y-auto bg-slate-50 p-4">
+            <div className="w-full md:w-1/3 border-b md:border-b-0 md:border-r overflow-y-auto bg-slate-50 p-4 min-h-[150px]">
               {/* ... existing dialog left panel ... */}
               {/* Simplified for brevity as logic inside is fine */}
               <div className="space-y-4">
@@ -774,7 +774,7 @@ export default function Pipeline() {
               </div>
             </div>
 
-            <div className="w-2/3 flex flex-col bg-white h-full min-h-0 overflow-hidden">
+            <div className="w-full md:w-2/3 flex flex-col bg-white h-full min-h-0 overflow-hidden">
               {/* ... existing dialog right panel logic ... */}
               {/* I am omitting the massive getProjectGroups logic here as it is syntactically correct in your file. 
                     Ensure you keep the existing logic inside this div */
