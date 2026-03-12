@@ -65,10 +65,23 @@ export const initiateMcubeCall = async (req: AuthRequest, res: Response) => {
   try {
     const { leadPhone } = req.body;
 
-    // Find the current agent's phone number
-    const agent = await prisma.user.findUnique({ where: { id: req.user!.userId } });
-    if (!agent || !agent.phone) {
-      return res.status(400).json({ error: 'Agent phone number not found in database' });
+    // Find the logged-in user's phone number
+    const currentUser = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+    let exeNumberToRing = currentUser?.phone;
+
+    // If Admin/Manager has no phone number, fallback to the Lead's Assigned Agent's phone
+    if (!exeNumberToRing && (currentUser?.role === 'admin' || currentUser?.role === 'sales_manager')) {
+      const lead = await prisma.lead.findFirst({
+        where: { phone: { contains: leadPhone.slice(-10) } },
+        include: { assignedTo: true }
+      });
+      if (lead?.assignedTo?.phone) {
+        exeNumberToRing = lead.assignedTo.phone;
+      }
+    }
+
+    if (!exeNumberToRing) {
+      return res.status(400).json({ error: 'No phone number available to route the call. Please add a phone number to your profile or assign an agent.' });
     }
 
     // ✅ FIX G9: Throw if MCUBE_TOKEN is not configured — never silently use placeholder
@@ -80,7 +93,7 @@ export const initiateMcubeCall = async (req: AuthRequest, res: Response) => {
     // Make the request to MCUBE Outbound API
     const response = await axios.post('https://api.mcube.com/Restmcube-api/outbound-calls', {
       HTTP_AUTHORIZATION: mcubeToken,
-      exenumber: agent.phone,
+      exenumber: exeNumberToRing,
       custnumber: leadPhone,
       refurl: "1"
     }, {
