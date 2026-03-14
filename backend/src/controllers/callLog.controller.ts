@@ -61,15 +61,14 @@ export const mcubeRouting = async (req: Request, res: Response) => {
 };
 
 // --- NEW FUNCTION 1: INITIATE CALL VIA MCUBE ---
+
 export const initiateMcubeCall = async (req: AuthRequest, res: Response) => {
   try {
     const { leadPhone } = req.body;
 
-    // Find the logged-in user's phone number
     const currentUser = await prisma.user.findUnique({ where: { id: req.user!.userId } });
     let exeNumberToRing = currentUser?.phone;
 
-    // If Admin/Manager has no phone number, fallback to the Lead's Assigned Agent's phone
     if (!exeNumberToRing && (currentUser?.role === 'admin' || currentUser?.role === 'sales_manager')) {
       const lead = await prisma.lead.findFirst({
         where: { phone: { contains: leadPhone.slice(-10) } },
@@ -81,88 +80,87 @@ export const initiateMcubeCall = async (req: AuthRequest, res: Response) => {
     }
 
     if (!exeNumberToRing) {
-      return res.status(400).json({ error: 'No phone number available to route the call. Please add a phone number to your profile or assign an agent.' });
+      return res.status(400).json({ error: 'No phone number available to route the call.' });
     }
 
-    // ✅ FIX G9: Throw if MCUBE_TOKEN is not configured — never silently use placeholder
-    const mcubeToken = process.env.MCUBE_TOKEN;
-    if (!mcubeToken) {
-      return res.status(503).json({ error: 'MCUBE dialer not configured. Please set MCUBE_TOKEN in environment variables.' });
+    // This token will now hold the 'apikey' required by the Classic API
+    const mcubeApiKey = process.env.MCUBE_TOKEN;
+    if (!mcubeApiKey) {
+      return res.status(503).json({ error: 'MCUBE dialer not configured. Please set MCUBE_TOKEN.' });
     }
 
-    // Make the request to MCUBE Outbound API
-    const response = await axios.post('https://api.mcube.com/Restmcube-api/outbound-calls', {
-      HTTP_AUTHORIZATION: mcubeToken,
-      exenumber: exeNumberToRing,
-      custnumber: leadPhone,
-      refurl: "1"
-    }, {
-      headers: { 'Content-Type': 'application/json' }
+    // Using the Classic Outbound URL format [cite: 2]
+    const response = await axios.get('https://mcube.vmc.in/api/outboundcall', {
+      params: {
+        apikey: mcubeApiKey,       // [cite: 3]
+        exenumber: exeNumberToRing, // [cite: 3]
+        custnumber: leadPhone      // [cite: 3]
+      }
     });
 
-    return res.status(200).json({ success: true, message: 'Call initiated via MCUBE', data: response.data });
+    return res.status(200).json({ success: true, message: 'Call initiated via MCUBE Classic', data: response.data });
   } catch (error) {
     console.error('MCUBE Call Initiate Error:', error);
-    return res.status(500).json({ error: 'Failed to initiate call via MCUBE' });
+    return res.status(500).json({ error: 'Failed to initiate call via MCUBE Classic' });
   }
 };
 
 // --- NEW FUNCTION 2: RECEIVE CALL DATA FROM MCUBE (WEBHOOK) ---
+// --- UPDATED FUNCTION 2: RECEIVE CALL DATA FROM MCUBE (WEBHOOK) ---
 export const mcubeWebhook = async (req: Request, res: Response) => {
   try {
     const callData = req.body;
 
-    // Extract MCUBE payload data based on their docs
-    const { callfrom, callto, dialstatus, filename, duration, callid } = callData;
+    // Extract both Inbound and Outbound Classic payload data 
+    const { 
+        callfrom, callto, dialstatus, 
+        executive, customer, status, callType, 
+        filename, duration, callid 
+    } = callData;
 
-    // ✅ FIX C3: Guard against missing / too-short phone fields
-    // Always respond 200 first so MCUBE doesn't retry on validation failures
-    if (!callfrom || typeof callfrom !== 'string' || callfrom.length < 10) {
-      console.warn('MCUBE Webhook: invalid or missing callfrom field', callData);
-      return res.status(200).send('Webhook received (invalid callfrom)');
+    // customer = Lead, executive = Agent 
+    const actualLeadPhone = customer || callfrom;
+    const actualAgentPhone = executive || callto;
+
+    if (!actualLeadPhone || typeof actualLeadPhone !== 'string' || actualLeadPhone.length < 10) {
+      return res.status(200).send('Webhook received (invalid lead phone)');
     }
-    if (!callto || typeof callto !== 'string' || callto.length < 10) {
-      console.warn('MCUBE Webhook: invalid or missing callto field', callData);
-      return res.status(200).send('Webhook received (invalid callto)');
+    if (!actualAgentPhone || typeof actualAgentPhone !== 'string' || actualAgentPhone.length < 10) {
+      return res.status(200).send('Webhook received (invalid agent phone)');
     }
 
-    // 1. Find Lead and Agent by phone number (using contains to handle +91 formatting differences)
-    // callfrom = Customer (Lead), callto = Agent
-    const lead = await prisma.lead.findFirst({ where: { phone: { contains: callfrom.slice(-10) } } });
-    const agent = await prisma.user.findFirst({ where: { phone: { contains: callto.slice(-10) } } });
+    const lead = await prisma.lead.findFirst({ where: { phone: { contains: actualLeadPhone.slice(-10) } } });
+    const agent = await prisma.user.findFirst({ where: { phone: { contains: actualAgentPhone.slice(-10) } } });
 
-    // ✅ FIX C3: Return 200 (not 404) so MCUBE doesn't retry when lead/agent isn't in CRM
     if (!lead || !agent) {
-      console.warn('MCUBE Webhook: Lead or Agent not found for phones', { callfrom, callto });
       return res.status(200).send('Webhook received (lead or agent not found in CRM)');
     }
 
-    // 2. Map MCUBE dialstatus to CRM status
     let mappedStatus: "not_connected" | "connected_positive" = "not_connected";
 
-    if (dialstatus === 'ANSWER') {
+    // "Call complete" is a successful call in Classic [cite: 7]
+    if (dialstatus === 'ANSWER' || status === 'Call complete') {
       mappedStatus = "connected_positive";
-    } else if (dialstatus === 'Busy' || dialstatus === 'NoAnswer' || dialstatus === 'CANCEL') {
+    // "Executive Busy" or "Customer busy" means not connected [cite: 7]
+    } else if (
+        dialstatus === 'Busy' || dialstatus === 'NoAnswer' || dialstatus === 'CANCEL' || 
+        status === 'Executive Busy' || status === 'Customer busy'
+    ) {
       mappedStatus = "not_connected";
     }
 
-    // Convert duration to seconds (can be "00:00:04" or just "7")
     let durationInSeconds = null;
     if (duration) {
       const durationStr = String(duration);
       if (durationStr.includes(':')) {
         const parts = durationStr.split(':');
-        if (parts.length === 3) {
-          durationInSeconds = (+parts[0]) * 60 * 60 + (+parts[1]) * 60 + (+parts[2]);
-        } else if (parts.length === 2) {
-          durationInSeconds = (+parts[0]) * 60 + (+parts[1]);
-        }
+        if (parts.length === 3) durationInSeconds = (+parts[0]) * 60 * 60 + (+parts[1]) * 60 + (+parts[2]);
+        else if (parts.length === 2) durationInSeconds = (+parts[0]) * 60 + (+parts[1]);
       } else {
         durationInSeconds = parseInt(durationStr, 10);
       }
     }
 
-    // 3. Auto-create the call log
     await prisma.callLog.create({
       data: {
         leadId: lead.id,
@@ -170,43 +168,29 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
         callStatus: mappedStatus,
         callDate: new Date(),
         callDuration: durationInSeconds,
-        notes: `System Auto-Logged via MCUBE. \nCall ID: ${callid || 'N/A'}\nRecording: ${filename || 'No recording provided'}`,
+        notes: `System Auto-Logged via MCUBE ${callType || 'Inbound'}. \nCall ID: ${callid || 'N/A'}\nRecording: ${filename || 'No recording provided'}`,
       }
     });
 
-    // 4. Update lead stage automatically if connected
     if (mappedStatus === 'connected_positive') {
-      const stageProgression: Record<string, string> = {
-        'new': 'contacted',
-        'contacted': 'site_visit'
-      };
-      const nextStage = stageProgression[lead.stage] || lead.stage;
-
+      const stageProgression: Record<string, string> = { 'new': 'contacted', 'contacted': 'site_visit' };
       await prisma.lead.update({
         where: { id: lead.id },
-        data: { stage: nextStage as any, temperature: 'hot' }
+        data: { stage: (stageProgression[lead.stage] || lead.stage) as any, temperature: 'hot' }
       });
-    }
-
-    // 5. Auto-schedule a FollowUpTask (Notification) for missed calls
-    if (mappedStatus === 'not_connected') {
+    } else if (mappedStatus === 'not_connected') {
       await prisma.followUpTask.create({
         data: {
-          leadId: lead.id,
-          agentId: agent.id,
-          taskType: 'callback',
-          scheduledAt: addHours(new Date(), 2),
-          notes: 'Missed incoming call from Lead. Please call back when free.',
+          leadId: lead.id, agentId: agent.id, taskType: 'callback',
+          scheduledAt: addHours(new Date(), 2), notes: `Missed ${callType || 'incoming'} call from Lead.`,
         }
       });
     }
 
-    // ✅ MUST return 200 OK so MCUBE knows it was received
     return res.status(200).send('Webhook processed successfully');
   } catch (error) {
     console.error('MCUBE Webhook Error:', error);
-    // ✅ FIX C3: Always return 200 even on internal errors to prevent MCUBE retries
-    return res.status(200).send('Webhook received (internal error during processing)');
+    return res.status(200).send('Webhook received (internal error)');
   }
 };
 
