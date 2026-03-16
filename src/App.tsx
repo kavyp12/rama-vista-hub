@@ -19,6 +19,7 @@ import Payments from "./pages/Payments";
 import Reports from "./pages/Reports";
 import Team from "./pages/Team";
 import Brokers from "./pages/Brokers";
+import MissedCalls from "./pages/MissedCalls";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -72,6 +73,13 @@ function AppRoutes() {
       <Route path="/leads" element={
         <ProtectedRoute>
           <Leads />
+        </ProtectedRoute>
+      } />
+
+      {/* Missed Calls — Sales Agent dedicated page */}
+      <Route path="/missed-calls" element={
+        <ProtectedRoute allowedRoles={['sales_agent']}>
+          <MissedCalls />
         </ProtectedRoute>
       } />
 

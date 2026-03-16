@@ -9,8 +9,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Bell, X, AlertTriangle, Calendar, Users,
-  Clock, TrendingDown, UserX, ChevronRight, RefreshCw, PhoneMissed
+  Clock, TrendingDown, UserX, ChevronRight, RefreshCw, PhoneMissed,
+  Phone, Flame, Thermometer, Snowflake, ArrowUpRight, ChevronDown, ChevronUp
 } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
@@ -29,7 +31,19 @@ interface AgentStats {
   missedFollowups: number;
   missedVisits: number;
   stagnantLeads: number;
-  missedCalls?: number; // Optional since it might be new from backend
+  missedCalls?: number;
+}
+
+interface MissedCallDetail {
+  id: string;
+  leadId: string;
+  leadName: string;
+  leadPhone: string;
+  temperature: string;
+  stage: string;
+  calledAt: string;
+  notes: string | null;
+  type: 'inbound_missed' | 'outbound_missed';
 }
 
 interface DashboardLayoutProps {
@@ -48,6 +62,8 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
   const [totalCount, setTotalCount] = useState(0);
   const [fetching, setFetching] = useState(false);
   const [lastFetched, setLastFetched] = useState<Date | null>(null);
+  const [missedCallDetails, setMissedCallDetails] = useState<MissedCallDetail[]>([]);
+  const [missedCallsExpanded, setMissedCallsExpanded] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -85,26 +101,15 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
 
       if (isAgent) {
         // ---- AGENT: use dedicated stats endpoint ----
-        const [statsRes, visitsRes] = await Promise.all([
+        const [statsRes, visitsRes, missedCallsRes] = await Promise.all([
           fetch(`${API_URL}/leads/dashboard/stats`, { headers }),
           fetch(`${API_URL}/site-visits?status=scheduled`, { headers }),
+          fetch(`${API_URL}/call-logs/missed-calls`, { headers }),
         ]);
 
         if (statsRes.ok) {
           const data: AgentStats = await statsRes.json();
 
-          if (data.missedFollowups > 0) {
-            items.push({
-              id: 'overdue_followup',
-              title: 'Overdue Follow-ups',
-              subtitle: 'Leads past their follow-up date',
-              count: data.missedFollowups,
-              color: 'text-red-600',
-              bg: 'bg-red-50',
-              icon: AlertTriangle,
-              href: '/leads',
-            });
-          }
           if (data.missedCalls && data.missedCalls > 0) {
             items.push({
               id: 'missed_calls',
@@ -114,7 +119,19 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
               color: 'text-rose-600',
               bg: 'bg-rose-50',
               icon: PhoneMissed,
-              href: '/leads', // Direct them to leads page to see pending followups
+              href: '/missed-calls',
+            });
+          }
+          if (data.missedFollowups > 0) {
+            items.push({
+              id: 'overdue_followup',
+              title: 'Overdue Follow-ups',
+              subtitle: 'Leads past their follow-up date',
+              count: data.missedFollowups,
+              color: 'text-red-600',
+              bg: 'bg-red-50',
+              icon: AlertTriangle,
+              href: '/missed-calls',
             });
           }
           if (data.missedVisits > 0) {
@@ -138,9 +155,15 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
               color: 'text-amber-600',
               bg: 'bg-amber-50',
               icon: TrendingDown,
-              href: '/leads',
+              href: '/missed-calls',
             });
           }
+        }
+
+        // Fetch and store missed call details for expandable view
+        if (missedCallsRes.ok) {
+          const details: MissedCallDetail[] = await missedCallsRes.json();
+          setMissedCallDetails(Array.isArray(details) ? details : []);
         }
 
         if (visitsRes.ok) {
@@ -238,7 +261,7 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
               color: 'text-blue-600',
               bg: 'bg-blue-50',
               icon: Users,
-              href: '/leads',
+              href: '/missed-calls',
             });
           }
         }
@@ -299,6 +322,15 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
     }
   }
 
+  function getTemperatureBadge(temp: string) {
+    switch (temp) {
+      case 'hot': return <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded-full"><Flame className="h-2.5 w-2.5" />Hot</span>;
+      case 'warm': return <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full"><Thermometer className="h-2.5 w-2.5" />Warm</span>;
+      case 'cold': return <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full"><Snowflake className="h-2.5 w-2.5" />Cold</span>;
+      default: return null;
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -311,7 +343,7 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
 
   return (
     <SidebarProvider>
-      <AppSidebar />
+      <AppSidebar missedCallCount={isAgent ? missedCallDetails.length : 0} />
       <SidebarInset>
         <header className="flex h-16 shrink-0 items-center gap-2 border-b bg-background px-4 md:px-6">
           <SidebarTrigger className="-ml-2" />
@@ -350,7 +382,7 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
 
             {/* ===== DROPDOWN PANEL ===== */}
             {notifOpen && (
-              <div className="absolute right-0 top-12 w-[300px] sm:w-[370px] bg-white rounded-xl border border-slate-200 shadow-2xl z-[100] overflow-hidden">
+              <div className="absolute right-0 top-12 w-[320px] sm:w-[400px] bg-white rounded-xl border border-slate-200 shadow-2xl z-[100] overflow-hidden">
 
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
@@ -385,7 +417,7 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
                 </div>
 
                 {/* Notification List */}
-                <div className="max-h-[440px] overflow-y-auto">
+                <div className="max-h-[520px] overflow-y-auto">
                   {notifications.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-14 gap-3 text-slate-400">
                       <div className="h-14 w-14 rounded-full bg-slate-100 flex items-center justify-center">
@@ -398,34 +430,122 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
                     <div className="p-2 space-y-1">
                       {notifications.map((notif) => {
                         const Icon = notif.icon;
+                        const isMissedCalls = notif.id === 'missed_calls' && isAgent && missedCallDetails.length > 0;
+
                         return (
-                          <button
-                            key={notif.id}
-                            className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 transition-colors text-left group cursor-pointer"
-                            onClick={() => {
-                              navigate(notif.href);
-                              setNotifOpen(false);
-                            }}
-                          >
-                            {/* Icon */}
-                            <div className={`h-10 w-10 rounded-full ${notif.bg} flex items-center justify-center shrink-0`}>
-                              <Icon className={`h-5 w-5 ${notif.color}`} />
-                            </div>
-
-                            {/* Text */}
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <p className="text-sm font-semibold text-slate-800 leading-tight">{notif.title}</p>
-                                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${notif.bg} ${notif.color} shrink-0`}>
-                                  {notif.count}
-                                </span>
+                          <div key={notif.id}>
+                            {/* Notification Row */}
+                            <div className={`flex items-center gap-3 p-3 rounded-lg transition-colors text-left group ${isMissedCalls ? 'hover:bg-rose-50/50' : 'hover:bg-slate-50'}`}>
+                              {/* Icon */}
+                              <div className={`h-10 w-10 rounded-full ${notif.bg} flex items-center justify-center shrink-0`}>
+                                <Icon className={`h-5 w-5 ${notif.color}`} />
                               </div>
-                              <p className="text-xs text-slate-400 mt-0.5 leading-snug">{notif.subtitle}</p>
+
+                              {/* Text */}
+                              <div
+                                className="flex-1 min-w-0 cursor-pointer"
+                                onClick={() => {
+                                  if (!isMissedCalls) {
+                                    navigate(notif.href);
+                                    setNotifOpen(false);
+                                  } else {
+                                    setMissedCallsExpanded(prev => !prev);
+                                  }
+                                }}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm font-semibold text-slate-800 leading-tight">{notif.title}</p>
+                                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${notif.bg} ${notif.color} shrink-0`}>
+                                    {notif.count}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-slate-400 mt-0.5 leading-snug">{notif.subtitle}</p>
+                              </div>
+
+                              {/* Arrow or Expand */}
+                              {isMissedCalls ? (
+                                <button
+                                  className="shrink-0 text-rose-400 hover:text-rose-600 transition-colors"
+                                  onClick={() => setMissedCallsExpanded(prev => !prev)}
+                                >
+                                  {missedCallsExpanded
+                                    ? <ChevronUp className="h-4 w-4" />
+                                    : <ChevronDown className="h-4 w-4" />
+                                  }
+                                </button>
+                              ) : (
+                                <button
+                                  className="shrink-0"
+                                  onClick={() => { navigate(notif.href); setNotifOpen(false); }}
+                                >
+                                  <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-slate-500 transition-colors" />
+                                </button>
+                              )}
                             </div>
 
-                            {/* Arrow */}
-                            <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-slate-500 shrink-0 transition-colors" />
-                          </button>
+                            {/* === EXPANDED MISSED CALLS DETAILS === */}
+                            {isMissedCalls && missedCallsExpanded && (
+                              <div className="mx-2 mb-2 rounded-lg border border-rose-100 bg-rose-50/50 overflow-hidden">
+                                <div className="px-3 py-2 bg-rose-100/60 border-b border-rose-100 flex items-center justify-between">
+                                  <span className="text-[11px] font-bold text-rose-700 uppercase tracking-wide">
+                                    📵 Missed Call Details
+                                  </span>
+                                  <span className="text-[10px] text-rose-500">Tap a lead to open</span>
+                                </div>
+                                <div className="divide-y divide-rose-100/80">
+                                  {missedCallDetails.map((detail) => (
+                                    <button
+                                      key={detail.id}
+                                      className="w-full text-left px-3 py-2.5 hover:bg-rose-100/50 transition-colors group/item"
+                                      onClick={() => {
+                                        navigate(`/leads`);
+                                        setNotifOpen(false);
+                                      }}
+                                    >
+                                      <div className="flex items-center gap-2 mb-1">
+                                        {/* Call type icon */}
+                                        <div className={`h-6 w-6 rounded-full flex items-center justify-center shrink-0 ${detail.type === 'inbound_missed' ? 'bg-rose-200' : 'bg-orange-100'}`}>
+                                          {detail.type === 'inbound_missed'
+                                            ? <PhoneMissed className="h-3 w-3 text-rose-600" />
+                                            : <Phone className="h-3 w-3 text-orange-500" />
+                                          }
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <div className="flex items-center gap-1.5">
+                                            <p className="text-xs font-bold text-slate-800 truncate">{detail.leadName}</p>
+                                            {getTemperatureBadge(detail.temperature)}
+                                          </div>
+                                          <p className="text-[11px] text-rose-600 font-medium">{detail.leadPhone}</p>
+                                        </div>
+                                        <ArrowUpRight className="h-3.5 w-3.5 text-slate-300 group-hover/item:text-rose-500 shrink-0 transition-colors" />
+                                      </div>
+                                      <div className="flex items-center gap-2 pl-8">
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${detail.type === 'inbound_missed' ? 'text-rose-700 bg-rose-100' : 'text-orange-700 bg-orange-100'}`}>
+                                          {detail.type === 'inbound_missed' ? '↙ Inbound Missed' : '↗ Outbound Not Connected'}
+                                        </span>
+                                        <span className="text-[10px] text-slate-400">
+                                          {formatDistanceToNow(new Date(detail.calledAt), { addSuffix: true })}
+                                        </span>
+                                      </div>
+                                      {detail.notes && detail.notes.includes('📵') && (
+                                        <p className="mt-1 pl-8 text-[10px] text-slate-500 truncate">
+                                          {detail.notes.replace(/📵|📞/g, '').trim()}
+                                        </p>
+                                      )}
+                                    </button>
+                                  ))}
+                                </div>
+                                <div className="px-3 py-2 bg-rose-100/40 border-t border-rose-100">
+                                  <button
+                                    className="text-[11px] text-rose-600 font-semibold hover:underline flex items-center gap-1"
+                                    onClick={() => { navigate('/leads'); setNotifOpen(false); }}
+                                  >
+                                    View all in My Leads <ArrowUpRight className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         );
                       })}
                     </div>

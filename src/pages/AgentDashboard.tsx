@@ -19,7 +19,7 @@ import {
   AlertTriangle, Star, Zap, BarChart3, Plus, ChevronRight,
   CheckSquare, Circle, ArrowRight
 } from 'lucide-react';
-import { format, parseISO, isToday, isPast, differenceInDays } from 'date-fns';
+import { format, parseISO, isToday, isPast, differenceInDays, formatDistanceToNow } from 'date-fns';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, RadialBarChart, RadialBar
@@ -88,6 +88,18 @@ interface CallLog {
   calledAt: string;
 }
 
+interface MissedCallDetail {
+  id: string;
+  leadId: string;
+  leadName: string;
+  leadPhone: string;
+  temperature: string;
+  stage: string;
+  calledAt: string;
+  notes: string | null;
+  type: 'inbound_missed' | 'outbound_missed';
+}
+
 interface Task {
   id: string;
   title: string;
@@ -130,6 +142,7 @@ export default function AgentDashboard() {
   const [stats, setStats] = useState<PerformanceStats | null>(null);
   const [callLogs, setCallLogs] = useState<CallLog[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [missedCallDetails, setMissedCallDetails] = useState<MissedCallDetail[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Quick Update Lead Stage
@@ -155,17 +168,19 @@ export default function AgentDashboard() {
     setLoading(true);
     try {
       const headers = { 'Authorization': `Bearer ${token}` };
-      const [visitsRes, followUpsRes, statsRes, callLogsRes] = await Promise.all([
+      const [visitsRes, followUpsRes, statsRes, callLogsRes, missedCallsRes] = await Promise.all([
         fetch(`${API_URL}/site-visits`, { headers }),
         fetch(`${API_URL}/leads?needsFollowup=true`, { headers }),
         fetch(`${API_URL}/users/${user?.id}/stats`, { headers }),
         fetch(`${API_URL}/call-logs?limit=20`, { headers }),
+        fetch(`${API_URL}/call-logs/missed-calls`, { headers }),
       ]);
 
       const visitsData = await visitsRes.json();
       const followUpsData = await followUpsRes.json();
       const statsData = await statsRes.json();
       const callLogsData = callLogsRes.ok ? await callLogsRes.json() : [];
+      const missedCallsData = missedCallsRes.ok ? await missedCallsRes.json() : [];
 
       const myVisits = Array.isArray(visitsData)
         ? visitsData
@@ -179,6 +194,7 @@ export default function AgentDashboard() {
       setFollowUps(Array.isArray(followUpsData) ? followUpsData : []);
       setStats(statsData);
       setCallLogs(Array.isArray(callLogsData) ? callLogsData : []);
+      setMissedCallDetails(Array.isArray(missedCallsData) ? missedCallsData : []);
 
       // Build today's task list from follow-ups + visits (with date safety)
       const generatedTasks: Task[] = [
@@ -631,12 +647,20 @@ export default function AgentDashboard() {
         </div>
 
         <Tabs defaultValue="tasks" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 h-auto p-1 lg:w-[600px]">
+          <TabsList className="grid w-full grid-cols-4 h-auto p-1 lg:w-[760px]">
             <TabsTrigger value="tasks" className="relative text-xs sm:text-sm py-2">
               <span className="truncate">Today's Tasks</span>
               {pendingTasks > 0 && (
                 <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 text-white text-[9px] rounded-full flex items-center justify-center font-bold">
                   {pendingTasks}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="missed" className="relative text-xs sm:text-sm py-2">
+              <span className="truncate">Missed Calls</span>
+              {missedCallDetails.length > 0 && (
+                <span className="absolute -top-1 -right-1 h-4 w-4 bg-rose-500 text-white text-[9px] rounded-full flex items-center justify-center font-bold animate-pulse">
+                  {missedCallDetails.length}
                 </span>
               )}
             </TabsTrigger>
@@ -710,6 +734,117 @@ export default function AgentDashboard() {
                           </Badge>
                         </div>
                       ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* === MISSED CALLS TAB === */}
+          <TabsContent value="missed" className="mt-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <PhoneMissed className="h-4 w-4 text-rose-500" /> Missed Calls
+                  </CardTitle>
+                  <Badge variant="outline" className="text-rose-600 border-rose-200">
+                    {missedCallDetails.length} pending callback{missedCallDetails.length !== 1 ? 's' : ''}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">Leads that called you or calls you couldn't connect — they need a callback</p>
+              </CardHeader>
+              <CardContent>
+                {missedCallDetails.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-3">
+                    <div className="h-14 w-14 rounded-full bg-green-50 flex items-center justify-center">
+                      <Phone className="h-7 w-7 text-green-400" />
+                    </div>
+                    <p className="font-semibold text-sm text-slate-600">All caught up!</p>
+                    <p className="text-xs text-slate-400">No missed calls to follow up on.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {missedCallDetails.map(call => (
+                      <div
+                        key={call.id}
+                        className="flex items-start gap-4 p-4 rounded-xl border border-rose-100 bg-rose-50/40 hover:bg-rose-50/80 transition-all group"
+                      >
+                        {/* Call type icon */}
+                        <div className={`h-11 w-11 rounded-full flex items-center justify-center shrink-0 ${
+                          call.type === 'inbound_missed' ? 'bg-rose-100' : 'bg-orange-100'
+                        }`}>
+                          {call.type === 'inbound_missed'
+                            ? <PhoneMissed className="h-5 w-5 text-rose-600" />
+                            : <PhoneOff className="h-5 w-5 text-orange-500" />
+                          }
+                        </div>
+
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <h4 className="font-bold text-sm text-slate-800">{call.leadName}</h4>
+                            {call.temperature === 'hot' && (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-red-600 bg-red-100 px-1.5 py-0.5 rounded-full">
+                                <Flame className="h-2.5 w-2.5" />Hot
+                              </span>
+                            )}
+                            {call.temperature === 'warm' && (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full">
+                                <Thermometer className="h-2.5 w-2.5" />Warm
+                              </span>
+                            )}
+                            {call.temperature === 'cold' && (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded-full">
+                                <Snowflake className="h-2.5 w-2.5" />Cold
+                              </span>
+                            )}
+                            <Badge variant="outline" className="text-[10px] h-5 capitalize">
+                              {call.stage.replace(/_/g, ' ')}
+                            </Badge>
+                          </div>
+
+                          <div className="flex items-center gap-4 text-xs text-muted-foreground mb-2">
+                            <span className="flex items-center gap-1">
+                              <Phone className="h-3 w-3" />
+                              <span className="font-medium text-slate-700">{call.leadPhone}</span>
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              {formatDistanceToNow(new Date(call.calledAt), { addSuffix: true })}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                              call.type === 'inbound_missed'
+                                ? 'text-rose-700 bg-rose-100'
+                                : 'text-orange-700 bg-orange-100'
+                            }`}>
+                              {call.type === 'inbound_missed' ? '↙ They Called You' : '↗ You Called, No Answer'}
+                            </span>
+                          </div>
+
+                          {call.notes && call.notes.includes('📵') && (
+                            <p className="mt-2 text-[11px] text-slate-500 leading-relaxed border-l-2 border-rose-200 pl-2">
+                              {call.notes.replace(/📵|📞|📋/g, '').trim().slice(0, 120)}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Call Back button */}
+                        <a href={`tel:${call.leadPhone}`}>
+                          <Button
+                            size="sm"
+                            className="h-9 gap-1.5 bg-rose-600 hover:bg-rose-700 text-white shrink-0"
+                            onClick={() => openCallLog(call.leadId, call.leadName)}
+                          >
+                            <PhoneCall className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline text-xs">Call Back</span>
+                          </Button>
+                        </a>
+                      </div>
+                    ))}
                   </div>
                 )}
               </CardContent>

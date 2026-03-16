@@ -37,9 +37,14 @@ import {
   BarChart3,
   Phone,
   UserCog,
+  PhoneMissed,
 } from 'lucide-react';
 
-export function AppSidebar() {
+interface AppSidebarProps {
+  missedCallCount?: number;
+}
+
+export function AppSidebar({ missedCallCount = 0 }: AppSidebarProps) {
   const location = useLocation();
   const { user, role, logout } = useAuth();
   const permissions = usePermissions();
@@ -48,17 +53,18 @@ export function AppSidebar() {
     const baseItems = {
       group: 'Overview',
       items: [
-        { title: 'Dashboard', icon: LayoutDashboard, url: '/dashboard' },
+        { title: 'Dashboard', icon: LayoutDashboard, url: '/dashboard', badge: 0 },
       ],
     };
 
-    // ✅ AGENT: "My Leads" instead of Telecalling
+    // ✅ AGENT: "My Leads" instead of Telecalling + Missed Calls with live count
     const agentSalesItems = {
       group: 'My Work',
       items: [
-        { title: 'My Leads', icon: Users, url: '/leads' },
-        { title: 'Site Visits', icon: CalendarDays, url: '/site-visits' },
-        { title: 'Properties', icon: Home, url: '/properties' },
+        { title: 'My Leads', icon: Users, url: '/leads', badge: 0 },
+        { title: 'Missed Calls', icon: PhoneMissed, url: '/missed-calls', badge: missedCallCount },
+        { title: 'Site Visits', icon: CalendarDays, url: '/site-visits', badge: 0 },
+        { title: 'Properties', icon: Home, url: '/properties', badge: 0 },
       ],
     };
 
@@ -66,38 +72,38 @@ export function AppSidebar() {
     const advancedSalesItems = {
       group: 'Sales',
       items: [
-        { title: 'Leads', icon: Users, url: '/leads' },
-        { title: 'Telecalling', icon: Phone, url: '/telecalling' },
-        { title: 'Site Visits', icon: CalendarDays, url: '/site-visits' },
-        { title: 'Pipeline', icon: TrendingUp, url: '/pipeline' },
+        { title: 'Leads', icon: Users, url: '/leads', badge: 0 },
+        { title: 'Telecalling', icon: Phone, url: '/telecalling', badge: 0 },
+        { title: 'Site Visits', icon: CalendarDays, url: '/site-visits', badge: 0 },
+        { title: 'Pipeline', icon: TrendingUp, url: '/pipeline', badge: 0 },
       ],
     };
 
     const inventoryItems = {
       group: 'Inventory',
       items: [
-        { title: 'Projects', icon: Building2, url: '/projects' },
-        { title: 'Properties', icon: Home, url: '/properties' },
+        { title: 'Projects', icon: Building2, url: '/projects', badge: 0 },
+        { title: 'Properties', icon: Home, url: '/properties', badge: 0 },
       ],
     };
 
     const managerOperations = {
       group: 'Operations',
       items: [
-        { title: 'Channel Partners', icon: Handshake, url: '/brokers' },
-        { title: 'Reports', icon: BarChart3, url: '/reports' },
+        { title: 'Channel Partners', icon: Handshake, url: '/brokers', badge: 0 },
+        { title: 'Reports', icon: BarChart3, url: '/reports', badge: 0 },
       ],
     };
 
     const adminOperations = {
       group: 'Operations',
       items: [
-        { title: 'Team', icon: UserCog, url: '/team' },
-        { title: 'Channel Partners', icon: Handshake, url: '/brokers' },
-        { title: 'Marketing', icon: Megaphone, url: '/marketing' },
-        { title: 'Documents', icon: FileText, url: '/documents' },
-        { title: 'Payments', icon: CreditCard, url: '/payments' },
-        { title: 'Reports', icon: BarChart3, url: '/reports' },
+        { title: 'Team', icon: UserCog, url: '/team', badge: 0 },
+        { title: 'Channel Partners', icon: Handshake, url: '/brokers', badge: 0 },
+        { title: 'Marketing', icon: Megaphone, url: '/marketing', badge: 0 },
+        { title: 'Documents', icon: FileText, url: '/documents', badge: 0 },
+        { title: 'Payments', icon: CreditCard, url: '/payments', badge: 0 },
+        { title: 'Reports', icon: BarChart3, url: '/reports', badge: 0 },
       ],
     };
 
@@ -106,7 +112,7 @@ export function AppSidebar() {
     } else if (permissions.isManager) {
       return [baseItems, advancedSalesItems, inventoryItems, managerOperations];
     } else {
-      // ✅ Return Agent menu
+      // ✅ Return Agent menu with Missed Calls
       return [baseItems, agentSalesItems];
     }
   };
@@ -152,20 +158,33 @@ export function AppSidebar() {
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {group.items.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={location.pathname === item.url}
-                      className="gap-3 px-3 py-2.5 text-sm font-medium transition-colors"
-                    >
-                      <Link to={item.url}>
-                        <item.icon className="h-4 w-4" />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                {group.items.map((item) => {
+                  const isMissedCalls = item.title === 'Missed Calls';
+                  const isActive = location.pathname === item.url;
+                  
+                  return (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive}
+                        className={`gap-3 px-3 py-2.5 text-sm font-medium transition-colors ${isMissedCalls && item.badge > 0 ? 'text-rose-500 hover:text-rose-600 hover:bg-rose-50/30' : ''}`}
+                      >
+                        <Link to={item.url} className="flex items-center justify-between w-full">
+                          <div className="flex items-center gap-3">
+                            <item.icon className={`h-4 w-4 ${isMissedCalls && item.badge > 0 ? 'text-rose-500' : ''}`} />
+                            <span>{item.title}</span>
+                          </div>
+                          {/* Badge for missed calls count */}
+                          {item.badge > 0 && (
+                            <span className="ml-auto h-5 min-w-[20px] px-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center leading-none animate-pulse">
+                              {item.badge > 99 ? '99+' : item.badge}
+                            </span>
+                          )}
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

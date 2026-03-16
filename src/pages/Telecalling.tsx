@@ -220,9 +220,28 @@ export default function Telecalling() {
     setIsEditOpen(true);
   };
 
-  const handleCallAction = (item: TableRowData) => {
-      toast({ title: "Dialing...", description: `Calling ${item.lead.name} (${item.lead.phone})` });
-  };
+  // ✅ FIXED — actually calls MCUBE
+const handleCallAction = async (item: TableRowData) => {
+    toast({ title: "Dialing...", description: `Connecting to ${item.lead.name} (${item.lead.phone})...` });
+    try {
+        const res = await fetch(`${API_URL}/call-logs/initiate-mcube`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ leadPhone: item.lead.phone })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            toast({ title: "Call Failed", description: data.error || "Could not initiate call.", variant: "destructive" });
+        } else {
+            toast({ title: "Call Connected!", description: `MCUBE is connecting you to ${item.lead.name}. Your phone will ring first.` });
+        }
+    } catch (error) {
+        toast({ title: "Error", description: "Could not reach MCUBE. Check your connection.", variant: "destructive" });
+    }
+};
 
   // ✅ ARCHIVE FUNCTION
   const handleArchive = async (id: string) => {
