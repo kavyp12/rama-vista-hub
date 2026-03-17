@@ -8,6 +8,7 @@ import {
   initiateMcubeCall,
   mcubeWebhook,
   getMissedCallsDetail,
+  completeFollowUpTask,
 } from '../controllers/callLog.controller';
 import { authenticate } from '../middlewares/auth.middleware';
 
@@ -30,5 +31,6 @@ router.get('/stats', getCallStats);
 router.get('/missed-calls', getMissedCallsDetail); // Detailed missed calls for agent UI
 router.patch('/:id', updateCallLog);
 router.delete('/:id', deleteCallLog);
+router.patch('/tasks/:taskId/complete', completeFollowUpTask);
 
 export default router;

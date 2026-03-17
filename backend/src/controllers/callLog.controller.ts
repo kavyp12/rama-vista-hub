@@ -526,6 +526,19 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const completeFollowUpTask = async (req: AuthRequest, res: Response) => {
+  try {
+    const { taskId } = req.params;
+    const task = await prisma.followUpTask.update({
+      where: { id: taskId },
+      data: { status: 'completed', completedAt: new Date() }
+    });
+    return res.json(task);
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to complete task' });
+  }
+};
+
 export const getCallStats = async (req: AuthRequest, res: Response) => {
   try {
     const agentId = req.user!.role === 'sales_agent' ? req.user!.userId : (req.query.agentId as string);
