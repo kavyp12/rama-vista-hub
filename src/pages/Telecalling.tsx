@@ -220,7 +220,7 @@ export default function Telecalling() {
     setIsEditOpen(true);
   };
 
-  // ✅ FIXED — actually calls MCUBE
+  // ✅ FIXED — actually calls MCUBE and refreshes table so new log appears immediately
 const handleCallAction = async (item: TableRowData) => {
     toast({ title: "Dialing...", description: `Connecting to ${item.lead.name} (${item.lead.phone})...` });
     try {
@@ -236,7 +236,12 @@ const handleCallAction = async (item: TableRowData) => {
         if (!res.ok) {
             toast({ title: "Call Failed", description: data.error || "Could not initiate call.", variant: "destructive" });
         } else {
-            toast({ title: "Call Connected!", description: `MCUBE is connecting you to ${item.lead.name}. Your phone will ring first.` });
+            toast({ title: "📞 Dialing...", description: `Your phone will ring first, then ${item.lead.name} will be connected.` });
+            // ✅ FIX: Refresh the table so the newly created pending CallLog appears
+            setTimeout(() => {
+                fetchData();
+                fetchStats();
+            }, 1500); // small delay to let the backend finish writing
         }
     } catch (error) {
         toast({ title: "Error", description: "Could not reach MCUBE. Check your connection.", variant: "destructive" });

@@ -57,6 +57,40 @@ export const initiateMcubeCall = async (req: AuthRequest, res: Response) => {
       }
     });
 
+    const mcubeCallId = response.data?.callid || 'N/A';
+
+    // ── FIX: Immediately save a pending CallLog so call appears in CRM right away ──
+    // The webhook will enrich this later with duration/recording once MCUBE posts back.
+    const cleanLeadPhone = String(leadPhone).replace(/\D/g, '').slice(-10);
+    const lead = await prisma.lead.findFirst({
+      where: { phone: { contains: cleanLeadPhone } }
+    });
+
+    if (!lead) {
+      // If the lead doesn't exist in our CRM database, we shouldn't fail silently.
+      // We must tell the frontend that it cannot log a call for a non-existent lead.
+      return res.status(404).json({ 
+        error: `Could not log call. No lead found in the CRM with phone number ${cleanLeadPhone}. Make sure the lead is saved first.` 
+      });
+    }
+
+    // Immediately save a pending CallLog so call appears in CRM right away
+    await prisma.callLog.create({
+      data: {
+        leadId: lead.id,
+        agentId: currentUser.id,
+        callStatus: 'not_connected',  // conservative default; webhook updates this when call completes
+        callDate: new Date(),
+        notes: `Outbound call initiated via MCUBE | Call ID: ${mcubeCallId} | Agent: ${currentUser.fullName} (${currentUser.phone}) | Awaiting webhook update`,
+      }
+    });
+
+    // Stamp last contacted so lead list stays fresh
+    await prisma.lead.update({
+      where: { id: lead.id },
+      data: { lastContactedAt: new Date() }
+    });
+
     return res.status(200).json({
       success: true,
       message: 'Call initiated via MCUBE',
@@ -89,6 +123,10 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
   try {
     const callData = req.body;
 
+    // ── DIAGNOSTIC LOGGING — remove after MCUBE is confirmed working ──
+    console.log('\n📞 MCUBE WEBHOOK HIT:', new Date().toISOString());
+    console.log('📦 Raw payload:', JSON.stringify(callData, null, 2));
+
     // ── Parse payload ──
     // INBOUND  fields: callfrom (customer), callto (agent), dialstatus, duration, callid, filename, calltype
     // OUTBOUND fields: customer (lead),     executive (agent), status,    duration, callid, filename, callType
@@ -110,7 +148,11 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
     const rawLeadPhone = (customer || callfrom || '') as string;
     const rawAgentPhone = (executive || callto || '') as string;
 
+    console.log(`📱 Lead phone raw: "${rawLeadPhone}" | Agent phone raw: "${rawAgentPhone}"`);
+    console.log(`📋 callType: ${callType} | dialstatus: ${dialstatus} | status: ${status} | duration: ${duration}`);
+
     if (!rawLeadPhone || rawLeadPhone.length < 6) {
+      console.warn('⚠️  Webhook rejected: no lead phone in payload');
       return res.status(200).send('Webhook received (no lead phone in payload)');
     }
 
@@ -225,15 +267,23 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
     }
 
     if (!admin) {
+      console.warn('⚠️  Webhook: no active admin found in CRM');
       return res.status(200).send('Webhook received (no active admin found in CRM)');
     }
 
     // Create the lead if it doesn't exist at all
     let targetLead = lead;
     if (!targetLead) {
+      // ── FILTER (Options 3): Ignore short calls or missed calls from unknown numbers ──
+      // This ensures we do not litter the CRM with spam or instant hang-ups.
+      if (!isConnected || !durationInSeconds || durationInSeconds < 10) {
+        console.warn(`⚠️ Webhook: ignored unknown caller ${cleanLeadPhone} (Call missed or < 10s)`);
+        return res.status(200).send('Webhook received (ignored short/missed call from unknown number)');
+      }
+
       targetLead = await prisma.lead.create({
         data: {
-          name: `New Lead - ${cleanLeadPhone}`,
+          name: `Unverified MCUBE Caller - ${cleanLeadPhone}`, // Option 4
           phone: cleanLeadPhone,
           stage: 'new',
           temperature: 'warm',
@@ -338,7 +388,7 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
       take: 20,
     });
 
-    // Combine and deduplicate by leadId, showing most recent first
+    // Combined deduplication by leadId so we don't show the same lead twice (e.g. Inbound Missed + Outbound Missed simultaneously)
     const seen = new Set<string>();
     const results: {
       id: string;
@@ -355,9 +405,8 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
     // Inbound missed calls (callback tasks from MCube webhook)
     for (const task of callbackTasks) {
       if (!task.lead) continue;
-      const key = `inbound-${task.lead.id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      if (seen.has(task.lead.id)) continue;
+      seen.add(task.lead.id);
       results.push({
         id: task.id,
         leadId: task.lead.id,
@@ -374,9 +423,15 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
     // Outbound missed calls (not_connected call logs)
     for (const log of missedCallLogs) {
       if (!log.lead) continue;
-      const key = `outbound-${log.lead.id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      if (seen.has(log.lead.id)) continue;
+      seen.add(log.lead.id);
+      
+      let callType: 'inbound_missed' | 'outbound_missed' = 'outbound_missed';
+      // Safety check: if the call log notes say it was an Inbound call from MCUBE, label it as inbound
+      if (log.notes?.includes('MCUBE Inbound')) {
+        callType = 'inbound_missed';
+      }
+
       results.push({
         id: log.id,
         leadId: log.lead.id,
@@ -386,7 +441,7 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
         stage: log.lead.stage,
         calledAt: log.callDate.toISOString(),
         notes: log.notes,
-        type: 'outbound_missed',
+        type: callType,
       });
     }
 
@@ -503,6 +558,13 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
       case 'qualified': where.callStatus = 'connected_positive'; break;
       case 'unqualified': where.callStatus = 'not_interested'; break;
       case 'archive': where.isArchived = true; break;
+      // ✅ FIX: 'active' = calls made TODAY for this agent
+      case 'active': {
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+        where.callDate = { gte: startOfDay };
+        break;
+      }
       case 'deleted':
         delete where.deletedAt;
         where.deletedAt = { not: null };

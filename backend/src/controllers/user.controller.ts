@@ -39,7 +39,14 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
     const where: any = {};
 
     if (role) where.role = role;
-    if (isActive !== undefined) where.isActive = isActive === 'true';
+    
+    // By default, hide deactivated/deleted users unless specifically requested
+    if (isActive !== undefined) {
+      where.isActive = isActive === 'true';
+    } else {
+      where.isActive = true; 
+    }
+
     if (search) {
       where.OR = [
         { fullName: { contains: search as string, mode: 'insensitive' } },

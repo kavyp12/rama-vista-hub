@@ -77,7 +77,9 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: any) {
         body: JSON.stringify({ leadPhone: lead.phone })
       });
       if (!res.ok) throw new Error();
-      toast({ title: 'Ringing', description: 'Please answer your phone to connect to the lead.' });
+      // ✅ FIX: Tell parent to refresh so the new pending CallLog appears in the list
+      onSuccess();
+      toast({ title: '📞 Ringing Your Phone', description: 'Answer your phone — MCUBE will then connect you to the lead.' });
     } catch {
       toast({ title: 'Dialer Error', description: 'Could not connect via MCUBE. Log manually below.', variant: 'destructive' });
     }
