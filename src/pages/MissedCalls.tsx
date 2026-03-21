@@ -375,7 +375,11 @@ function MissedCallCard({
         {/* Name + temp + stage */}
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className="font-semibold text-sm text-slate-900 truncate">{call.leadName}</p>
+            <p className="font-semibold text-sm text-slate-900 truncate">
+               {call.leadName 
+                 ? call.leadName.replace('Unverified MCUBE Caller - ', 'New Inquiry: ').replace('New Lead - ', 'New Inquiry: ') 
+                 : 'Unknown Lead'}
+            </p>
             <a href={`tel:${call.leadPhone}`} className="text-xs text-blue-600 font-medium flex items-center gap-1 hover:underline">
               <Phone className="h-3 w-3" />{call.leadPhone}
             </a>
@@ -386,8 +390,7 @@ function MissedCallCard({
           </div>
         </div>
 
-        {/* Stage + follow-up date */}
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap pb-1">
           <Badge variant="outline" className="text-[10px] h-4 px-1.5 capitalize font-normal">
             {call.stage.replace(/_/g, ' ')}
           </Badge>
@@ -398,6 +401,22 @@ function MissedCallCard({
             </span>
           )}
         </div>
+        
+        {/* --- RECORDING (if available) --- */}
+        {(() => {
+           if (!call.notes) return null;
+           const match = call.notes.match(/Recording:\s*(http[^\s\|]+)/);
+           if (match && match[1] && match[1] !== 'None') {
+               return (
+                   <div className="pt-2 mt-1 border-t border-slate-100">
+                       <a href={match[1]} target="_blank" rel="noreferrer" className="text-[10px] font-semibold w-fit bg-blue-50 text-blue-600 border border-blue-100 hover:bg-blue-100 rounded px-2 py-1 flex items-center gap-1.5 font-sans transition-colors">
+                           ▶ Play Audio Recording
+                       </a>
+                   </div>
+               );
+           }
+           return null;
+        })()}
       </div>
 
       {/* Action footer */}

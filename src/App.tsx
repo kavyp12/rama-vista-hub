@@ -109,9 +109,9 @@ function AppRoutes() {
       
       <Route path="/deals" element={<Navigate to="/pipeline" replace />} />
 
-      {/* ✅ TELECALLING RESTRICTED TO ADMIN/MANAGER ONLY */}
+      {/* ✅ TELECALLING (Backend filters to show only Agent's own calls) */}
       <Route path="/telecalling" element={
-        <ProtectedRoute allowedRoles={['admin', 'sales_manager']}>
+        <ProtectedRoute>
           <Telecalling />
         </ProtectedRoute>
       } />
