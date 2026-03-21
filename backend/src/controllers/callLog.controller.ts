@@ -341,29 +341,8 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
   try {
     const agentId = req.user!.userId;
 
-    // Get pending callback tasks for this agent (these are created when a lead calls and it's missed/received)
-    const callbackTasks = await prisma.followUpTask.findMany({
-      where: {
-        agentId,
-        taskType: 'callback',
-        status: 'pending',
-      },
-      include: {
-        lead: {
-          select: {
-            id: true,
-            name: true,
-            phone: true,
-            temperature: true,
-            stage: true,
-          }
-        }
-      },
-      orderBy: { scheduledAt: 'desc' },
-      take: 100,
-    });
-
-    // Also get recent not_connected call logs for this agent (missed outbound)
+    // ── STEP 1: All not_connected call logs for this agent (the TRUE source of missed calls) ──
+    // This is the same data source that getCallLogs?view=missed uses, so the count will always match.
     const missedCallLogs = await prisma.callLog.findMany({
       where: {
         agentId,
@@ -378,68 +357,63 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
             phone: true,
             temperature: true,
             stage: true,
+            nextFollowupAt: true,
           }
         }
       },
       orderBy: { callDate: 'desc' },
-      take: 200,
+      // ── NO hard cap here — we return ALL missed calls so badge count matches Telecalling page ──
     });
 
-    const results: {
-      id: string;
-      leadId: string;
-      leadName: string;
-      leadPhone: string;
-      temperature: string;
-      stage: string;
-      calledAt: string;
-      notes: string | null;
-      type: 'inbound_missed' | 'outbound_missed';
-    }[] = [];
+    // ── STEP 2: Pending callback follow-up tasks to know which calls have a taskId ──
+    // (used so the frontend can mark a task as "done" after the agent calls back)
+    const pendingTasks = await prisma.followUpTask.findMany({
+      where: {
+        agentId,
+        taskType: 'callback',
+        status: 'pending',
+      },
+      select: { id: true, leadId: true, status: true },
+    });
 
-    // Inbound missed calls (callback tasks from MCube webhook)
-    for (const task of callbackTasks) {
-      if (!task.lead) continue;
-      results.push({
-        id: task.id,
-        leadId: task.lead.id,
-        leadName: task.lead.name,
-        leadPhone: task.lead.phone,
-        temperature: task.lead.temperature,
-        stage: task.lead.stage,
-        calledAt: task.scheduledAt.toISOString(),
-        notes: task.notes,
-        type: 'inbound_missed',
-      });
+    // Build a fast leadId → taskId lookup
+    const leadTaskMap = new Map<string, string>();
+    for (const t of pendingTasks) {
+      if (t.leadId) leadTaskMap.set(t.leadId, t.id);
     }
 
-    // Outbound missed calls (not_connected call logs)
-    for (const log of missedCallLogs) {
-      if (!log.lead) continue;
-      
-      let callType: 'inbound_missed' | 'outbound_missed' = 'outbound_missed';
-      // Safety check: if the call log notes say it was an Inbound call from MCUBE, label it as inbound
-      if (log.notes?.includes('MCUBE Inbound')) {
-        callType = 'inbound_missed';
-      }
+    // ── STEP 3: Build the final result list ──
+    // One entry per call log — no deduplication — so count matches 1:1 with Telecalling's missed view.
+    const results = missedCallLogs
+      .filter(log => log.lead != null)
+      .map(log => {
+        const callType: 'inbound_missed' | 'outbound_missed' =
+          log.notes?.includes('MCUBE Inbound') ? 'inbound_missed' : 'outbound_missed';
 
-      results.push({
-        id: log.id,
-        leadId: log.lead.id,
-        leadName: log.lead.name,
-        leadPhone: log.lead.phone,
-        temperature: log.lead.temperature,
-        stage: log.lead.stage,
-        calledAt: log.callDate.toISOString(),
-        notes: log.notes,
-        type: callType,
+        const taskId = leadTaskMap.get(log.lead!.id);
+
+        return {
+          id: log.id,
+          leadId: log.lead!.id,
+          leadName: log.lead!.name,
+          leadPhone: log.lead!.phone,
+          temperature: log.lead!.temperature,
+          stage: log.lead!.stage,
+          calledAt: log.callDate.toISOString(),
+          notes: log.notes,
+          type: callType,
+          // followUpStatus: whether there is still a pending task for this lead
+          followUpStatus: taskId ? 'pending' : 'done',
+          nextFollowupAt: (log.lead as any).nextFollowupAt?.toISOString?.() ?? null,
+          taskId: taskId ?? null,
+        };
       });
-    }
 
-    // Sort by calledAt descending
+    // Sort by calledAt descending — newest first
     results.sort((a, b) => new Date(b.calledAt).getTime() - new Date(a.calledAt).getTime());
 
-    return res.json(results.slice(0, 15));
+    // ── NO .slice() cap — return all so sidebar badge and this page always show the same number ──
+    return res.json(results);
   } catch (error) {
     console.error('Missed Calls Detail Error:', error);
     return res.status(500).json({ error: 'Failed to fetch missed calls detail' });

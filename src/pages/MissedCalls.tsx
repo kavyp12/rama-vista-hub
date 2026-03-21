@@ -75,6 +75,8 @@ export default function MissedCalls() {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = res.ok ? await res.json() : [];
+      // The API now returns ALL missed call logs with followUpStatus + taskId already set.
+      // followUpStatus = 'pending' if there is an open followUpTask for that lead, else 'done'.
       setCalls(Array.isArray(data) ? data : []);
     } catch {
       toast({ title: 'Error', description: 'Could not load missed calls', variant: 'destructive' });
