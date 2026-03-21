@@ -360,7 +360,7 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
         }
       },
       orderBy: { scheduledAt: 'desc' },
-      take: 20,
+      take: 100,
     });
 
     // Also get recent not_connected call logs for this agent (missed outbound)
@@ -369,9 +369,6 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
         agentId,
         callStatus: 'not_connected',
         deletedAt: null,
-        callDate: {
-          gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // last 7 days
-        }
       },
       include: {
         lead: {
@@ -385,11 +382,9 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
         }
       },
       orderBy: { callDate: 'desc' },
-      take: 20,
+      take: 200,
     });
 
-    // Combined deduplication by leadId so we don't show the same lead twice (e.g. Inbound Missed + Outbound Missed simultaneously)
-    const seen = new Set<string>();
     const results: {
       id: string;
       leadId: string;
@@ -405,8 +400,6 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
     // Inbound missed calls (callback tasks from MCube webhook)
     for (const task of callbackTasks) {
       if (!task.lead) continue;
-      if (seen.has(task.lead.id)) continue;
-      seen.add(task.lead.id);
       results.push({
         id: task.id,
         leadId: task.lead.id,
@@ -423,8 +416,6 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
     // Outbound missed calls (not_connected call logs)
     for (const log of missedCallLogs) {
       if (!log.lead) continue;
-      if (seen.has(log.lead.id)) continue;
-      seen.add(log.lead.id);
       
       let callType: 'inbound_missed' | 'outbound_missed' = 'outbound_missed';
       // Safety check: if the call log notes say it was an Inbound call from MCUBE, label it as inbound
