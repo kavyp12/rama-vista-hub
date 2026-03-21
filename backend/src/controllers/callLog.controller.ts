@@ -538,19 +538,33 @@ export const createCallLog = async (req: AuthRequest, res: Response) => {
 
 export const getCallLogs = async (req: AuthRequest, res: Response) => {
   try {
-    const { leadId, view, search, date } = req.query;
+    const { leadId, view, search, date, dateFrom, dateTo, callStatus, agentId, minDuration } = req.query;
 
     const where: any = { deletedAt: null };
     if (leadId) where.leadId = leadId;
 
+    // ── Search ──
     if (search) {
       where.OR = [
         { lead: { name: { contains: search as string, mode: 'insensitive' } } },
         { lead: { phone: { contains: search as string } } }
       ];
     }
-    
-    if (date) {
+
+    // ── Date filter — supports legacy single `date` param AND new dateFrom/dateTo range ──
+    if (dateFrom || dateTo) {
+      where.callDate = {};
+      if (dateFrom) {
+        const start = new Date(dateFrom as string);
+        start.setHours(0, 0, 0, 0);
+        where.callDate.gte = start;
+      }
+      if (dateTo) {
+        const end = new Date(dateTo as string);
+        end.setHours(23, 59, 59, 999);
+        where.callDate.lte = end;
+      }
+    } else if (date) {
       const start = new Date(date as string);
       start.setHours(0, 0, 0, 0);
       const end = new Date(start);
@@ -558,8 +572,24 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
       where.callDate = { gte: start, lte: end };
     }
 
-    if (req.user!.role === 'sales_agent') where.agentId = req.user!.userId;
+    // ── Call status filter (from multi-filter panel) ──
+    if (callStatus && callStatus !== 'all') {
+      where.callStatus = callStatus as string;
+    }
 
+    // ── Agent filter (admin only — sales agents always scoped to self) ──
+    if (req.user!.role === 'sales_agent') {
+      where.agentId = req.user!.userId;
+    } else if (agentId && agentId !== 'all') {
+      where.agentId = agentId as string;
+    }
+
+    // ── Minimum call duration filter (in seconds) ──
+    if (minDuration && minDuration !== 'all') {
+      where.callDuration = { gte: parseInt(minDuration as string, 10) };
+    }
+
+    // ── View presets ──
     switch (view) {
       case 'missed': where.callStatus = 'not_connected'; break;
       case 'attended': where.callStatus = { in: ['connected_positive', 'connected_callback', 'not_interested'] }; break;
@@ -567,7 +597,7 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
       case 'unqualified': where.callStatus = 'not_interested'; break;
       case 'archive': where.isArchived = true; break;
       case 'active': {
-        if (!date) {
+        if (!date && !dateFrom) {
           const startOfDay = new Date();
           startOfDay.setHours(0, 0, 0, 0);
           where.callDate = { gte: startOfDay };
@@ -588,7 +618,7 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
         agent: { select: { id: true, fullName: true } }
       },
       orderBy: { callDate: 'desc' },
-      take: 200
+      take: 500
     });
 
     return res.json(callLogs);
@@ -614,15 +644,31 @@ export const getCallStats = async (req: AuthRequest, res: Response) => {
   try {
     const agentId = req.user!.role === 'sales_agent' ? req.user!.userId : (req.query.agentId as string);
     const dateQuery = req.query.date as string;
-    
-    const whereClause: any = { agentId, deletedAt: null };
-    
-    if (dateQuery) {
-        const start = new Date(dateQuery);
+    const dateFrom = req.query.dateFrom as string;
+    const dateTo = req.query.dateTo as string;
+
+    const whereClause: any = { deletedAt: null };
+    if (agentId && agentId !== 'all') whereClause.agentId = agentId;
+
+    // Support both legacy single `date` and new dateFrom/dateTo range
+    if (dateFrom || dateTo) {
+      whereClause.callDate = {};
+      if (dateFrom) {
+        const start = new Date(dateFrom);
         start.setHours(0, 0, 0, 0);
-        const end = new Date(start);
+        whereClause.callDate.gte = start;
+      }
+      if (dateTo) {
+        const end = new Date(dateTo);
         end.setHours(23, 59, 59, 999);
-        whereClause.callDate = { gte: start, lte: end };
+        whereClause.callDate.lte = end;
+      }
+    } else if (dateQuery) {
+      const start = new Date(dateQuery);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setHours(23, 59, 59, 999);
+      whereClause.callDate = { gte: start, lte: end };
     }
 
     const callsByStatus = await prisma.callLog.groupBy({
