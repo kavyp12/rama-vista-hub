@@ -96,6 +96,7 @@ export default function Telecalling() {
   // State for Data
   const [activeView, setActiveView] = useState(searchParams.get('view') || 'reports');
   const [searchQuery, setSearchQuery] = useState('');
+  const [dateFilter, setDateFilter] = useState('');
   const [tableData, setTableData] = useState<TableRowData[]>([]);
   const [stats, setStats] = useState<CallStats | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -147,6 +148,7 @@ export default function Telecalling() {
                 view: activeView,
                 search: searchQuery
             });
+            if (dateFilter) query.append('date', dateFilter);
 
             const res = await fetch(`${API_URL}/call-logs?${query.toString()}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
@@ -178,11 +180,12 @@ export default function Telecalling() {
     } finally {
         setIsLoading(false);
     }
-  }, [activeView, searchQuery, token, toast]);
+  }, [activeView, searchQuery, dateFilter, token, toast]);
 
   const fetchStats = useCallback(async () => {
       try {
-          const res = await fetch(`${API_URL}/call-logs/stats`, {
+          const query = dateFilter ? `?date=${dateFilter}` : '';
+          const res = await fetch(`${API_URL}/call-logs/stats${query}`, {
               headers: { 'Authorization': `Bearer ${token}` }
           });
           const data = await res.json();
@@ -190,7 +193,7 @@ export default function Telecalling() {
       } catch (error) {
           console.error("Failed to fetch stats", error);
       }
-  }, [token]);
+  }, [token, dateFilter]);
 
   useEffect(() => { fetchStats(); }, [fetchStats]);
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -345,9 +348,23 @@ const handleCallAction = async (item: TableRowData) => {
                     {item.icon && <item.icon className="h-4 w-4" />}
                     <span className="truncate">{item.label}</span>
                     
-                    {item.id === 'missed' && stats?.notAnswered ? (
-                        <span className="ml-auto text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold">{stats.notAnswered}</span>
-                    ) : null}
+                    {stats ? (() => {
+                        let count = 0;
+                        let badgeClass = "bg-primary/10 text-primary";
+                        if (item.id === 'all') count = stats.totalCalls;
+                        else if (item.id === 'attended') count = stats.totalCalls - stats.notAnswered;
+                        else if (item.id === 'missed') { count = stats.notAnswered; badgeClass = "bg-red-100 text-red-600"; }
+                        else if (item.id === 'qualified') count = stats.positive;
+                        else if (item.id === 'unqualified') count = stats.negative;
+                        else if (item.id === 'new_leads') { count = (stats as any).newLeads; badgeClass = "bg-blue-100 text-blue-600"; }
+                        
+                        if (count > 0) return (
+                            <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-bold ${badgeClass}`}>
+                                {count}
+                            </span>
+                        );
+                        return null;
+                    })() : null}
                   </Button>
                 )
               ))}
@@ -377,13 +394,21 @@ const handleCallAction = async (item: TableRowData) => {
                     </h2>
                   </div>
 
-                  <div className="relative w-full sm:w-72 mt-2 sm:mt-0">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input 
-                      placeholder="Search name or phone..." 
-                      className="pl-10 bg-background"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
+                  <div className="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+                    <div className="relative w-full sm:w-64">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input 
+                        placeholder="Search name or phone..." 
+                        className="pl-10 bg-background"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
+                    </div>
+                    <Input
+                       type="date"
+                       className="w-[140px] bg-background text-sm"
+                       value={dateFilter}
+                       onChange={(e) => setDateFilter(e.target.value)}
                     />
                   </div>
                </div>
@@ -440,7 +465,11 @@ const handleCallAction = async (item: TableRowData) => {
                                    </AvatarFallback>
                                  </Avatar>
                                  <div>
-                                    <span className="font-semibold text-sm block">{row.lead?.name || 'Unknown Lead'}</span>
+                                    <span className="font-semibold text-sm block">
+                                      {row.lead?.name 
+                                        ? row.lead.name.replace('Unverified MCUBE Caller - ', 'New Inquiry: ').replace('New Lead - ', 'New Inquiry: ') 
+                                        : 'Unknown Lead'}
+                                    </span>
                                     {row.isLeadRow ? (
                                         <span className="text-[10px] text-blue-600 font-medium">New Website Lead</span>
                                     ) : (
@@ -462,8 +491,24 @@ const handleCallAction = async (item: TableRowData) => {
                              <TableCell>
                                <StatusBadge status={row.callStatus} />
                              </TableCell>
-                             <TableCell className="text-xs font-mono">
-                               {row.duration ? `${Math.floor(row.duration / 60)}m ${row.duration % 60}s` : '--'}
+                             <TableCell>
+                               <div className="flex flex-col gap-1.5 mt-1 mb-1">
+                                 <span className="text-xs font-mono font-medium text-foreground">
+                                   {row.duration ? `${Math.floor(row.duration / 60)}m ${row.duration % 60}s` : '--'}
+                                 </span>
+                                 {(() => {
+                                     if (!row.notes) return null;
+                                     const match = row.notes.match(/Recording:\s*(http[^\s\|]+)/);
+                                     if (match && match[1] && match[1] !== 'None') {
+                                         return (
+                                             <a href={match[1]} target="_blank" rel="noreferrer" className="text-[10px] bg-blue-50 text-blue-600 rounded px-1.5 py-0.5 w-fit border border-blue-100 hover:bg-blue-100 flex items-center gap-1 font-sans shadow-sm transition-colors">
+                                               ▶ Play Audio
+                                             </a>
+                                         );
+                                     }
+                                     return null;
+                                 })()}
+                               </div>
                              </TableCell>
                              <TableCell className="text-right pr-4">
                                <DropdownMenu>

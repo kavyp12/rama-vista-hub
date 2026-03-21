@@ -65,6 +65,7 @@ export function AppSidebar({ missedCallCount = 0 }: AppSidebarProps) {
         { title: 'Missed Calls', icon: PhoneMissed, url: '/missed-calls', badge: missedCallCount },
         { title: 'Site Visits', icon: CalendarDays, url: '/site-visits', badge: 0 },
         { title: 'Properties', icon: Home, url: '/properties', badge: 0 },
+        { title: 'Payments', icon: CreditCard, url: '/payments', badge: 0 },
       ],
     };
 
@@ -76,6 +77,7 @@ export function AppSidebar({ missedCallCount = 0 }: AppSidebarProps) {
         { title: 'Telecalling', icon: Phone, url: '/telecalling', badge: 0 },
         { title: 'Site Visits', icon: CalendarDays, url: '/site-visits', badge: 0 },
         { title: 'Pipeline', icon: TrendingUp, url: '/pipeline', badge: 0 },
+        { title: 'Payments', icon: CreditCard, url: '/payments', badge: 0 },
       ],
     };
 

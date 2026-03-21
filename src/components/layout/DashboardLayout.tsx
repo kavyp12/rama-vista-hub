@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import {
   Bell, X, AlertTriangle, Calendar, Users,
   Clock, TrendingDown, UserX, ChevronRight, RefreshCw, PhoneMissed,
-  Phone, Flame, Thermometer, Snowflake, ArrowUpRight, ChevronDown, ChevronUp
+  Phone, Flame, Thermometer, Snowflake, ArrowUpRight, ChevronDown, ChevronUp, IndianRupee
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -65,6 +65,30 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
   const [missedCallDetails, setMissedCallDetails] = useState<MissedCallDetail[]>([]);
   const [missedCallsExpanded, setMissedCallsExpanded] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  
+  const isInitialLoad = useRef(true);
+  const previousOverdueCount = useRef(0);
+
+  // Sound function for notifications
+  function playNotificationSound() {
+    try {
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContext) return;
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      gain.gain.setValueAtTime(0.1, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 1);
+      osc.start();
+      osc.stop(ctx.currentTime + 1);
+    } catch (e) {
+      console.log('Audio disabled by browser auto-play policy');
+    }
+  }
 
   useEffect(() => {
     if (!loading && !user) navigate('/auth');
@@ -101,10 +125,11 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
 
       if (isAgent) {
         // ---- AGENT: use dedicated stats endpoint ----
-        const [statsRes, visitsRes, missedCallsRes] = await Promise.all([
+        const [statsRes, visitsRes, missedCallsRes, overdueRes] = await Promise.all([
           fetch(`${API_URL}/leads/dashboard/stats`, { headers }),
           fetch(`${API_URL}/site-visits?status=scheduled`, { headers }),
           fetch(`${API_URL}/call-logs/missed-calls`, { headers }),
+          fetch(`${API_URL}/payments/overdue`, { headers }),
         ]);
 
         if (statsRes.ok) {
@@ -186,11 +211,28 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
           }
         }
 
+        if (overdueRes.ok) {
+          const overdueData = await overdueRes.json();
+          if (overdueData.summary && overdueData.summary.totalOverdueCount > 0) {
+            items.push({
+              id: 'overdue_payments',
+              title: 'Overdue Payments',
+              subtitle: `₹${overdueData.summary.totalOverdueAmount.toLocaleString('en-IN')} pending collection`,
+              count: overdueData.summary.totalOverdueCount,
+              color: 'text-red-700',
+              bg: 'bg-red-100',
+              icon: IndianRupee,
+              href: '/payments',
+            });
+          }
+        }
+
       } else {
         // ---- ADMIN / MANAGER: fetch leads + visits ----
-        const [leadsRes, visitsRes] = await Promise.all([
+        const [leadsRes, visitsRes, overdueRes] = await Promise.all([
           fetch(`${API_URL}/leads`, { headers }),
           fetch(`${API_URL}/site-visits?status=scheduled`, { headers }),
+          fetch(`${API_URL}/payments/overdue`, { headers }),
         ]);
 
         const leads = leadsRes.ok ? await leadsRes.json() : [];
@@ -298,22 +340,53 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
             });
           }
         }
+
+        if (overdueRes.ok) {
+          const overdueData = await overdueRes.json();
+          if (overdueData.summary && overdueData.summary.totalOverdueCount > 0) {
+            items.push({
+              id: 'overdue_payments',
+              title: 'Overdue Payments',
+              subtitle: `₹${overdueData.summary.totalOverdueAmount.toLocaleString('en-IN')} total overdue`,
+              count: overdueData.summary.totalOverdueCount,
+              color: 'text-red-700',
+              bg: 'bg-red-100',
+              icon: IndianRupee,
+              href: '/payments',
+            });
+          }
+        }
       }
 
       // Sort highest count first, critical items first
       const priority: Record<string, number> = {
         missed_calls: 0,
-        unassigned_lead: 1,
-        overdue_followup: 2,
-        missed_visit: 3,
-        stagnant_lead: 4,
-        today_visit: 5,
-        new_leads_today: 6,
+        overdue_payments: 1,
+        unassigned_lead: 2,
+        overdue_followup: 3,
+        missed_visit: 4,
+        stagnant_lead: 5,
+        today_visit: 6,
+        new_leads_today: 7,
       };
       items.sort((a, b) => (priority[a.id] ?? 9) - (priority[b.id] ?? 9));
 
       setNotifications(items);
-      setTotalCount(items.reduce((sum, n) => sum + n.count, 0));
+      const newTotal = items.reduce((sum, n) => sum + n.count, 0);
+      setTotalCount(newTotal);
+
+      // Play sound ONLY if overdue payment count increased since last check, 
+      // and prevent it from trying to play on initial page load.
+      const overdueItem = items.find(i => i.id === 'overdue_payments');
+      const currentOverdueCount = overdueItem ? overdueItem.count : 0;
+      
+      if (!isInitialLoad.current && currentOverdueCount > previousOverdueCount.current) {
+        playNotificationSound();
+      }
+      
+      previousOverdueCount.current = currentOverdueCount;
+      isInitialLoad.current = false;
+
       setLastFetched(new Date());
     } catch (err) {
       console.error('Notification fetch failed:', err);

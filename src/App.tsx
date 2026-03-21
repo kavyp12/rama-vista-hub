@@ -129,7 +129,7 @@ function AppRoutes() {
       } />
 
       <Route path="/payments" element={
-        <ProtectedRoute allowedRoles={['admin', 'sales_manager']}>
+        <ProtectedRoute>
           <Payments />
         </ProtectedRoute>
       } />

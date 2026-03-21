@@ -283,7 +283,7 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
 
       targetLead = await prisma.lead.create({
         data: {
-          name: `Unverified MCUBE Caller - ${cleanLeadPhone}`, // Option 4
+          name: `New Inquiry: ${cleanLeadPhone}`,
           phone: cleanLeadPhone,
           stage: 'new',
           temperature: 'warm',
@@ -538,7 +538,7 @@ export const createCallLog = async (req: AuthRequest, res: Response) => {
 
 export const getCallLogs = async (req: AuthRequest, res: Response) => {
   try {
-    const { leadId, view, search } = req.query;
+    const { leadId, view, search, date } = req.query;
 
     const where: any = { deletedAt: null };
     if (leadId) where.leadId = leadId;
@@ -549,6 +549,14 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
         { lead: { phone: { contains: search as string } } }
       ];
     }
+    
+    if (date) {
+      const start = new Date(date as string);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setHours(23, 59, 59, 999);
+      where.callDate = { gte: start, lte: end };
+    }
 
     if (req.user!.role === 'sales_agent') where.agentId = req.user!.userId;
 
@@ -558,11 +566,12 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
       case 'qualified': where.callStatus = 'connected_positive'; break;
       case 'unqualified': where.callStatus = 'not_interested'; break;
       case 'archive': where.isArchived = true; break;
-      // ✅ FIX: 'active' = calls made TODAY for this agent
       case 'active': {
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
-        where.callDate = { gte: startOfDay };
+        if (!date) {
+          const startOfDay = new Date();
+          startOfDay.setHours(0, 0, 0, 0);
+          where.callDate = { gte: startOfDay };
+        }
         break;
       }
       case 'deleted':
@@ -579,7 +588,7 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
         agent: { select: { id: true, fullName: true } }
       },
       orderBy: { callDate: 'desc' },
-      take: 100
+      take: 200
     });
 
     return res.json(callLogs);
@@ -604,12 +613,21 @@ export const completeFollowUpTask = async (req: AuthRequest, res: Response) => {
 export const getCallStats = async (req: AuthRequest, res: Response) => {
   try {
     const agentId = req.user!.role === 'sales_agent' ? req.user!.userId : (req.query.agentId as string);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const dateQuery = req.query.date as string;
+    
+    const whereClause: any = { agentId, deletedAt: null };
+    
+    if (dateQuery) {
+        const start = new Date(dateQuery);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(start);
+        end.setHours(23, 59, 59, 999);
+        whereClause.callDate = { gte: start, lte: end };
+    }
 
     const callsByStatus = await prisma.callLog.groupBy({
       by: ['callStatus'],
-      where: { agentId, callDate: { gte: today }, deletedAt: null },
+      where: whereClause,
       _count: true
     });
 
@@ -617,6 +635,8 @@ export const getCallStats = async (req: AuthRequest, res: Response) => {
     const connectedCalls = callsByStatus
       .filter(item => item.callStatus.startsWith('connected'))
       .reduce((sum, item) => sum + item._count, 0);
+      
+    const newLeadsCount = await prisma.lead.count({ where: { stage: 'new' } });
 
     return res.json({
       totalCalls,
@@ -624,7 +644,9 @@ export const getCallStats = async (req: AuthRequest, res: Response) => {
       notAnswered: callsByStatus.find(i => i.callStatus === 'not_connected')?._count || 0,
       positive: callsByStatus.find(i => i.callStatus === 'connected_positive')?._count || 0,
       negative: callsByStatus.find(i => i.callStatus === 'not_interested')?._count || 0,
-      connectRate: totalCalls > 0 ? Math.round((connectedCalls / totalCalls) * 100) : 0
+      callback: callsByStatus.find(i => i.callStatus === 'connected_callback')?._count || 0,
+      connectRate: totalCalls > 0 ? Math.round((connectedCalls / totalCalls) * 100) : 0,
+      newLeads: newLeadsCount
     });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to fetch call stats' });

@@ -9,7 +9,11 @@ import {
   recordPayment,
   getPaymentLedger,
   getOverduePayments,
-  sendPaymentReminders
+  sendPaymentReminders,
+  // NEW
+  updatePipelineStage,
+  getPipelineView,
+  getStageHistory,
 } from '../controllers/payment.controller';
 import { authenticate, authorize } from '../middlewares/auth.middleware';
 
@@ -32,12 +36,19 @@ router.get('/overdue/list', getOverduePayments);
 // Payment Reminders (must be before /:id)
 router.post('/reminders/send', sendPaymentReminders);
 
+// NEW — Pipeline view (must be before /:id)
+router.get('/pipeline/view', getPipelineView);
+
 // Basic CRUD
 router.get('/', getPayments);
 router.post('/', createPayment);
 
 // Record Payment (must be before generic /:id routes)
 router.post('/:id/record', recordPayment);
+
+// NEW — Pipeline stage routes (must be before generic /:id)
+router.patch('/:id/stage', updatePipelineStage);
+router.get('/:id/stage-history', getStageHistory);
 
 // Generic ID routes (must be LAST)
 router.get('/:id', getPayment);
