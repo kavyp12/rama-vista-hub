@@ -408,6 +408,8 @@ export default function Telecalling() {
 
           {activeView === 'reports' ? (
             <ReportsView stats={stats} token={token} filters={filters} setFilters={setFilters} agents={agents} onRefresh={handleRefresh} isRefreshing={isRefreshing} />
+          ) : activeView === 'analytics' ? (
+            <AnalyticsView token={token} filters={filters} setFilters={setFilters} agents={agents} onRefresh={handleRefresh} isRefreshing={isRefreshing} />
           ) : (
             <Card className="h-full flex flex-col border shadow-sm">
               {/* ─── TOOLBAR ─── */}
@@ -942,6 +944,14 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 bg-background border rounded-md px-2 py-0.5 shadow-sm">
+              <span className="text-xs font-semibold text-muted-foreground">From:</span>
+              <Input type="date" className="h-7 w-fit text-xs border-none shadow-none px-0 py-0 bg-transparent focus-visible:ring-0"
+                value={filters.dateFrom} onChange={e => setFilters(p => ({ ...p, dateFrom: e.target.value }))} />
+              <span className="text-xs font-semibold text-muted-foreground ml-1">To:</span>
+              <Input type="date" className="h-7 w-fit text-xs border-none shadow-none px-0 py-0 bg-transparent focus-visible:ring-0"
+                value={filters.dateTo} onChange={e => setFilters(p => ({ ...p, dateTo: e.target.value }))} min={filters.dateFrom} />
+            </div>
             {/* Quick range presets */}
             {[
               { label: 'Today', days: 0 },
@@ -1242,6 +1252,418 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
             </Table>
           </CardContent>
         </Card>
+
+      </div>
+    </ScrollArea>
+  );
+}
+
+// ─────────────────────────────────────────────
+// ANALYTICS VIEW — deep-dive call analysis
+// ─────────────────────────────────────────────
+interface AnalyticsViewProps {
+  token: string | null;
+  filters: FilterState;
+  setFilters: React.Dispatch<React.SetStateAction<FilterState>>;
+  agents: Agent[];
+  onRefresh: () => void;
+  isRefreshing: boolean;
+}
+
+function AnalyticsView({ token, filters, setFilters, agents, onRefresh, isRefreshing }: AnalyticsViewProps) {
+  const [logs, setLogs] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const fetchLogs = useCallback(async () => {
+    if (!token) return;
+    setIsLoading(true);
+    try {
+      const query = new URLSearchParams({ view: 'all' });
+      if (filters.dateFrom) query.append('dateFrom', filters.dateFrom);
+      if (filters.dateTo) query.append('dateTo', filters.dateTo);
+      if (filters.agentId !== 'all') query.append('agentId', filters.agentId);
+      const res = await fetch(`${API_URL}/call-logs?${query}&take=1000`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) return;
+      setLogs(await res.json());
+    } catch { }
+    finally { setIsLoading(false); }
+  }, [token, filters.dateFrom, filters.dateTo, filters.agentId]);
+
+  useEffect(() => { fetchLogs(); }, [fetchLogs]);
+
+  // ── Hourly heatmap (0–23) ──
+  const hourlyData = useMemo(() => {
+    const counts: Record<number, { hour: string; total: number; connected: number }> = {};
+    for (let h = 0; h < 24; h++) {
+      counts[h] = { hour: `${h.toString().padStart(2, '0')}:00`, total: 0, connected: 0 };
+    }
+    logs.forEach(log => {
+      const h = new Date(log.callDate).getHours();
+      counts[h].total++;
+      if (['connected_positive', 'connected_callback'].includes(log.callStatus)) counts[h].connected++;
+    });
+    return Object.values(counts).filter(d => d.total > 0);
+  }, [logs]);
+
+  // ── Day-of-week breakdown ──
+  const dowData = useMemo(() => {
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const counts: Record<number, { day: string; total: number; connected: number; qualified: number }> = {};
+    days.forEach((d, i) => { counts[i] = { day: d, total: 0, connected: 0, qualified: 0 }; });
+    logs.forEach(log => {
+      const dow = new Date(log.callDate).getDay();
+      counts[dow].total++;
+      if (['connected_positive', 'connected_callback'].includes(log.callStatus)) counts[dow].connected++;
+      if (log.callStatus === 'connected_positive') counts[dow].qualified++;
+    });
+    return Object.values(counts);
+  }, [logs]);
+
+  // ── Duration distribution buckets ──
+  const durationBuckets = useMemo(() => {
+    const buckets = [
+      { label: '< 30s', min: 0, max: 30, count: 0 },
+      { label: '30s–1m', min: 30, max: 60, count: 0 },
+      { label: '1–3m', min: 60, max: 180, count: 0 },
+      { label: '3–5m', min: 180, max: 300, count: 0 },
+      { label: '5–10m', min: 300, max: 600, count: 0 },
+      { label: '10m+', min: 600, max: Infinity, count: 0 },
+    ];
+    logs.forEach(log => {
+      if (log.callDuration == null) return;
+      const b = buckets.find(b => log.callDuration >= b.min && log.callDuration < b.max);
+      if (b) b.count++;
+    });
+    return buckets;
+  }, [logs]);
+
+  // ── Avg duration per outcome ──
+  const avgDurationByStatus = useMemo(() => {
+    const map: Record<string, { label: string; sum: number; count: number; color: string }> = {
+      connected_positive: { label: 'Qualified', sum: 0, count: 0, color: '#22c55e' },
+      connected_callback: { label: 'Callback', sum: 0, count: 0, color: '#3b82f6' },
+      not_connected: { label: 'Missed', sum: 0, count: 0, color: '#ef4444' },
+      not_interested: { label: 'Unqualified', sum: 0, count: 0, color: '#6b7280' },
+    };
+    logs.forEach(log => {
+      if (log.callDuration && map[log.callStatus]) {
+        map[log.callStatus].sum += log.callDuration;
+        map[log.callStatus].count++;
+      }
+    });
+    return Object.values(map).map(d => ({
+      ...d,
+      avg: d.count > 0 ? Math.round(d.sum / d.count) : 0,
+    }));
+  }, [logs]);
+
+  // ── Overall avg duration ──
+  const overallAvgDuration = useMemo(() => {
+    const connected = logs.filter(l => l.callDuration && l.callDuration > 0);
+    if (!connected.length) return 0;
+    return Math.round(connected.reduce((s, l) => s + l.callDuration, 0) / connected.length);
+  }, [logs]);
+
+  // ── Outcome funnel ──
+  const funnel = useMemo(() => {
+    const total = logs.length;
+    const connected = logs.filter(l => ['connected_positive', 'connected_callback', 'not_interested'].includes(l.callStatus)).length;
+    const qualified = logs.filter(l => l.callStatus === 'connected_positive').length;
+    return [
+      { stage: 'Total Calls', value: total, color: '#6366f1' },
+      { stage: 'Connected', value: connected, color: '#22c55e' },
+      { stage: 'Qualified', value: qualified, color: '#f59e0b' },
+    ];
+  }, [logs]);
+
+  const formatDuration = (s: number) => s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
+
+  if (isLoading) return (
+    <div className="flex-1 flex items-center justify-center">
+      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+    </div>
+  );
+
+  const hasData = logs.length > 0;
+
+  return (
+    <ScrollArea className="h-full">
+      <div className="space-y-6 p-1 pb-8">
+
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight">Call Analysis</h2>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              {filters.dateFrom && filters.dateTo
+                ? `${format(new Date(filters.dateFrom), 'MMM dd')} – ${format(new Date(filters.dateTo), 'MMM dd, yyyy')}`
+                : 'All time · deep-dive insights'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 bg-background border rounded-md px-2 py-0.5 shadow-sm">
+              <span className="text-xs font-semibold text-muted-foreground">From:</span>
+              <Input type="date" className="h-7 w-fit text-xs border-none shadow-none px-0 py-0 bg-transparent focus-visible:ring-0"
+                value={filters.dateFrom} onChange={e => setFilters(p => ({ ...p, dateFrom: e.target.value }))} />
+              <span className="text-xs font-semibold text-muted-foreground ml-1">To:</span>
+              <Input type="date" className="h-7 w-fit text-xs border-none shadow-none px-0 py-0 bg-transparent focus-visible:ring-0"
+                value={filters.dateTo} onChange={e => setFilters(p => ({ ...p, dateTo: e.target.value }))} min={filters.dateFrom} />
+            </div>
+            {[{ label: 'Today', days: 0 }, { label: 'This Week', days: 7 }, { label: 'This Month', days: 30 }].map(p => (
+              <Button key={p.label} variant="outline" size="sm" className="h-8 text-xs"
+                onClick={() => {
+                  const today = format(new Date(), 'yyyy-MM-dd');
+                  const from = format(subDays(new Date(), p.days), 'yyyy-MM-dd');
+                  setFilters(prev => ({ ...prev, dateFrom: from, dateTo: today }));
+                }}>
+                {p.label}
+              </Button>
+            ))}
+            {agents.length > 0 && (
+              <Select value={filters.agentId} onValueChange={v => setFilters(p => ({ ...p, agentId: v }))}>
+                <SelectTrigger className="h-8 text-xs w-36">
+                  <SelectValue placeholder="All Agents" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Agents</SelectItem>
+                  {agents.map(a => <SelectItem key={a.id} value={a.id}>{a.fullName}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+            {(filters.dateFrom || filters.agentId !== 'all') && (
+              <Button variant="ghost" size="sm" className="h-8 text-xs gap-1"
+                onClick={() => setFilters(p => ({ ...p, dateFrom: '', dateTo: '', agentId: 'all' }))}>
+                <X className="h-3 w-3" /> Clear
+              </Button>
+            )}
+            <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={onRefresh} disabled={isRefreshing}>
+              <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+        </div>
+
+        {/* ── KPI Row ── */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card className="bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm">
+            <CardContent className="p-5">
+              <div className="p-2.5 rounded-xl bg-indigo-100 text-indigo-600 w-fit mb-3">
+                <Phone className="h-5 w-5" />
+              </div>
+              <p className="text-2xl font-bold">{logs.length.toLocaleString()}</p>
+              <p className="text-xs font-semibold mt-0.5 opacity-90">Total Calls Analysed</p>
+            </CardContent>
+          </Card>
+          <Card className="bg-green-50 border-green-200 text-green-700 shadow-sm">
+            <CardContent className="p-5">
+              <div className="p-2.5 rounded-xl bg-green-100 text-green-600 w-fit mb-3">
+                <Clock className="h-5 w-5" />
+              </div>
+              <p className="text-2xl font-bold">{overallAvgDuration > 0 ? formatDuration(overallAvgDuration) : '—'}</p>
+              <p className="text-xs font-semibold mt-0.5 opacity-90">Avg Call Duration</p>
+              <p className="text-xs opacity-70 mt-1">Connected calls only</p>
+            </CardContent>
+          </Card>
+          <Card className="bg-amber-50 border-amber-200 text-amber-700 shadow-sm">
+            <CardContent className="p-5">
+              <div className="p-2.5 rounded-xl bg-amber-100 text-amber-600 w-fit mb-3">
+                <Target className="h-5 w-5" />
+              </div>
+              <p className="text-2xl font-bold">
+                {logs.length > 0
+                  ? `${Math.round((logs.filter(l => l.callStatus === 'connected_positive').length / logs.length) * 100)}%`
+                  : '—'}
+              </p>
+              <p className="text-xs font-semibold mt-0.5 opacity-90">Qualification Rate</p>
+              <p className="text-xs opacity-70 mt-1">Qualified / total calls</p>
+            </CardContent>
+          </Card>
+          <Card className="bg-blue-50 border-blue-200 text-blue-700 shadow-sm">
+            <CardContent className="p-5">
+              <div className="p-2.5 rounded-xl bg-blue-100 text-blue-600 w-fit mb-3">
+                <Award className="h-5 w-5" />
+              </div>
+              <p className="text-2xl font-bold">
+                {(() => {
+                  const best = hourlyData.reduce((a, b) => b.total > a.total ? b : a, { hour: '—', total: 0 });
+                  return best.total > 0 ? best.hour : '—';
+                })()}
+              </p>
+              <p className="text-xs font-semibold mt-0.5 opacity-90">Peak Calling Hour</p>
+              <p className="text-xs opacity-70 mt-1">Highest volume hour</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* ── Outcome Funnel + Duration by Status ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Outcome Funnel */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-semibold">Call Outcome Funnel</CardTitle>
+              <p className="text-xs text-muted-foreground">How calls progress from dialled to qualified</p>
+            </CardHeader>
+            <CardContent>
+              {hasData ? (
+                <div className="space-y-4 pt-2">
+                  {funnel.map((stage, idx) => {
+                    const pct = funnel[0].value > 0 ? Math.round((stage.value / funnel[0].value) * 100) : 0;
+                    return (
+                      <div key={stage.stage}>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground w-4 font-bold">{idx + 1}</span>
+                            <span className="text-sm font-medium">{stage.stage}</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm font-bold">{stage.value.toLocaleString()}</span>
+                            <span className="text-xs text-muted-foreground w-10 text-right">{pct}%</span>
+                          </div>
+                        </div>
+                        <div className="h-7 rounded-lg overflow-hidden bg-muted">
+                          <div
+                            className="h-full rounded-lg transition-all flex items-center pl-3"
+                            style={{ width: `${Math.max(pct, 4)}%`, backgroundColor: stage.color }}
+                          >
+                            {pct > 15 && <span className="text-white text-xs font-bold">{pct}%</span>}
+                          </div>
+                        </div>
+                        {idx < funnel.length - 1 && funnel[idx + 1].value > 0 && (
+                          <p className="text-[10px] text-muted-foreground mt-1 pl-6">
+                            Drop-off: {stage.value - funnel[idx + 1].value} calls ({100 - Math.round((funnel[idx + 1].value / stage.value) * 100)}%)
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : <EmptyChart label="No data for funnel" />}
+            </CardContent>
+          </Card>
+
+          {/* Avg Duration by Outcome */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-semibold">Avg Duration by Outcome</CardTitle>
+              <p className="text-xs text-muted-foreground">How long each call type lasts on average</p>
+            </CardHeader>
+            <CardContent>
+              {hasData ? (
+                <div className="space-y-3 pt-2">
+                  {avgDurationByStatus.filter(d => d.count > 0).map(d => (
+                    <div key={d.label}>
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
+                          <span className="text-sm font-medium">{d.label}</span>
+                          <span className="text-xs text-muted-foreground">({d.count} calls)</span>
+                        </div>
+                        <span className="text-sm font-bold">{formatDuration(d.avg)}</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${Math.min(100, (d.avg / Math.max(...avgDurationByStatus.map(x => x.avg), 1)) * 100)}%`,
+                            backgroundColor: d.color,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  {avgDurationByStatus.every(d => d.count === 0) && (
+                    <p className="text-sm text-muted-foreground text-center py-6">No duration data available</p>
+                  )}
+                </div>
+              ) : <EmptyChart label="No duration data" />}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* ── Hourly Heatmap ── */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-semibold">Hourly Call Volume</CardTitle>
+            <p className="text-xs text-muted-foreground">When your team makes the most calls throughout the day</p>
+          </CardHeader>
+          <CardContent>
+            {hourlyData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={hourlyData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                  <XAxis dataKey="hour" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} interval={1} />
+                  <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+                  <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+                  <Bar dataKey="total" name="Total" fill="#6366f1" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="connected" name="Connected" fill="#22c55e" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : <EmptyChart label="No hourly data for this period" />}
+          </CardContent>
+        </Card>
+
+        {/* ── Day-of-Week + Duration Buckets ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Day of Week */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-semibold">Calls by Day of Week</CardTitle>
+              <p className="text-xs text-muted-foreground">Which days see the highest calling activity</p>
+            </CardHeader>
+            <CardContent>
+              {hasData ? (
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={dowData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="day" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+                    <Bar dataKey="total" name="Total" fill="#8b5cf6" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="connected" name="Connected" fill="#22c55e" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="qualified" name="Qualified" fill="#f59e0b" radius={[3, 3, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : <EmptyChart label="No day-of-week data" />}
+            </CardContent>
+          </Card>
+
+          {/* Duration Distribution */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-semibold">Call Duration Distribution</CardTitle>
+              <p className="text-xs text-muted-foreground">Breakdown of call lengths across all connected calls</p>
+            </CardHeader>
+            <CardContent>
+              {durationBuckets.some(b => b.count > 0) ? (
+                <div className="space-y-3 pt-2">
+                  {durationBuckets.filter(b => b.count > 0).map((b, idx) => {
+                    const total = durationBuckets.reduce((s, x) => s + x.count, 0);
+                    const pct = total > 0 ? Math.round((b.count / total) * 100) : 0;
+                    const hues = ['#6366f1', '#8b5cf6', '#3b82f6', '#22c55e', '#f59e0b', '#ef4444'];
+                    return (
+                      <div key={b.label}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm font-medium">{b.label}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground">{b.count} calls</span>
+                            <span className="text-sm font-bold w-10 text-right">{pct}%</span>
+                          </div>
+                        </div>
+                        <div className="h-2 rounded-full bg-muted overflow-hidden">
+                          <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: hues[idx % hues.length] }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : <EmptyChart label="No duration data available" />}
+            </CardContent>
+          </Card>
+        </div>
 
       </div>
     </ScrollArea>
