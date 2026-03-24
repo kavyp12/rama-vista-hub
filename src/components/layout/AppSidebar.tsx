@@ -38,6 +38,7 @@ import {
   Phone,
   UserCog,
   PhoneMissed,
+  Gift,
 } from 'lucide-react';
 
 interface AppSidebarProps {
@@ -94,6 +95,7 @@ export function AppSidebar({ missedCallCount = 0 }: AppSidebarProps) {
       group: 'Operations',
       items: [
         { title: 'Channel Partners', icon: Handshake, url: '/brokers', badge: 0 },
+        { title: 'Incentives', icon: Gift, url: '/incentives', badge: 0 },
         { title: 'Reports', icon: BarChart3, url: '/reports', badge: 0 },
       ],
     };
@@ -103,6 +105,7 @@ export function AppSidebar({ missedCallCount = 0 }: AppSidebarProps) {
       items: [
         { title: 'Team', icon: UserCog, url: '/team', badge: 0 },
         { title: 'Channel Partners', icon: Handshake, url: '/brokers', badge: 0 },
+        { title: 'Incentives', icon: Gift, url: '/incentives', badge: 0 },
         { title: 'Marketing', icon: Megaphone, url: '/marketing', badge: 0 },
         { title: 'Documents', icon: FileText, url: '/documents', badge: 0 },
         { title: 'Payments', icon: CreditCard, url: '/payments', badge: 0 },

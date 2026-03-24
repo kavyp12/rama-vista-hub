@@ -14,6 +14,7 @@ import syncRoutes from './sync.routes';
 import userRoutes from './user.routes'; // ✅ ADD THIS
 import brokerRoutes from './broker.routes';
 import uploadRoutes from './upload.routes'; 
+import incentiveRoutes from './incentive.routes';
 
 const router = Router();
 
@@ -34,5 +35,6 @@ router.use('/call-logs', callLogRoutes);
 router.use('/documents', documentRoutes);
 router.use('/campaigns', campaignRoutes);
 router.use('/activities', activityRoutes);
+router.use('/incentives', incentiveRoutes);
 
 export default router;

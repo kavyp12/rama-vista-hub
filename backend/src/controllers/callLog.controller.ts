@@ -274,13 +274,11 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
     // Create the lead if it doesn't exist at all
     let targetLead = lead;
     if (!targetLead) {
-      // ── FILTER (Options 3): Ignore short calls or missed calls from unknown numbers ──
-      // This ensures we do not litter the CRM with spam or instant hang-ups.
-      if (!isConnected || !durationInSeconds || durationInSeconds < 10) {
-        console.warn(`⚠️ Webhook: ignored unknown caller ${cleanLeadPhone} (Call missed or < 10s)`);
-        return res.status(200).send('Webhook received (ignored short/missed call from unknown number)');
-      }
-
+      // ── Always capture every inbound caller, even if missed ──
+      // We want EVERY unknown caller saved as a new lead so nothing is lost.
+      // Admin will review and assign or delete later.
+      console.log(`📥 New unknown caller ${cleanLeadPhone} — creating lead in CRM.`);
+      
       targetLead = await prisma.lead.create({
         data: {
           name: `New Inquiry: ${cleanLeadPhone}`,

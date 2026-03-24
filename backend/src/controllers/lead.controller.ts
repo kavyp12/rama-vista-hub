@@ -110,11 +110,12 @@ export const getLeads = async (req: AuthRequest, res: Response) => {
         siteVisits: {
           select: {
             id: true, scheduledAt: true, status: true, rating: true, feedback: true,
+            conductedBy: true,
             property: { select: { title: true, location: true } },
             project: { select: { name: true, location: true } }
           },
-          orderBy: { scheduledAt: 'desc' },
-          take: 5
+          orderBy: { scheduledAt: 'desc' }
+          // No take limit — Pipeline needs ALL visits to group per-project correctly
         },
         callLogs: {
           select: { id: true, callStatus: true, callDate: true, notes: true, type: true },

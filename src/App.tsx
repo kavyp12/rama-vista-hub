@@ -20,6 +20,7 @@ import Reports from "./pages/Reports";
 import Team from "./pages/Team";
 import Brokers from "./pages/Brokers";
 import MissedCalls from "./pages/MissedCalls";
+import Incentives from "./pages/Incentives";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -149,6 +150,12 @@ function AppRoutes() {
       <Route path="/brokers" element={
         <ProtectedRoute allowedRoles={['admin', 'sales_manager']}>
           <Brokers />
+        </ProtectedRoute>
+      } />
+
+      <Route path="/incentives" element={
+        <ProtectedRoute allowedRoles={['admin', 'sales_manager']}>
+          <Incentives />
         </ProtectedRoute>
       } />
 

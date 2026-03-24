@@ -204,25 +204,29 @@ export default function Pipeline() {
     }
   }
 
-  // ✅ FIX H4: Single pass — no second loop needed. The size===0 branch handles leads without site visits.
+  // Produce one pipeline card per unique project visited by the lead.
+  // If a lead has visits with no project/property attached they still count (grouped under lead's own project or "Other").
+  // Leads with zero site visits appear once with their default assigned project.
   function expandLeadsByProject() {
     const expanded: ProjectLead[] = [];
 
     rawLeads.forEach(lead => {
       const projectsMap = new Map<string, SiteVisit[]>();
+      let untaggedVisits: SiteVisit[] = [];
 
       lead.siteVisits?.forEach(visit => {
         const projectName = visit.project?.name || visit.property?.title || null;
-        if (!projectName) return;
-
-        if (!projectsMap.has(projectName)) {
-          projectsMap.set(projectName, []);
+        if (projectName) {
+          if (!projectsMap.has(projectName)) projectsMap.set(projectName, []);
+          projectsMap.get(projectName)!.push(visit);
+        } else {
+          // Visit has no project/property tag — still a real visit
+          untaggedVisits.push(visit);
         }
-        projectsMap.get(projectName)!.push(visit);
       });
 
-      if (projectsMap.size === 0) {
-        // Handles leads with 0 OR empty siteVisits — no second loop needed
+      if (projectsMap.size === 0 && untaggedVisits.length === 0) {
+        // No site visits at all — show one card for the lead itself
         expanded.push({
           ...lead,
           displayProject: lead.project?.name || lead.property?.title || undefined,
@@ -230,6 +234,7 @@ export default function Pipeline() {
           projectVisitCount: 0
         });
       } else {
+        // One card per unique tagged project
         projectsMap.forEach((visits, projectName) => {
           expanded.push({
             ...lead,
@@ -238,11 +243,26 @@ export default function Pipeline() {
             projectVisitCount: visits.length
           });
         });
+
+        // If there are also untagged visits, collapse them into a single extra card
+        if (untaggedVisits.length > 0 && projectsMap.size === 0) {
+          // All visits are untagged — show one card under the lead's own project
+          expanded.push({
+            ...lead,
+            displayProject: lead.project?.name || lead.property?.title || undefined,
+            projectKey: `${lead.id}-untagged`,
+            projectVisitCount: untaggedVisits.length
+          });
+        }
+        // If there are BOTH tagged and untagged, untagged visits are already counted in the
+        // lead's projectVisitCount sense — intentionally not duplicating the card here
+        // to avoid confusing the admin with phantom "Other" columns.
       }
     });
 
     setExpandedLeads(expanded);
   }
+
 
   const handleViewLead = async (lead: ProjectLead) => {
     const originalLead = rawLeads.find(l => l.id === lead.id);
