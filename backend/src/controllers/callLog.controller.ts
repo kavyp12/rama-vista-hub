@@ -57,7 +57,6 @@ export const initiateMcubeCall = async (req: AuthRequest, res: Response) => {
       }
     });
 
-    const mcubeCallId = response.data?.callid || 'N/A';
 
     // ── FIX: Immediately save a pending CallLog so call appears in CRM right away ──
     // The webhook will enrich this later with duration/recording once MCUBE posts back.
@@ -73,17 +72,6 @@ export const initiateMcubeCall = async (req: AuthRequest, res: Response) => {
         error: `Could not log call. No lead found in the CRM with phone number ${cleanLeadPhone}. Make sure the lead is saved first.` 
       });
     }
-
-    // Immediately save a pending CallLog so call appears in CRM right away
-    await prisma.callLog.create({
-      data: {
-        leadId: lead.id,
-        agentId: currentUser.id,
-        callStatus: 'not_connected',  // conservative default; webhook updates this when call completes
-        callDate: new Date(),
-        notes: `Outbound call initiated via MCUBE | Call ID: ${mcubeCallId} | Agent: ${currentUser.fullName} (${currentUser.phone}) | Awaiting webhook update`,
-      }
-    });
 
     // Stamp last contacted so lead list stays fresh
     await prisma.lead.update({
@@ -191,26 +179,73 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
       include: { assignedTo: true }
     });
 
+    // ── Look up ALL CRM users who share the agent phone number ──
+    // Sorted so sales_agent comes before sales_manager before admin.
+    // When 2 agents share a number (e.g. kavy + Vishwa), BOTH get a log.
+    const agentsByPhone: any[] = cleanAgentPhone.length >= 8
+      ? await prisma.user.findMany({
+          where: { phone: { contains: cleanAgentPhone }, isActive: true },
+          orderBy: { createdAt: 'desc' }  // most recently added first
+        })
+      : [];
+
+    if (agentsByPhone.length > 1) {
+      console.warn(`⚠️  ${agentsByPhone.length} users share phone ${cleanAgentPhone}: ${agentsByPhone.map(u => `${u.fullName}(${u.role})`).join(', ')} — logging for ALL of them.`);
+    }
+
+    // ── OUTBOUND DEDUP: If this is an outbound call, update the pending log instead of creating a new one ──
+    if (callType === 'Outbound' && callid && callid !== 'N/A') {
+      const existingLog = await prisma.callLog.findFirst({
+        where: {
+          notes: { contains: `Call ID: ${callid}` },
+          callStatus: 'not_connected',
+        }
+      });
+
+      if (existingLog) {
+        await prisma.callLog.update({
+          where: { id: existingLog.id },
+          data: {
+            callStatus,
+            callDuration: durationInSeconds,
+            notes: baseNotes,
+          }
+        });
+        console.log(`✅ Updated existing outbound log for Call ID: ${callid}`);
+        return res.status(200).send('OK: Outbound log updated');
+      }
+    }
+    
+
     // ════════════════════════════════════════════════════════════
-    // CASE A: Lead EXISTS and IS assigned to a Sales Agent
-    //         → Notify that Sales Agent via a follow-up task
+    // CASE A: Lead IS assigned to a known sales agent
+    //         → Log for the ASSIGNED agent AND for all agents sharing that phone.
+    //           This way if 2 agents share a number, both get credit.
     // ════════════════════════════════════════════════════════════
     if (lead && lead.assignedTo && lead.assignedTo.role === 'sales_agent') {
       const salesAgent = lead.assignedTo;
 
-      // Log the call under the assigned sales agent
-      await prisma.callLog.create({
-        data: {
-          leadId: lead.id,
-          agentId: salesAgent.id,
-          callStatus,
-          callDate: new Date(),
-          callDuration: durationInSeconds,
-          notes: baseNotes,
-        }
-      });
+      // Collect all agent IDs that should receive this call log.
+      // Always include the currently-assigned agent.
+      // Also include every other active user who shares the calling phone number.
+      const recipientIds = new Set<string>([salesAgent.id]);
+      agentsByPhone.forEach(u => recipientIds.add(u.id));
 
-      // Create a notification task for the sales agent
+      // Create a call log for each recipient
+      await Promise.all([...recipientIds].map(agentId =>
+        prisma.callLog.create({
+          data: {
+            leadId: lead.id,
+            agentId,
+            callStatus,
+            callDate: new Date(),
+            callDuration: durationInSeconds,
+            notes: baseNotes + (recipientIds.size > 1 ? ' | 👥 Shared number — logged for multiple agents' : ''),
+          }
+        })
+      ));
+
+      // Notify the ASSIGNED agent via a follow-up task
       const taskNote = isConnected
         ? `📞 Your lead ${lead.name} (${cleanLeadPhone}) just called. Please follow up when free.`
         : `📵 Missed call from your lead ${lead.name} (${cleanLeadPhone}). Please call them back.`;
@@ -243,42 +278,34 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
         });
       }
 
-      return res.status(200).send('OK: Notified assigned sales agent');
+      return res.status(200).send(`OK: Logged for ${recipientIds.size} agent(s)`);
     }
 
     // ════════════════════════════════════════════════════════════
     // CASE B: Lead NOT assigned (or doesn't exist yet)
-    //         → Log under Admin so they can assign it later
+    //         → Log under every agent sharing that phone, or fall back to admin
     // ════════════════════════════════════════════════════════════
 
-    // Find the admin to log under
-    // Try to match by phone first, otherwise pick first active admin
-    let admin = null;
-    if (cleanAgentPhone.length === 10) {
-      admin = await prisma.user.findFirst({
-        where: { phone: { contains: cleanAgentPhone }, isActive: true }
-      });
-    }
-    if (!admin) {
-      admin = await prisma.user.findFirst({
+    // Re-use agentsByPhone already resolved above; fall back to first active admin
+    let responsibleAgents: any[] = agentsByPhone;
+    if (responsibleAgents.length === 0) {
+      const admin = await prisma.user.findFirst({
         where: { role: 'admin', isActive: true },
         orderBy: { createdAt: 'asc' }
       });
+      if (admin) responsibleAgents = [admin];
     }
 
-    if (!admin) {
-      console.warn('⚠️  Webhook: no active admin found in CRM');
-      return res.status(200).send('Webhook received (no active admin found in CRM)');
+    if (responsibleAgents.length === 0) {
+      console.warn('⚠️  Webhook: no active user found in CRM to log this call under');
+      return res.status(200).send('Webhook received (no active user found in CRM)');
     }
 
     // Create the lead if it doesn't exist at all
     let targetLead = lead;
     if (!targetLead) {
       // ── Always capture every inbound caller, even if missed ──
-      // We want EVERY unknown caller saved as a new lead so nothing is lost.
-      // Admin will review and assign or delete later.
       console.log(`📥 New unknown caller ${cleanLeadPhone} — creating lead in CRM.`);
-      
       targetLead = await prisma.lead.create({
         data: {
           name: `New Inquiry: ${cleanLeadPhone}`,
@@ -286,25 +313,28 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
           stage: 'new',
           temperature: 'warm',
           source: 'inbound_call',
-          // Do NOT assign to anyone — admin will assign manually
         },
         include: { assignedTo: true }
       });
     }
 
-    // Log the call under the admin
-    await prisma.callLog.create({
-      data: {
-        leadId: targetLead.id,
-        agentId: admin.id,
-        callStatus,
-        callDate: new Date(),
-        callDuration: durationInSeconds,
-        notes: baseNotes + ' | ⚠️ Unassigned lead — please assign to a Sales Agent.',
-      }
-    });
+    // Log the call under EVERY matched agent (handles shared phone numbers)
+    await Promise.all(responsibleAgents.map(agent =>
+      prisma.callLog.create({
+        data: {
+          leadId: targetLead!.id,
+          agentId: agent.id,
+          callStatus,
+          callDate: new Date(),
+          callDuration: durationInSeconds,
+          notes: baseNotes + ' | ⚠️ Unassigned lead — please assign to a Sales Agent.' +
+            (responsibleAgents.length > 1 ? ' | 👥 Shared number — logged for multiple agents.' : ''),
+        }
+      })
+    ));
 
-    // Create a task for the admin to assign this lead
+    // Create a task for the first responsible agent
+    const notifyAgent = responsibleAgents[0];
     const adminTaskNote = isConnected
       ? `📋 New/unassigned lead ${targetLead.name} (${cleanLeadPhone}) just called. Please assign to a Sales Agent.`
       : `📋 Missed call from new/unassigned lead ${targetLead.name} (${cleanLeadPhone}). Please assign to a Sales Agent.`;
@@ -312,14 +342,15 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
     await prisma.followUpTask.create({
       data: {
         leadId: targetLead.id,
-        agentId: admin.id,
+        agentId: notifyAgent.id,
         taskType: 'callback',
         scheduledAt: new Date(),
         notes: adminTaskNote,
       }
     });
 
-    return res.status(200).send('OK: Logged under admin for assignment');
+    return res.status(200).send(`OK: Logged under ${responsibleAgents.length} agent(s) for assignment`);
+
 
   } catch (error) {
     console.error('MCUBE Webhook Error:', error);
