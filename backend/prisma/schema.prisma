@@ -393,6 +393,7 @@ enum PipelineStage {
 }
 
 enum LeadStage {
+  unverified
   new
   contacted
   site_visit

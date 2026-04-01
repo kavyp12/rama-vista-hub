@@ -48,6 +48,7 @@ import {
   RefreshCw,
   ArrowUpRight,
   ArrowDownLeft,
+  Edit, // 👈 ADD THIS RIGHT HERE
 } from 'lucide-react';
 import { format, parseISO, subDays, startOfWeek, endOfWeek } from 'date-fns';
 import {
@@ -162,6 +163,43 @@ export default function Telecalling() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
+  
+
+  const [isEditNameOpen, setIsEditNameOpen] = useState(false);
+  const [nameToEdit, setNameToEdit] = useState('');
+  const [leadIdToEdit, setLeadIdToEdit] = useState('');
+
+
+  const handleSaveName = async () => {
+    try {
+      const res = await fetch(`${API_URL}/leads/${leadIdToEdit}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: nameToEdit }),
+      });
+      if (!res.ok) throw new Error();
+      toast({ title: 'Updated', description: 'Caller name updated successfully.' });
+      setIsEditNameOpen(false);
+      fetchData(); 
+    } catch {
+      toast({ title: 'Error', description: 'Could not update name.', variant: 'destructive' });
+    }
+  };
+
+  const handlePushToLeads = async (leadId: string) => {
+    try {
+      const res = await fetch(`${API_URL}/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage: 'new' }), 
+      });
+      if (!res.ok) throw new Error();
+      toast({ title: 'Pushed to Leads', description: 'Caller successfully added to your active Leads pipeline.' });
+      fetchData();
+    } catch {
+      toast({ title: 'Error', description: 'Could not push to leads.', variant: 'destructive' });
+    }
+  };
 
   // Sync state to URL
   useEffect(() => {
@@ -798,42 +836,62 @@ export default function Telecalling() {
                                   {row.duration ? `${Math.floor(row.duration / 60)}m ${row.duration % 60}s` : '—'}
                                 </TableCell>
                                 <TableCell className="text-right pr-4">
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <MoreVertical className="h-4 w-4" />
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="w-44">
-                                      <DropdownMenuItem onClick={() => handleViewDetails(row)}>
-                                        View Details
-                                      </DropdownMenuItem>
-                                      {!row.isLeadRow && (
-                                        <>
-                                          <DropdownMenuItem onClick={() => handleCallAction(row)}>
-                                            <Phone className="h-3.5 w-3.5 mr-2" /> Call Again
-                                          </DropdownMenuItem>
-                                          <DropdownMenuItem onClick={() => handleArchive(row.id)}>
-                                            <Archive className="h-3.5 w-3.5 mr-2" /> Archive
-                                          </DropdownMenuItem>
-                                          <DropdownMenuItem onClick={() => confirmDelete(row.id)} className="text-destructive focus:text-destructive">
-                                            <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
-                                          </DropdownMenuItem>
-                                        </>
-                                      )}
-                                      {row.isLeadRow && (
-                                        <>
-                                          <DropdownMenuItem onClick={() => handleCallAction(row)}>
-                                            <Phone className="h-3.5 w-3.5 mr-2" /> Initiate Call
-                                          </DropdownMenuItem>
-                                          <DropdownMenuItem onClick={() => handleDeleteLead(row.leadId)} className="text-destructive focus:text-destructive">
-                                            <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete Lead
-                                          </DropdownMenuItem>
-                                        </>
-                                      )}
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                </TableCell>
+  <DropdownMenu>
+    <DropdownMenuTrigger asChild>
+      <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
+        <MoreVertical className="h-4 w-4" />
+      </Button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end" className="w-48">
+      <DropdownMenuItem onClick={() => handleViewDetails(row)}>
+        View Details
+      </DropdownMenuItem>
+
+      {/* NEW: Edit Name */}
+      <DropdownMenuItem onClick={() => {
+        setLeadIdToEdit(row.leadId);
+        setNameToEdit(row.lead?.name || '');
+        setIsEditNameOpen(true);
+      }}>
+        <Edit className="h-3.5 w-3.5 mr-2" /> Edit Caller Name
+      </DropdownMenuItem>
+
+      {/* NEW: Push to Leads */}
+      {row.lead?.stage === 'unverified' && (
+        <DropdownMenuItem 
+          onClick={() => handlePushToLeads(row.leadId)} 
+          className="text-green-600 focus:text-green-700 font-medium"
+        >
+          <ArrowRightCircle className="h-3.5 w-3.5 mr-2" /> Push to Leads
+        </DropdownMenuItem>
+      )}
+
+      {!row.isLeadRow && (
+        <>
+          <DropdownMenuItem onClick={() => handleCallAction(row)}>
+            <Phone className="h-3.5 w-3.5 mr-2" /> Call Again
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => handleArchive(row.id)}>
+            <Archive className="h-3.5 w-3.5 mr-2" /> Archive
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => confirmDelete(row.id)} className="text-destructive focus:text-destructive">
+            <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+          </DropdownMenuItem>
+        </>
+      )}
+      {row.isLeadRow && (
+        <>
+          <DropdownMenuItem onClick={() => handleCallAction(row)}>
+            <Phone className="h-3.5 w-3.5 mr-2" /> Initiate Call
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => handleDeleteLead(row.leadId)} className="text-destructive focus:text-destructive">
+            <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete Lead
+          </DropdownMenuItem>
+        </>
+      )}
+    </DropdownMenuContent>
+  </DropdownMenu>
+</TableCell>
                               </TableRow>
                             );
                           })
@@ -916,6 +974,31 @@ export default function Telecalling() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+     
+      {/* ─── EDIT CALLER NAME DIALOG ─── */}
+      <Dialog open={isEditNameOpen} onOpenChange={setIsEditNameOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Edit Caller Name</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Name</label>
+              <Input 
+                value={nameToEdit} 
+                onChange={(e) => setNameToEdit(e.target.value)} 
+                placeholder="Enter caller's real name"
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setIsEditNameOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveName}>Save Name</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

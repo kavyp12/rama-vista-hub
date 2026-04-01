@@ -260,10 +260,19 @@ export default function Leads() {
 
   const filteredLeads = leads
     .filter(lead => {
+      // 👇 Hide unverified leads from the main leads dashboard
+      if (lead.stage === 'unverified') return false;
+
       const matchesSearch = lead.name.toLowerCase().includes(searchQuery.toLowerCase()) || lead.phone.includes(searchQuery) || (lead.email && lead.email.toLowerCase().includes(searchQuery.toLowerCase()));
+      
       let matchesStage = true;
-      if (stageFilter === 'active_open') matchesStage = !['closed', 'lost', 'completed'].includes(lead.stage);
-      else if (stageFilter !== 'all') matchesStage = lead.stage === stageFilter;
+      // 👇 Updated to explicitly exclude 'unverified' when viewing active_open
+      if (stageFilter === 'active_open') {
+        matchesStage = !['closed', 'lost', 'completed', 'unverified'].includes(lead.stage);
+      } else if (stageFilter !== 'all') {
+        matchesStage = lead.stage === stageFilter;
+      }
+      
       const matchesSource = sourceFilter === 'all' ? true : lead.source === sourceFilter;
       const matchesTemperature = temperatureFilter === 'all' ? true : lead.temperature === temperatureFilter;
 
