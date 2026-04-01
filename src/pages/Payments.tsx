@@ -239,7 +239,7 @@ export default function Payments() {
   const { token, user } = useAuth();
   const { toast } = useToast();
 
-  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
+  const isAdmin = user?.role === 'admin' || (user?.role as string) === 'superadmin';
 
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -502,7 +502,7 @@ export default function Payments() {
   // ==================== RENDER ====================
 
   return (
-    <DashboardLayout>
+    <DashboardLayout title="Payments">
       <div className="space-y-6 p-6">
 
         {/* Header */}
