@@ -115,17 +115,17 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
     console.log('📦 Raw payload:', JSON.stringify(callData, null, 2));
 
     const {
-      callfrom,    
-      callto,      
-      dialstatus,  
-      executive,   
-      customer,    
-      status,      
-      callType,    
-      filename,    
-      duration,    
-      callid,      
-      agentname,   
+      callfrom,
+      callto,
+      dialstatus,
+      executive,
+      customer,
+      status,
+      callType,
+      filename,
+      duration,
+      callid,
+      agentname,
     } = callData;
 
     const rawLeadPhone = (customer || callfrom || '') as string;
@@ -142,9 +142,19 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
     const cleanLeadPhone = rawLeadPhone.replace(/\D/g, '').slice(-10);
     const cleanAgentPhone = rawAgentPhone.replace(/\D/g, '').slice(-10);
 
+    // ✅ FIX 1: Case-insensitive connected check — MCUBE sends different casing
+    const rawDialstatus = String(dialstatus || '').toUpperCase().trim();
+    const rawStatus = String(status || '').toLowerCase().trim();
+
     const isConnected =
-      dialstatus === 'ANSWER' ||
-      status === 'Call complete';
+      rawDialstatus === 'ANSWER' ||
+      rawDialstatus === 'ANSWERED' ||
+      rawDialstatus === 'CONNECTED' ||
+      rawStatus.includes('complete') ||
+      rawStatus.includes('connected') ||
+      rawStatus.includes('answered');
+
+    console.log(`✅ isConnected: ${isConnected} | rawDialstatus: "${rawDialstatus}" | rawStatus: "${rawStatus}"`);
 
     const callStatus: 'connected_positive' | 'not_connected' = isConnected
       ? 'connected_positive'
@@ -163,17 +173,20 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
     }
 
     const callTypeLabel = callType || 'Inbound';
-    const baseNotes = `Auto-logged via MCUBE ${callTypeLabel} | Call ID: ${callid || 'N/A'} | Agent: ${agentname || cleanAgentPhone || 'Unknown'} | Recording: ${filename || 'None'}`;
+    // ✅ FIX 2: Store recording URL/filename clearly so frontend can parse it
+    const recordingValue = filename && filename !== '' && filename !== 'None' ? filename : 'None';
+    const baseNotes = `Auto-logged via MCUBE ${callTypeLabel} | Call ID: ${callid || 'N/A'} | Agent: ${agentname || cleanAgentPhone || 'Unknown'} | Recording: ${recordingValue}`;
 
     const lead = await prisma.lead.findFirst({
       where: { phone: { contains: cleanLeadPhone } },
       include: { assignedTo: true }
     });
 
+    // ✅ FIX 3: Find agent by phone — includes admin role too, not just sales_agent
     const agentsByPhone: any[] = cleanAgentPhone.length >= 8
       ? await prisma.user.findMany({
           where: { phone: { contains: cleanAgentPhone }, isActive: true },
-          orderBy: { createdAt: 'desc' }  
+          orderBy: { createdAt: 'desc' }
         })
       : [];
 
@@ -202,7 +215,7 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
         return res.status(200).send('OK: Outbound log updated');
       }
     }
-    
+
     if (lead && lead.assignedTo && lead.assignedTo.role === 'sales_agent') {
       const salesAgent = lead.assignedTo;
 
@@ -231,99 +244,113 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
           leadId: lead.id,
           agentId: salesAgent.id,
           taskType: 'callback',
-          scheduledAt: new Date(),   
+          scheduledAt: new Date(),
           notes: taskNote,
         }
       });
 
-      if (isConnected) {
-        const stageProgression: Record<string, string> = {
-          'new': 'contacted',
-          'contacted': 'site_visit',
-          'site_visit': 'negotiation',
-          'negotiation': 'token'
-        };
-        await prisma.lead.update({
-          where: { id: lead.id },
-          data: {
-            stage: (stageProgression[lead.stage] || lead.stage) as any,
-            temperature: 'hot',
-            nextFollowupAt: new Date(),
-          }
-        });
-      }
-
-      return res.status(200).send(`OK: Logged for ${recipientIds.size} agent(s)`);
-    }
-
-    let responsibleAgents: any[] = agentsByPhone;
-    if (responsibleAgents.length === 0) {
-      const admin = await prisma.user.findFirst({
-        where: { role: 'admin', isActive: true },
-        orderBy: { createdAt: 'asc' }
+      await prisma.lead.update({
+        where: { id: lead.id },
+        data: { lastContactedAt: new Date() }
       });
-      if (admin) responsibleAgents = [admin];
+
+      console.log(`✅ Call logged for assigned agent: ${salesAgent.fullName}`);
+      return res.status(200).send('OK: Logged for assigned sales agent');
     }
 
-    if (responsibleAgents.length === 0) {
-      console.warn('⚠️  Webhook: no active user found in CRM to log this call under');
-      return res.status(200).send('Webhook received (no active user found in CRM)');
+    // ✅ FIX 4: If lead assigned to ADMIN — log under that admin (not just sales_agent)
+    if (lead && lead.assignedTo) {
+      const assignedUser = lead.assignedTo;
+
+      const recipientIds = new Set<string>([assignedUser.id]);
+      agentsByPhone.forEach(u => recipientIds.add(u.id));
+
+      await Promise.all([...recipientIds].map(agentId =>
+        prisma.callLog.create({
+          data: {
+            leadId: lead.id,
+            agentId,
+            callStatus,
+            callDate: new Date(),
+            callDuration: durationInSeconds,
+            notes: baseNotes,
+          }
+        })
+      ));
+
+      await prisma.lead.update({
+        where: { id: lead.id },
+        data: { lastContactedAt: new Date() }
+      });
+
+      console.log(`✅ Call logged for assigned user (${assignedUser.role}): ${assignedUser.fullName}`);
+      return res.status(200).send('OK: Logged for assigned user');
     }
+
+    // Unassigned lead — find or create, log under admin
+    const adminUser = await prisma.user.findFirst({
+      where: { role: 'admin', isActive: true },
+      orderBy: { createdAt: 'asc' }
+    });
 
     let targetLead = lead;
+
     if (!targetLead) {
-      console.log(`📥 New unknown caller ${cleanLeadPhone} — creating lead in CRM.`);
+      const callerName = agentname
+        ? `New Lead - ${agentname}`
+        : `Unverified MCUBE Caller - ${cleanLeadPhone}`;
+
       targetLead = await prisma.lead.create({
         data: {
-          name: `New Inquiry: ${cleanLeadPhone}`,
+          name: callerName,
           phone: cleanLeadPhone,
-          // 👇 CHANGED: Stays as unverified so it doesn't clutter the main Leads view
-          stage: 'unverified', 
-          temperature: 'warm',
+          stage: 'unverified' as any,
           source: 'inbound_call',
+          assignedToId: adminUser?.id || null,
         },
         include: { assignedTo: true }
       });
+      console.log(`🆕 New lead created: ${targetLead.name}`);
     }
 
-await Promise.all(responsibleAgents.map(agent =>
-      prisma.callLog.create({
+    const logAgentId = agentsByPhone.length > 0 ? agentsByPhone[0].id : adminUser?.id;
+
+    if (logAgentId) {
+      await prisma.callLog.create({
         data: {
-          // 👇 ADDED '!' HERE
-          leadId: targetLead!.id, 
-          agentId: agent.id,
+          leadId: targetLead.id,
+          agentId: logAgentId,
           callStatus,
           callDate: new Date(),
           callDuration: durationInSeconds,
-          notes: baseNotes + ' | ⚠️ Unassigned lead — please assign to a Sales Agent.' +
-            (responsibleAgents.length > 1 ? ' | 👥 Shared number — logged for multiple agents.' : ''),
+          notes: baseNotes,
         }
-      })
-    ));
+      });
+    }
 
-    const notifyAgent = responsibleAgents[0];
-    const adminTaskNote = isConnected
-      // 👇 ADDED '!' TO targetLead.name HERE
-      ? `📋 New/unassigned lead ${targetLead!.name} (${cleanLeadPhone}) just called. Please assign to a Sales Agent.`
-      // 👇 ADDED '!' TO targetLead.name HERE
-      : `📋 Missed call from new/unassigned lead ${targetLead!.name} (${cleanLeadPhone}). Please assign to a Sales Agent.`;
+    if (adminUser) {
+      await prisma.followUpTask.create({
+        data: {
+          leadId: targetLead.id,
+          agentId: adminUser.id,
+          taskType: 'callback',
+          scheduledAt: new Date(),
+          notes: `📋 Unassigned lead called: ${cleanLeadPhone}. Please assign to an agent.`,
+        }
+      });
+    }
 
-    await prisma.followUpTask.create({
-      data: {
-        // 👇 ADDED '!' HERE
-        leadId: targetLead!.id,
-        agentId: notifyAgent.id,
-        taskType: 'callback',
-        scheduledAt: new Date(),
-        notes: adminTaskNote,
-      }
+    await prisma.lead.update({
+      where: { id: targetLead.id },
+      data: { lastContactedAt: new Date() }
     });
 
-    return res.status(200).send(`OK: Logged under ${responsibleAgents.length} agent(s) for assignment`);
+    console.log(`✅ Unassigned call logged under admin`);
+    return res.status(200).send('OK: Unassigned call logged');
 
   } catch (error) {
-    console.error('MCUBE Webhook Error:', error);
-    return res.status(200).send('Webhook received (internal error)');
+    console.error('❌ MCUBE Webhook Error:', error);
+    return res.status(200).send('Webhook received with error — check server logs');
   }
 };
 

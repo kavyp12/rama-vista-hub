@@ -47,6 +47,8 @@ import {
   Target,
   RefreshCw,
   ArrowUpRight,
+  Play,
+Mic,
   ArrowDownLeft,
   Edit, // 👈 ADD THIS RIGHT HERE
 } from 'lucide-react';
@@ -207,15 +209,27 @@ export default function Telecalling() {
   }, [activeView, setSearchParams]);
 
   // Fetch agents list for filter dropdown (admin only)
-  useEffect(() => {
-    if (user?.role !== 'admin') return;
-    fetch(`${API_URL}/users?role=sales_agent`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(r => r.json())
-      .then(data => setAgents(Array.isArray(data) ? data : []))
-      .catch(() => {});
-  }, [token, user]);
+// REPLACE THIS:
+useEffect(() => {
+  if (user?.role !== 'admin') return;
+  fetch(`${API_URL}/users?role=sales_agent`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+    .then(r => r.json())
+    .then(data => setAgents(Array.isArray(data) ? data : []))
+    .catch(() => {});
+}, [token, user]);
+
+// WITH THIS:
+useEffect(() => {
+  if (user?.role !== 'admin' && user?.role !== 'sales_manager') return;
+  fetch(`${API_URL}/users`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+    .then(r => r.json())
+    .then(data => setAgents(Array.isArray(data) ? data : []))
+    .catch(() => {});
+}, [token, user]);
 
   // ─── ACTIVE FILTER COUNT ───
   const activeFilterCount = useMemo(() => {
@@ -422,12 +436,24 @@ export default function Telecalling() {
   };
 
   // Helper to get call direction from notes
-  const getCallDirection = (notes: string | null): 'inbound' | 'outbound' | null => {
-    if (!notes) return null;
-    if (notes.toLowerCase().includes('inbound')) return 'inbound';
-    if (notes.toLowerCase().includes('outbound')) return 'outbound';
-    return null;
-  };
+  // KEEP getCallDirection as is, then ADD extractRecording right below it:
+
+const getCallDirection = (notes: string | null): 'inbound' | 'outbound' | null => {
+  if (!notes) return null;
+  if (notes.toLowerCase().includes('inbound')) return 'inbound';
+  if (notes.toLowerCase().includes('outbound')) return 'outbound';
+  return null;
+};
+
+// ✅ NEW: Extract recording filename/URL from notes
+const extractRecording = (notes: string | null): string | null => {
+  if (!notes) return null;
+  const match = notes.match(/Recording:\s*([^\s|]+)/i);
+  if (!match) return null;
+  const val = match[1].trim();
+  if (val === 'None' || val === '' || val === 'N/A') return null;
+  return val;
+};
 
   return (
     <DashboardLayout title="Telecalling Center" description="Manage your call operations">
@@ -832,9 +858,34 @@ export default function Telecalling() {
                                   )}
                                 </TableCell>
                                 <TableCell><StatusBadge status={row.callStatus} /></TableCell>
-                                <TableCell className="text-sm text-muted-foreground">
-                                  {row.duration ? `${Math.floor(row.duration / 60)}m ${row.duration % 60}s` : '—'}
-                                </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+  {(() => {
+    const rec = extractRecording(row.notes);
+    const durationText = row.duration
+      ? `${Math.floor(row.duration / 60)}m ${row.duration % 60}s`
+      : '—';
+
+    if (!rec) {
+      return <span>{durationText}</span>;
+    }
+
+    return (
+      <button
+        onClick={() => {
+          setSelectedItem(row);
+          setIsEditOpen(true);
+        }}
+        className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline transition-colors group/rec"
+        title="Click to play recording"
+      >
+        <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 group-hover/rec:bg-blue-200 transition-colors">
+          <Play className="h-2.5 w-2.5 fill-blue-600 text-blue-600" />
+        </span>
+        {durationText}
+      </button>
+    );
+  })()}
+</TableCell>
                                 <TableCell className="text-right pr-4">
   <DropdownMenu>
     <DropdownMenuTrigger asChild>
@@ -907,76 +958,104 @@ export default function Telecalling() {
       </div>
 
       {/* ─── VIEW DETAILS DIALOG ─── */}
-      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Call Details</DialogTitle>
-          </DialogHeader>
-          {selectedItem && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Client Name</label>
-                  <Input defaultValue={selectedItem.lead?.name} readOnly className="bg-muted" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Phone</label>
-                  <Input defaultValue={selectedItem.lead?.phone} readOnly className="bg-muted" />
-                </div>
-              </div>
-              {!selectedItem.isLeadRow && (
-                <>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</label>
-                      <div className="pt-1"><StatusBadge status={selectedItem.callStatus} /></div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Duration</label>
-                      <Input
-                        defaultValue={selectedItem.duration ? `${Math.floor(selectedItem.duration / 60)}m ${selectedItem.duration % 60}s` : 'N/A'}
-                        readOnly className="bg-muted" />
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Direction</label>
-                    <div className="pt-1">
-                      {(() => {
-                        const dir = selectedItem.notes?.toLowerCase().includes('inbound') ? 'inbound' : selectedItem.notes?.toLowerCase().includes('outbound') ? 'outbound' : null;
-                        return dir === 'inbound' ? (
-                          <span className="inline-flex items-center gap-1 text-sm font-medium text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full">
-                            <ArrowDownLeft className="h-3.5 w-3.5" /> Incoming Call
-                          </span>
-                        ) : dir === 'outbound' ? (
-                          <span className="inline-flex items-center gap-1 text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-full">
-                            <ArrowUpRight className="h-3.5 w-3.5" /> Outgoing Call
-                          </span>
-                        ) : <span className="text-sm text-muted-foreground">Unknown</span>;
-                      })()}
-                    </div>
-                  </div>
-                </>
-              )}
+   {/* ─── VIEW DETAILS DIALOG ─── */}
+<Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+  <DialogContent className="sm:max-w-md">
+    <DialogHeader>
+      <DialogTitle>Call Details</DialogTitle>
+    </DialogHeader>
+    {selectedItem && (
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Client Name</label>
+            <Input defaultValue={selectedItem.lead?.name} readOnly className="bg-muted" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Phone</label>
+            <Input defaultValue={selectedItem.lead?.phone} readOnly className="bg-muted" />
+          </div>
+        </div>
+        {!selectedItem.isLeadRow && (
+          <>
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Notes</label>
-                <textarea
-                  className="w-full min-h-[80px] rounded-md border bg-muted px-3 py-2 text-sm resize-none"
-                  defaultValue={selectedItem.notes || ''}
-                  readOnly
-                />
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</label>
+                <div className="pt-1"><StatusBadge status={selectedItem.callStatus} /></div>
               </div>
-              {selectedItem.isLeadRow && (
-                <Button className="w-full gap-2" onClick={() => { handleCallAction(selectedItem); setIsEditOpen(false); }}>
-                  <Phone className="h-4 w-4" /> Initiate Call
-                </Button>
-              )}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Duration</label>
+                <Input
+                  defaultValue={selectedItem.duration ? `${Math.floor(selectedItem.duration / 60)}m ${selectedItem.duration % 60}s` : 'N/A'}
+                  readOnly className="bg-muted" />
+              </div>
             </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Direction</label>
+              <div className="pt-1">
+                {(() => {
+                  const dir = getCallDirection(selectedItem.notes);
+                  return dir === 'inbound' ? (
+                    <span className="inline-flex items-center gap-1 text-sm font-medium text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full">
+                      <ArrowDownLeft className="h-3.5 w-3.5" /> Incoming Call
+                    </span>
+                  ) : dir === 'outbound' ? (
+                    <span className="inline-flex items-center gap-1 text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-full">
+                      <ArrowUpRight className="h-3.5 w-3.5" /> Outgoing Call
+                    </span>
+                  ) : <span className="text-sm text-muted-foreground">Unknown</span>;
+                })()}
+              </div>
+            </div>
+
+            {/* ✅ NEW: Call Recording Player */}
+            {(() => {
+              const rec = extractRecording(selectedItem.notes);
+              return rec ? (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Call Recording</label>
+                  <div className="rounded-lg border bg-muted/30 p-3">
+                    {rec.startsWith('http') ? (
+                      <audio controls className="w-full h-10">
+                        <source src={rec} />
+                        <a href={rec} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 underline">
+                          Download Recording
+                        </a>
+                      </audio>
+                    ) : (
+                      <p className="text-sm text-muted-foreground font-mono break-all">{rec}</p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Call Recording</label>
+                  <p className="text-sm text-muted-foreground italic">No recording available</p>
+                </div>
+              );
+            })()}
+          </>
+        )}
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Notes</label>
+          <textarea
+            className="w-full min-h-[80px] rounded-md border bg-muted px-3 py-2 text-sm resize-none"
+            defaultValue={selectedItem.notes || ''}
+            readOnly
+          />
+        </div>
+        {selectedItem.isLeadRow && (
+          <Button className="w-full gap-2" onClick={() => { handleCallAction(selectedItem); setIsEditOpen(false); }}>
+            <Phone className="h-4 w-4" /> Initiate Call
+          </Button>
+        )}
+      </div>
+    )}
+    <DialogFooter>
+      <Button variant="outline" onClick={() => setIsEditOpen(false)}>Close</Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
 
      
       {/* ─── EDIT CALLER NAME DIALOG ─── */}
