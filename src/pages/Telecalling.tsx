@@ -210,27 +210,26 @@ export default function Telecalling() {
 
   // Fetch agents list for filter dropdown (admin only)
 // REPLACE THIS:
-useEffect(() => {
-  if (user?.role !== 'admin') return;
-  fetch(`${API_URL}/users?role=sales_agent`, {
-    headers: { Authorization: `Bearer ${token}` }
-  })
-    .then(r => r.json())
-    .then(data => setAgents(Array.isArray(data) ? data : []))
-    .catch(() => {});
-}, [token, user]);
-
-// WITH THIS:
-useEffect(() => {
-  if (user?.role !== 'admin' && user?.role !== 'sales_manager') return;
-  fetch(`${API_URL}/users`, {
-    headers: { Authorization: `Bearer ${token}` }
-  })
-    .then(r => r.json())
-    .then(data => setAgents(Array.isArray(data) ? data : []))
-    .catch(() => {});
-}, [token, user]);
-
+// Fetch agents list for filter dropdown (Admins and Sales Agents)
+  useEffect(() => {
+    if (user?.role !== 'admin' && user?.role !== 'sales_manager') return;
+    
+    // Fetch all users, then filter to only those who take calls
+    fetch(`${API_URL}/users`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          // Keep only admins and sales_agents so IVR handlers appear in the dropdown
+          const eligibleAgents = data.filter(u => u.role === 'admin' || u.role === 'sales_agent');
+          setAgents(eligibleAgents);
+        } else {
+          setAgents([]);
+        }
+      })
+      .catch(() => {});
+  }, [token, user]);
   // ─── ACTIVE FILTER COUNT ───
   const activeFilterCount = useMemo(() => {
     let count = 0;
