@@ -20,8 +20,8 @@ import {
   Phone,
   PhoneCall,
   PhoneMissed,
-  PhoneIncoming,
-  PhoneOutgoing,
+  PhoneIncoming, // New
+  PhoneOutgoing, // New
   Clock,
   CheckCircle2,
   ThumbsUp,
@@ -46,11 +46,6 @@ import {
   Award,
   Target,
   RefreshCw,
-  ArrowUpRight,
-  Play,
-Mic,
-  ArrowDownLeft,
-  Edit, // 👈 ADD THIS RIGHT HERE
 } from 'lucide-react';
 import { format, parseISO, subDays, startOfWeek, endOfWeek } from 'date-fns';
 import {
@@ -112,13 +107,6 @@ interface CallStats {
   callback: number;
   connectRate: number;
   newLeads: number;
-  // New: direction-specific breakdown
-  inboundTotal?: number;
-  outboundTotal?: number;
-  inboundConnected?: number;
-  outboundConnected?: number;
-  inboundMissed?: number;
-  outboundMissed?: number;
 }
 
 interface FilterState {
@@ -129,7 +117,7 @@ interface FilterState {
   agentId: string;
   minDuration: string;
   source: string;
-  direction: string;
+  direction: string; // New
 }
 
 const EMPTY_FILTERS: FilterState = {
@@ -140,9 +128,8 @@ const EMPTY_FILTERS: FilterState = {
   agentId: 'all',
   minDuration: 'all',
   source: 'all',
-  direction: 'all',
+  direction: 'all', // New
 };
-
 // ─────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────
@@ -165,43 +152,6 @@ export default function Telecalling() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
-  
-
-  const [isEditNameOpen, setIsEditNameOpen] = useState(false);
-  const [nameToEdit, setNameToEdit] = useState('');
-  const [leadIdToEdit, setLeadIdToEdit] = useState('');
-
-
-  const handleSaveName = async () => {
-    try {
-      const res = await fetch(`${API_URL}/leads/${leadIdToEdit}`, {
-        method: 'PATCH',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: nameToEdit }),
-      });
-      if (!res.ok) throw new Error();
-      toast({ title: 'Updated', description: 'Caller name updated successfully.' });
-      setIsEditNameOpen(false);
-      fetchData(); 
-    } catch {
-      toast({ title: 'Error', description: 'Could not update name.', variant: 'destructive' });
-    }
-  };
-
-  const handlePushToLeads = async (leadId: string) => {
-    try {
-      const res = await fetch(`${API_URL}/leads/${leadId}`, {
-        method: 'PATCH',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stage: 'new' }), 
-      });
-      if (!res.ok) throw new Error();
-      toast({ title: 'Pushed to Leads', description: 'Caller successfully added to your active Leads pipeline.' });
-      fetchData();
-    } catch {
-      toast({ title: 'Error', description: 'Could not push to leads.', variant: 'destructive' });
-    }
-  };
 
   // Sync state to URL
   useEffect(() => {
@@ -209,30 +159,18 @@ export default function Telecalling() {
   }, [activeView, setSearchParams]);
 
   // Fetch agents list for filter dropdown (admin only)
-// REPLACE THIS:
-useEffect(() => {
-  if (user?.role !== 'admin') return;
-  fetch(`${API_URL}/users?role=sales_agent`, {
-    headers: { Authorization: `Bearer ${token}` }
-  })
-    .then(r => r.json())
-    .then(data => setAgents(Array.isArray(data) ? data : []))
-    .catch(() => {});
-}, [token, user]);
-
-// WITH THIS:
-useEffect(() => {
-  if (user?.role !== 'admin' && user?.role !== 'sales_manager') return;
-  fetch(`${API_URL}/users`, {
-    headers: { Authorization: `Bearer ${token}` }
-  })
-    .then(r => r.json())
-    .then(data => setAgents(Array.isArray(data) ? data : []))
-    .catch(() => {});
-}, [token, user]);
+  useEffect(() => {
+    if (user?.role !== 'admin') return;
+    fetch(`${API_URL}/users?role=sales_agent`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(r => r.json())
+      .then(data => setAgents(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, [token, user]);
 
   // ─── ACTIVE FILTER COUNT ───
-  const activeFilterCount = useMemo(() => {
+const activeFilterCount = useMemo(() => {
     let count = 0;
     if (filters.search) count++;
     if (filters.dateFrom) count++;
@@ -241,12 +179,11 @@ useEffect(() => {
     if (filters.agentId !== 'all') count++;
     if (filters.minDuration !== 'all') count++;
     if (filters.source !== 'all') count++;
-    if (filters.direction !== 'all') count++;
+    if (filters.direction !== 'all') count++; // New
     return count;
   }, [filters]);
-
   // ─── FETCH DATA ───
-  const fetchData = useCallback(async () => {
+ const fetchData = useCallback(async () => {
     if (activeView === 'reports') return;
     setIsLoading(true);
     setTableData([]);
@@ -277,7 +214,7 @@ useEffect(() => {
         if (filters.agentId !== 'all') query.append('agentId', filters.agentId);
         if (filters.minDuration !== 'all') query.append('minDuration', filters.minDuration);
         if (filters.source !== 'all') query.append('source', filters.source);
-        if (filters.direction !== 'all') query.append('direction', filters.direction);
+        if (filters.direction !== 'all') query.append('direction', filters.direction); // New
 
         const res = await fetch(`${API_URL}/call-logs?${query}`, {
           headers: { Authorization: `Bearer ${token}` }
@@ -306,16 +243,17 @@ useEffect(() => {
     }
   }, [activeView, filters, token, toast]);
 
-  const fetchStats = useCallback(async () => {
+ const fetchStats = useCallback(async () => {
     try {
       const query = new URLSearchParams();
       if (filters.dateFrom) query.append('dateFrom', filters.dateFrom);
       if (filters.dateTo) query.append('dateTo', filters.dateTo);
       if (filters.agentId !== 'all') query.append('agentId', filters.agentId);
-      if (filters.direction !== 'all') query.append('direction', filters.direction);
-
+      if (filters.direction !== 'all') query.append('direction', filters.direction); // New
+      
+      // Pass the active view so the sidebar counts update based on the view if needed
       if (activeView === 'inbound' || activeView === 'outbound') {
-        query.set('direction', activeView);
+         query.append('direction', activeView);
       }
 
       const res = await fetch(`${API_URL}/call-logs/stats?${query}`, {
@@ -344,8 +282,8 @@ useEffect(() => {
     { id: 'new_leads', label: 'New Web Leads', icon: Globe, className: 'text-blue-600 font-medium bg-blue-50/50' },
     { type: 'separator' },
     { id: 'all', label: 'All Calls', icon: Phone },
-    { id: 'inbound', label: 'Incoming Calls', icon: PhoneIncoming },
-    { id: 'outbound', label: 'Outgoing Calls', icon: PhoneOutgoing },
+    { id: 'inbound', label: 'Incoming Calls', icon: PhoneIncoming }, // New
+    { id: 'outbound', label: 'Outgoing Calls', icon: PhoneOutgoing }, // New
     { id: 'attended', label: 'Attended Calls', icon: PhoneCall },
     { id: 'active', label: 'Active (Today)', icon: CheckCircle2 },
     { id: 'missed', label: 'Missed Calls', icon: PhoneMissed, className: 'text-red-600 font-medium' },
@@ -435,28 +373,6 @@ useEffect(() => {
     }
   };
 
-  // Helper to get call direction from notes
-  // KEEP getCallDirection as is, then ADD extractRecording right below it:
-
-const getCallDirection = (notes: string | null): 'inbound' | 'outbound' | null => {
-  if (!notes) return null;
-  if (notes.toLowerCase().includes('inbound')) return 'inbound';
-  if (notes.toLowerCase().includes('outbound')) return 'outbound';
-  return null;
-};
-
-const MCUBE_RECORDING_BASE_URL = 'https://mcube.vmc.in/Recordings'; // ← confirm this URL with MCUBE
-
-const extractRecording = (notes: string | null): string | null => {
-  if (!notes) return null;
-  const match = notes.match(/Recording:\s*([^\s|]+)/i);
-  if (!match) return null;
-  const val = match[1].trim();
-  if (!val || val === 'None' || val === 'none' || val === 'N/A' || val === '') return null;
-  if (val.startsWith('http://') || val.startsWith('https://')) return val;
-  return `${MCUBE_RECORDING_BASE_URL}/${val}`; // builds full URL from filename
-};
-
   return (
     <DashboardLayout title="Telecalling Center" description="Manage your call operations">
       <div className="flex flex-col lg:flex-row h-[calc(100vh-110px)] md:h-[calc(100vh-140px)] gap-4 lg:gap-6">
@@ -488,8 +404,6 @@ const extractRecording = (notes: string | null): string | null => {
                       else if (item.id === 'qualified') count = stats.positive;
                       else if (item.id === 'unqualified') count = stats.negative;
                       else if (item.id === 'new_leads') { count = stats.newLeads; badgeClass = 'bg-blue-100 text-blue-600'; }
-                      else if (item.id === 'inbound') { count = stats.inboundTotal || 0; badgeClass = 'bg-green-100 text-green-700'; }
-                      else if (item.id === 'outbound') { count = stats.outboundTotal || 0; badgeClass = 'bg-indigo-100 text-indigo-700'; }
                       if (count > 0) return (
                         <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-bold ${badgeClass}`}>{count}</span>
                       );
@@ -548,33 +462,31 @@ const extractRecording = (notes: string | null): string | null => {
                       )}
                     </Button>
 
+                    {/* Floating popover box — matches image 2 design */}
                     {showFilters && (
                       <>
-                        <div className="fixed inset-0 z-40" onClick={() => setShowFilters(false)} />
-                        <div className="absolute right-0 top-[calc(100%+8px)] z-50 w-[340px] rounded-xl border bg-background shadow-2xl overflow-hidden">
-
-                          {/* ── HEADER ── */}
-                          <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
-                            <div className="flex items-center gap-2">
-                              <Filter className="h-4 w-4 text-muted-foreground" />
-                              <span className="text-sm font-semibold">Filter Calls</span>
-                              {activeFilterCount > 0 && (
-                                <span className="bg-primary text-primary-foreground text-xs rounded-full w-4 h-4 flex items-center justify-center font-bold">
-                                  {activeFilterCount}
-                                </span>
-                              )}
-                            </div>
-                            <button onClick={() => setShowFilters(false)} className="text-muted-foreground hover:text-foreground transition-colors rounded-md p-0.5 hover:bg-muted">
+                        {/* Backdrop to close on outside click */}
+                        <div
+                          className="fixed inset-0 z-40"
+                          onClick={() => setShowFilters(false)}
+                        />
+                        <div className="absolute right-0 top-[calc(100%+8px)] z-50 w-80 rounded-xl border bg-background shadow-xl overflow-hidden">
+                          {/* Header */}
+                          <div className="flex items-center justify-between px-4 py-3 border-b">
+                            <span className="text-sm font-semibold">Filter Calls</span>
+                            <button
+                              onClick={() => setShowFilters(false)}
+                              className="text-muted-foreground hover:text-foreground transition-colors"
+                            >
                               <X className="h-4 w-4" />
                             </button>
                           </div>
 
-                          {/* ── FIELDS ── */}
-                          <div className="p-4 space-y-4 max-h-[75vh] overflow-y-auto">
-
+                          {/* Filter fields */}
+                          <div className="p-4 space-y-4">
                             {/* Search */}
                             <div className="space-y-1.5">
-                              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Search</label>
+                              <label className="text-xs font-semibold text-muted-foreground">Search</label>
                               <div className="relative">
                                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                                 <Input
@@ -583,103 +495,65 @@ const extractRecording = (notes: string | null): string | null => {
                                   value={filters.search}
                                   onChange={e => setFilters(p => ({ ...p, search: e.target.value }))}
                                 />
-                                {filters.search && (
-                                  <button onClick={() => setFilters(p => ({ ...p, search: '' }))} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                                    <X className="h-3.5 w-3.5" />
-                                  </button>
-                                )}
                               </div>
                             </div>
 
                             {/* Date Range */}
                             <div className="space-y-1.5">
-                              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Date Range</label>
+                              <label className="text-xs font-semibold text-muted-foreground">Date Range</label>
                               <div className="grid grid-cols-2 gap-2">
-                                <div>
-                                  <p className="text-[10px] text-muted-foreground mb-1">From</p>
-                                  <Input
-                                    type="date"
-                                    className="h-9 text-sm"
-                                    value={filters.dateFrom}
-                                    onChange={e => setFilters(p => ({ ...p, dateFrom: e.target.value }))}
-                                  />
-                                </div>
-                                <div>
-                                  <p className="text-[10px] text-muted-foreground mb-1">To</p>
-                                  <Input
-                                    type="date"
-                                    className="h-9 text-sm"
-                                    value={filters.dateTo}
-                                    min={filters.dateFrom}
-                                    onChange={e => setFilters(p => ({ ...p, dateTo: e.target.value }))}
-                                  />
-                                </div>
+                                <Input
+                                  type="date"
+                                  className="h-9 text-sm"
+                                  value={filters.dateFrom}
+                                  onChange={e => setFilters(p => ({ ...p, dateFrom: e.target.value }))}
+                                />
+                                <Input
+                                  type="date"
+                                  className="h-9 text-sm"
+                                  value={filters.dateTo}
+                                  onChange={e => setFilters(p => ({ ...p, dateTo: e.target.value }))}
+                                />
                               </div>
                               {/* Quick presets */}
                               <div className="flex gap-1.5 pt-0.5">
-                                {[{ label: 'Today', days: 0 }, { label: '7 Days', days: 7 }, { label: '30 Days', days: 30 }].map(preset => {
-                                  const today = format(new Date(), 'yyyy-MM-dd');
-                                  const from = format(subDays(new Date(), preset.days), 'yyyy-MM-dd');
-                                  const isActive = filters.dateFrom === from && filters.dateTo === today;
-                                  return (
-                                    <button
-                                      key={preset.label}
-                                      className={`flex-1 text-xs border rounded-md py-1.5 transition-colors font-medium ${isActive ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted'}`}
-                                      onClick={() => setFilters(p => ({ ...p, dateFrom: from, dateTo: today }))}
-                                    >
-                                      {preset.label}
-                                    </button>
-                                  );
-                                })}
+                                {[{ label: 'Today', days: 0 }, { label: '7 Days', days: 7 }, { label: '30 Days', days: 30 }].map(preset => (
+                                  <button
+                                    key={preset.label}
+                                    className="flex-1 text-xs border rounded-md py-1.5 hover:bg-muted transition-colors"
+                                    onClick={() => {
+                                      const today = format(new Date(), 'yyyy-MM-dd');
+                                      const from = format(subDays(new Date(), preset.days), 'yyyy-MM-dd');
+                                      setFilters(p => ({ ...p, dateFrom: from, dateTo: today }));
+                                    }}
+                                  >
+                                    {preset.label}
+                                  </button>
+                                ))}
                               </div>
                             </div>
 
-                            {/* Call Status */}
+                            {/* Status */}
                             <div className="space-y-1.5">
-                              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Call Status</label>
+                              <label className="text-xs font-semibold text-muted-foreground">Call Status</label>
                               <Select value={filters.status} onValueChange={v => setFilters(p => ({ ...p, status: v }))}>
                                 <SelectTrigger className="h-9 text-sm">
                                   <SelectValue placeholder="All Statuses" />
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All Statuses</SelectItem>
-                                  <SelectItem value="connected_positive">✅ Qualified</SelectItem>
-                                  <SelectItem value="connected_callback">🔄 Callback</SelectItem>
-                                  <SelectItem value="not_connected">❌ Missed</SelectItem>
-                                  <SelectItem value="not_interested">👎 Unqualified</SelectItem>
+                                  <SelectItem value="connected_positive">Qualified</SelectItem>
+                                  <SelectItem value="connected_callback">Callback</SelectItem>
+                                  <SelectItem value="not_connected">Missed</SelectItem>
+                                  <SelectItem value="not_interested">Unqualified</SelectItem>
                                 </SelectContent>
                               </Select>
-                            </div>
-
-                            {/* Call Direction */}
-                            <div className="space-y-1.5">
-                              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Call Direction</label>
-                              <div className="grid grid-cols-3 gap-1.5">
-                                {[
-                                  { value: 'all', label: 'All', icon: Phone },
-                                  { value: 'inbound', label: 'Incoming', icon: PhoneIncoming },
-                                  { value: 'outbound', label: 'Outgoing', icon: PhoneOutgoing },
-                                ].map(opt => {
-                                  const Icon = opt.icon;
-                                  const isActive = filters.direction === opt.value;
-                                  return (
-                                    <button
-                                      key={opt.value}
-                                      onClick={() => setFilters(p => ({ ...p, direction: opt.value }))}
-                                      className={`flex flex-col items-center justify-center gap-1 p-2.5 rounded-lg border text-xs font-medium transition-all ${isActive ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'hover:bg-muted border-border'}`}
-                                    >
-                                      <Icon className="h-4 w-4" />
-                                      {opt.label}
-                                    </button>
-                                  );
-                                })}
-                              </div>
                             </div>
 
                             {/* Agent (admin only) */}
                             {agents.length > 0 && (
                               <div className="space-y-1.5">
-                                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Agent</label>
+                                <label className="text-xs font-semibold text-muted-foreground">Agent</label>
                                 <Select value={filters.agentId} onValueChange={v => setFilters(p => ({ ...p, agentId: v }))}>
                                   <SelectTrigger className="h-9 text-sm">
                                     <SelectValue placeholder="All Agents" />
@@ -696,7 +570,7 @@ const extractRecording = (notes: string | null): string | null => {
 
                             {/* Duration */}
                             <div className="space-y-1.5">
-                              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Min Duration</label>
+                              <label className="text-xs font-semibold text-muted-foreground">Min Duration</label>
                               <Select value={filters.minDuration} onValueChange={v => setFilters(p => ({ ...p, minDuration: v }))}>
                                 <SelectTrigger className="h-9 text-sm">
                                   <SelectValue placeholder="Any Duration" />
@@ -710,43 +584,28 @@ const extractRecording = (notes: string | null): string | null => {
                                 </SelectContent>
                               </Select>
                             </div>
-
-                            {/* Active filters summary */}
-                            {activeFilterCount > 0 && (
-                              <div className="flex flex-wrap gap-1.5 pt-1">
-                                {filters.search && (
-                                  <span className="flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-1 rounded-full">
-                                    Search: {filters.search}
-                                    <button onClick={() => setFilters(p => ({ ...p, search: '' }))}><X className="h-2.5 w-2.5" /></button>
-                                  </span>
-                                )}
-                                {filters.status !== 'all' && (
-                                  <span className="flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-1 rounded-full">
-                                    Status: {filters.status}
-                                    <button onClick={() => setFilters(p => ({ ...p, status: 'all' }))}><X className="h-2.5 w-2.5" /></button>
-                                  </span>
-                                )}
-                                {filters.direction !== 'all' && (
-                                  <span className="flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-1 rounded-full">
-                                    {filters.direction === 'inbound' ? '↙ Incoming' : '↗ Outgoing'}
-                                    <button onClick={() => setFilters(p => ({ ...p, direction: 'all' }))}><X className="h-2.5 w-2.5" /></button>
-                                  </span>
-                                )}
-                                {(filters.dateFrom || filters.dateTo) && (
-                                  <span className="flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-1 rounded-full">
-                                    Date range
-                                    <button onClick={() => setFilters(p => ({ ...p, dateFrom: '', dateTo: '' }))}><X className="h-2.5 w-2.5" /></button>
-                                  </span>
-                                )}
-                              </div>
-                            )}
                           </div>
 
-                          {/* ── FOOTER ACTIONS ── */}
-                          <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/20">
+                          {/* Direction Filter */}
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-semibold text-muted-foreground">Call Direction</label>
+                              <Select value={filters.direction} onValueChange={v => setFilters(p => ({ ...p, direction: v }))}>
+                                <SelectTrigger className="h-9 text-sm">
+                                  <SelectValue placeholder="All Directions" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All Directions</SelectItem>
+                                  <SelectItem value="inbound">Incoming Calls</SelectItem>
+                                  <SelectItem value="outbound">Outgoing Calls</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                          {/* Footer actions */}
+                          <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/30">
                             <button
                               onClick={clearFilters}
-                              className="text-sm text-muted-foreground hover:text-foreground transition-colors font-medium"
+                              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
                             >
                               Clear all
                             </button>
@@ -780,7 +639,6 @@ const extractRecording = (notes: string | null): string | null => {
                           <TableHead>Client Name</TableHead>
                           <TableHead>Phone Number</TableHead>
                           <TableHead>Agent</TableHead>
-                          <TableHead>Direction</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead>Duration</TableHead>
                           <TableHead className="text-right pr-6">Actions</TableHead>
@@ -789,7 +647,7 @@ const extractRecording = (notes: string | null): string | null => {
                       <TableBody>
                         {isLoading ? (
                           <TableRow>
-                            <TableCell colSpan={8} className="h-64 text-center">
+                            <TableCell colSpan={7} className="h-64 text-center">
                               <div className="flex items-center justify-center gap-2 text-muted-foreground">
                                 <Loader2 className="h-6 w-6 animate-spin" />
                                 Loading data...
@@ -798,7 +656,7 @@ const extractRecording = (notes: string | null): string | null => {
                           </TableRow>
                         ) : tableData.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={8} className="h-64 text-center">
+                            <TableCell colSpan={7} className="h-64 text-center">
                               <div className="flex flex-col items-center justify-center text-muted-foreground gap-2">
                                 <Search className="h-10 w-10 opacity-20" />
                                 <p className="font-medium">No records found</p>
@@ -811,133 +669,113 @@ const extractRecording = (notes: string | null): string | null => {
                             </TableCell>
                           </TableRow>
                         ) : (
-                          tableData.map(row => {
-                            const dir = getCallDirection(row.notes);
-                            return (
-                              <TableRow key={row.id} className="hover:bg-muted/50 transition-colors group">
-                                <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                                  <div className="flex flex-col">
-                                    <span className="text-foreground font-medium">{format(parseISO(row.displayDate), 'MMM dd, yyyy')}</span>
-                                    <span className="text-[10px]">{format(parseISO(row.displayDate), 'hh:mm a')}</span>
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex items-center gap-2">
-                                    <Avatar className="h-8 w-8 border bg-background">
-                                      <AvatarFallback className="text-[10px] bg-primary/5 text-primary">
-                                        {row.lead?.name?.substring(0, 2).toUpperCase() || 'NA'}
-                                      </AvatarFallback>
-                                    </Avatar>
-                                    <div>
-                                      <span className="font-semibold text-sm block">
-                                        {row.lead?.name
-                                          ? row.lead.name.replace('Unverified MCUBE Caller - ', 'New Inquiry: ').replace('New Lead - ', 'New Inquiry: ')
-                                          : 'Unknown Lead'}
-                                      </span>
-                                      {row.isLeadRow ? (
-                                        <span className="text-[10px] text-blue-600 font-medium">New Website Lead</span>
-                                      ) : (
-                                        <span className="text-[10px] text-muted-foreground uppercase">{row.lead?.stage}</span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </TableCell>
-                                <TableCell className="text-sm font-mono">{row.lead?.phone || '—'}</TableCell>
-                                <TableCell className="text-sm text-muted-foreground">{row.agent?.fullName || '—'}</TableCell>
-                                <TableCell>
-                                  {row.isLeadRow ? (
-                                    <span className="text-xs text-muted-foreground">—</span>
-                                  ) : dir === 'inbound' ? (
-                                    <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">
-                                      <ArrowDownLeft className="h-3 w-3" /> Incoming
+                          tableData.map(row => (
+                            <TableRow key={row.id} className="hover:bg-muted/50 transition-colors group">
+                              <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                                <div className="flex flex-col">
+                                  <span className="text-foreground font-medium">{format(parseISO(row.displayDate), 'MMM dd, yyyy')}</span>
+                                  <span className="text-[10px]">{format(parseISO(row.displayDate), 'hh:mm a')}</span>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex items-center gap-2">
+                                  <Avatar className="h-8 w-8 border bg-background">
+                                    <AvatarFallback className="text-[10px] bg-primary/5 text-primary">
+                                      {row.lead?.name?.substring(0, 2).toUpperCase() || 'NA'}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  <div>
+                                    <span className="font-semibold text-sm block">
+                                      {row.lead?.name
+                                        ? row.lead.name.replace('Unverified MCUBE Caller - ', 'New Inquiry: ').replace('New Lead - ', 'New Inquiry: ')
+                                        : 'Unknown Lead'}
                                     </span>
-                                  ) : dir === 'outbound' ? (
-                                    <span className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
-                                      <ArrowUpRight className="h-3 w-3" /> Outgoing
+                                    {row.isLeadRow ? (
+                                      <span className="text-[10px] text-blue-600 font-medium">New Website Lead</span>
+                                    ) : (
+                                      <span className="text-[10px] text-muted-foreground uppercase">{row.lead?.stage}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex flex-col gap-1.5">
+                                  <span className={`font-mono text-sm ${row.callStatus === 'not_connected' ? 'text-red-600 font-bold bg-red-50 px-2 py-0.5 rounded border border-red-100 w-fit' : ''}`}>
+                                    {row.lead?.phone}
+                                  </span>
+                                  {!row.isLeadRow && row.notes?.includes('Inbound') ? (
+                                    <span className="flex items-center text-[10px] gap-1 text-green-600 font-medium bg-green-50 w-fit px-1.5 py-0.5 rounded border border-green-200">
+                                      <PhoneIncoming className="w-3 h-3"/> Incoming
                                     </span>
-                                  ) : (
-                                    <span className="text-xs text-muted-foreground">—</span>
-                                  )}
-                                </TableCell>
-                                <TableCell><StatusBadge status={row.callStatus} /></TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-  <div className="flex flex-col gap-1.5 my-1">
-    <span className="text-xs font-mono font-medium">
-      {row.duration ? `${Math.floor(row.duration / 60)}m ${row.duration % 60}s` : '—'}
-    </span>
-    {(() => {
-      const rec = extractRecording(row.notes);
-      if (!rec) return null;
-      return (
-        <a href={rec} target="_blank" rel="noreferrer"
-          className="text-[10px] bg-blue-50 text-blue-600 rounded px-1.5 py-0.5 w-fit border border-blue-100 hover:bg-blue-100 flex items-center gap-1 font-sans shadow-sm transition-colors">
-          <Play className="h-2.5 w-2.5 fill-blue-600" />
-          Play Audio
-        </a>
-      );
-    })()}
-  </div>
-</TableCell>
-                                <TableCell className="text-right pr-4">
-  <DropdownMenu>
-    <DropdownMenuTrigger asChild>
-      <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
-        <MoreVertical className="h-4 w-4" />
-      </Button>
-    </DropdownMenuTrigger>
-    <DropdownMenuContent align="end" className="w-48">
-      <DropdownMenuItem onClick={() => handleViewDetails(row)}>
-        View Details
-      </DropdownMenuItem>
-
-      {/* NEW: Edit Name */}
-      <DropdownMenuItem onClick={() => {
-        setLeadIdToEdit(row.leadId);
-        setNameToEdit(row.lead?.name || '');
-        setIsEditNameOpen(true);
-      }}>
-        <Edit className="h-3.5 w-3.5 mr-2" /> Edit Caller Name
-      </DropdownMenuItem>
-
-      {/* NEW: Push to Leads */}
-      {row.lead?.stage === 'unverified' && (
-        <DropdownMenuItem 
-          onClick={() => handlePushToLeads(row.leadId)} 
-          className="text-green-600 focus:text-green-700 font-medium"
-        >
-          <ArrowRightCircle className="h-3.5 w-3.5 mr-2" /> Push to Leads
-        </DropdownMenuItem>
-      )}
-
-      {!row.isLeadRow && (
-        <>
-          <DropdownMenuItem onClick={() => handleCallAction(row)}>
-            <Phone className="h-3.5 w-3.5 mr-2" /> Call Again
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => handleArchive(row.id)}>
-            <Archive className="h-3.5 w-3.5 mr-2" /> Archive
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => confirmDelete(row.id)} className="text-destructive focus:text-destructive">
-            <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
-          </DropdownMenuItem>
-        </>
-      )}
-      {row.isLeadRow && (
-        <>
-          <DropdownMenuItem onClick={() => handleCallAction(row)}>
-            <Phone className="h-3.5 w-3.5 mr-2" /> Initiate Call
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => handleDeleteLead(row.leadId)} className="text-destructive focus:text-destructive">
-            <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete Lead
-          </DropdownMenuItem>
-        </>
-      )}
-    </DropdownMenuContent>
-  </DropdownMenu>
-</TableCell>
-                              </TableRow>
-                            );
-                          })
+                                  ) : !row.isLeadRow && row.notes?.includes('Outbound') ? (
+                                    <span className="flex items-center text-[10px] gap-1 text-blue-600 font-medium bg-blue-50 w-fit px-1.5 py-0.5 rounded border border-blue-200">
+                                      <PhoneOutgoing className="w-3 h-3"/> Outgoing
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-sm">
+                                {row.agent?.fullName || <span className="text-muted-foreground italic">Unassigned</span>}
+                              </TableCell>
+                              <TableCell>
+                                <StatusBadge status={row.callStatus} />
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex flex-col gap-1.5 my-1">
+                                  <span className="text-xs font-mono font-medium">
+                                    {row.duration ? `${Math.floor(row.duration / 60)}m ${row.duration % 60}s` : '--'}
+                                  </span>
+                                  {(() => {
+                                    if (!row.notes) return null;
+                                    const match = row.notes.match(/Recording:\s*(http[^\s|]+)/);
+                                    if (match && match[1] && match[1] !== 'None') {
+                                      return (
+                                        <a href={match[1]} target="_blank" rel="noreferrer"
+                                          className="text-[10px] bg-blue-50 text-blue-600 rounded px-1.5 py-0.5 w-fit border border-blue-100 hover:bg-blue-100 flex items-center gap-1 font-sans shadow-sm transition-colors">
+                                          ▶ Play Audio
+                                        </a>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right pr-4">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <MoreVertical className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-48">
+                                    {row.isLeadRow && (
+                                      <>
+                                        <DropdownMenuItem onClick={() => handleCallAction(row)} className="text-blue-600 font-medium">
+                                          <Phone className="h-4 w-4 mr-2" /> Call Now
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem className="text-red-600 focus:text-red-600 focus:bg-red-50" onClick={() => handleDeleteLead(row.leadId)}>
+                                          <Trash2 className="h-4 w-4 mr-2" /> Delete Lead
+                                        </DropdownMenuItem>
+                                      </>
+                                    )}
+                                    <DropdownMenuItem onClick={() => handleViewDetails(row)}>
+                                      View Details
+                                    </DropdownMenuItem>
+                                    {!row.isLeadRow && (
+                                      <>
+                                        <DropdownMenuItem onClick={() => handleArchive(row.id)}>
+                                          <Archive className="h-4 w-4 mr-2" /> Archive
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem className="text-red-600 focus:text-red-600 focus:bg-red-50" onClick={() => confirmDelete(row.id)}>
+                                          <Trash2 className="h-4 w-4 mr-2" /> Delete
+                                        </DropdownMenuItem>
+                                      </>
+                                    )}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </TableCell>
+                            </TableRow>
+                          ))
                         )}
                       </TableBody>
                     </Table>
@@ -949,125 +787,55 @@ const extractRecording = (notes: string | null): string | null => {
         </div>
       </div>
 
-      {/* ─── VIEW DETAILS DIALOG ─── */}
-   {/* ─── VIEW DETAILS DIALOG ─── */}
-<Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-  <DialogContent className="sm:max-w-md">
-    <DialogHeader>
-      <DialogTitle>Call Details</DialogTitle>
-    </DialogHeader>
-    {selectedItem && (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Client Name</label>
-            <Input defaultValue={selectedItem.lead?.name} readOnly className="bg-muted" />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Phone</label>
-            <Input defaultValue={selectedItem.lead?.phone} readOnly className="bg-muted" />
-          </div>
-        </div>
-        {!selectedItem.isLeadRow && (
-          <>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</label>
-                <div className="pt-1"><StatusBadge status={selectedItem.callStatus} /></div>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Duration</label>
-                <Input
-                  defaultValue={selectedItem.duration ? `${Math.floor(selectedItem.duration / 60)}m ${selectedItem.duration % 60}s` : 'N/A'}
-                  readOnly className="bg-muted" />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Direction</label>
-              <div className="pt-1">
-                {(() => {
-                  const dir = getCallDirection(selectedItem.notes);
-                  return dir === 'inbound' ? (
-                    <span className="inline-flex items-center gap-1 text-sm font-medium text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full">
-                      <ArrowDownLeft className="h-3.5 w-3.5" /> Incoming Call
-                    </span>
-                  ) : dir === 'outbound' ? (
-                    <span className="inline-flex items-center gap-1 text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-full">
-                      <ArrowUpRight className="h-3.5 w-3.5" /> Outgoing Call
-                    </span>
-                  ) : <span className="text-sm text-muted-foreground">Unknown</span>;
-                })()}
-              </div>
-            </div>
-
-            {/* ✅ FIXED: Call Recording Player */}
-{(() => {
-  const rec = extractRecording(selectedItem.notes);
-  return (
-    <div className="space-y-1.5">
-      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Call Recording</label>
-      {rec ? (
-        <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
-          <audio controls className="w-full h-10">
-            <source src={rec} type="audio/mpeg" />
-            <source src={rec} type="audio/wav" />
-          </audio>
-          <a href={rec} target="_blank" rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:underline font-medium">
-            <Play className="h-3 w-3 fill-blue-600" />
-            Open / Download Recording
-          </a>
-        </div>
-      ) : (
-        <p className="text-sm text-muted-foreground italic">No recording available</p>
-      )}
-    </div>
-  );
-})()}
-          </>
-        )}
-        <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Notes</label>
-          <textarea
-            className="w-full min-h-[80px] rounded-md border bg-muted px-3 py-2 text-sm resize-none"
-            defaultValue={selectedItem.notes || ''}
-            readOnly
-          />
-        </div>
-        {selectedItem.isLeadRow && (
-          <Button className="w-full gap-2" onClick={() => { handleCallAction(selectedItem); setIsEditOpen(false); }}>
-            <Phone className="h-4 w-4" /> Initiate Call
-          </Button>
-        )}
-      </div>
-    )}
-    <DialogFooter>
-      <Button variant="outline" onClick={() => setIsEditOpen(false)}>Close</Button>
-    </DialogFooter>
-  </DialogContent>
-</Dialog>
-
-     
-      {/* ─── EDIT CALLER NAME DIALOG ─── */}
-      <Dialog open={isEditNameOpen} onOpenChange={setIsEditNameOpen}>
-        <DialogContent className="sm:max-w-sm">
+      {/* ─── VIEW DIALOG ─── */}
+      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Edit Caller Name</DialogTitle>
+            <DialogTitle>{selectedItem?.isLeadRow ? 'Lead Details' : 'Call Log Details'}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Name</label>
-              <Input 
-                value={nameToEdit} 
-                onChange={(e) => setNameToEdit(e.target.value)} 
-                placeholder="Enter caller's real name"
-                autoFocus
-              />
+          {selectedItem && (
+            <div className="space-y-4 py-2">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Client Name</label>
+                  <Input defaultValue={selectedItem.lead?.name} readOnly className="bg-muted" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Phone</label>
+                  <Input defaultValue={selectedItem.lead?.phone} readOnly className="bg-muted" />
+                </div>
+              </div>
+              {!selectedItem.isLeadRow && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</label>
+                    <div className="pt-1"><StatusBadge status={selectedItem.callStatus} /></div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Duration</label>
+                    <Input
+                      defaultValue={selectedItem.duration ? `${Math.floor(selectedItem.duration / 60)}m ${selectedItem.duration % 60}s` : 'N/A'}
+                      readOnly className="bg-muted" />
+                  </div>
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Notes</label>
+                <textarea
+                  className="w-full min-h-[80px] rounded-md border bg-muted px-3 py-2 text-sm resize-none"
+                  defaultValue={selectedItem.notes || ''}
+                  readOnly
+                />
+              </div>
+              {selectedItem.isLeadRow && (
+                <Button className="w-full gap-2" onClick={() => { handleCallAction(selectedItem); setIsEditOpen(false); }}>
+                  <Phone className="h-4 w-4" /> Initiate Call
+                </Button>
+              )}
             </div>
-          </div>
+          )}
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setIsEditNameOpen(false)}>Cancel</Button>
-            <Button onClick={handleSaveName}>Save Name</Button>
+            <Button variant="outline" onClick={() => setIsEditOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1098,61 +866,19 @@ const extractRecording = (notes: string | null): string | null => {
 // ─────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
   const configs: Record<string, { label: string; className: string; icon: any }> = {
-    connected_positive: {
-      label: 'Connected',
-      className: 'bg-green-50 text-green-700 border-green-200',
-      icon: CheckCircle2,
-    },
-    connected_callback: {
-      label: 'Callback',
-      className: 'bg-amber-50 text-amber-700 border-amber-200',
-      icon: Clock,
-    },
-    not_connected: {
-      label: 'Missed',
-      className: 'bg-red-50 text-red-600 border-red-200',
-      icon: PhoneMissed,
-    },
-    not_interested: {
-      label: 'Unqualified',
-      className: 'bg-gray-50 text-gray-600 border-gray-200',
-      icon: ThumbsDown,
-    },
-    pending: {
-      label: 'Pending',
-      className: 'bg-blue-50 text-blue-600 border-blue-200',
-      icon: Phone,
-    },
+    pending: { label: 'To Call', className: 'bg-orange-100 text-orange-700 border-orange-200', icon: ArrowRightCircle },
+    connected_positive: { label: 'Qualified', className: 'bg-green-100 text-green-700 border-green-200', icon: ThumbsUp },
+    connected_callback: { label: 'Callback', className: 'bg-blue-100 text-blue-700 border-blue-200', icon: Clock },
+    not_connected: { label: 'Missed', className: 'bg-red-100 text-red-700 border-red-200', icon: PhoneMissed },
+    not_interested: { label: 'Unqualified', className: 'bg-gray-100 text-gray-700 border-gray-200', icon: ThumbsDown },
   };
- 
-  const cfg = configs[status] || {
-    label: status,
-    className: 'bg-muted text-muted-foreground border-border',
-    icon: Phone,
-  };
-  const Icon = cfg.icon;
- 
+  const config = configs[status] || { label: status, className: 'bg-gray-100 border-gray-200', icon: Phone };
+  const Icon = config.icon;
   return (
-    <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border ${cfg.className}`}>
+    <Badge variant="outline" className={`${config.className} flex w-fit items-center gap-1.5 px-2 py-0.5 shadow-sm`}>
       <Icon className="h-3 w-3" />
-      {cfg.label}
-    </span>
-  );
-}
- 
-
-// ─────────────────────────────────────────────
-// DIRECTION BADGE MINI
-// ─────────────────────────────────────────────
-function DirectionBadge({ direction }: { direction: 'inbound' | 'outbound' }) {
-  return direction === 'inbound' ? (
-    <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700">
-      <ArrowDownLeft className="h-3.5 w-3.5" /> Incoming
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-700">
-      <ArrowUpRight className="h-3.5 w-3.5" /> Outgoing
-    </span>
+      {config.label}
+    </Badge>
   );
 }
 
@@ -1172,10 +898,10 @@ interface ReportsViewProps {
 function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isRefreshing }: ReportsViewProps) {
   const [trend, setTrend] = useState<any[]>([]);
   const [agentPerf, setAgentPerf] = useState<any[]>([]);
-  const [directionTrend, setDirectionTrend] = useState<any[]>([]);
   const [isLoadingReports, setIsLoadingReports] = useState(false);
 
-  const fetchReportData = useCallback(async () => {
+  // Fetch detailed report data
+ const fetchReportData = useCallback(async () => {
     if (!token) return;
     setIsLoadingReports(true);
     try {
@@ -1183,7 +909,7 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
       if (filters.dateFrom) query.append('dateFrom', filters.dateFrom);
       if (filters.dateTo) query.append('dateTo', filters.dateTo);
       if (filters.agentId !== 'all') query.append('agentId', filters.agentId);
-      if (filters.direction !== 'all') query.append('direction', filters.direction);
+      if (filters.direction !== 'all') query.append('direction', filters.direction); // New
 
       const res = await fetch(`${API_URL}/call-logs?${query}&take=1000`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -1191,11 +917,11 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
       if (!res.ok) return;
       const logs: any[] = await res.json();
 
-      // ─── Build 7-day trend (total, inbound, outbound) ───
-      const last7: Record<string, { date: string; total: number; connected: number; missed: number; inbound: number; outbound: number }> = {};
+      // ─── Build 7-day trend ───
+      const last7: Record<string, { date: string; total: number; connected: number; missed: number }> = {};
       for (let i = 6; i >= 0; i--) {
         const d = format(subDays(new Date(), i), 'MMM dd');
-        last7[format(subDays(new Date(), i), 'yyyy-MM-dd')] = { date: d, total: 0, connected: 0, missed: 0, inbound: 0, outbound: 0 };
+        last7[format(subDays(new Date(), i), 'yyyy-MM-dd')] = { date: d, total: 0, connected: 0, missed: 0 };
       }
       logs.forEach(log => {
         const day = log.callDate?.split('T')[0];
@@ -1203,28 +929,19 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
           last7[day].total++;
           if (['connected_positive', 'connected_callback'].includes(log.callStatus)) last7[day].connected++;
           if (log.callStatus === 'not_connected') last7[day].missed++;
-          const notes = (log.notes || '').toLowerCase();
-          if (notes.includes('inbound')) last7[day].inbound++;
-          else if (notes.includes('outbound')) last7[day].outbound++;
         }
       });
       setTrend(Object.values(last7));
 
-      // ─── Direction trend (7-day) ───
-      setDirectionTrend(Object.values(last7));
-
       // ─── Build agent performance ───
-      const agentMap: Record<string, { name: string; total: number; connected: number; missed: number; qualified: number; inbound: number; outbound: number }> = {};
+      const agentMap: Record<string, { name: string; total: number; connected: number; missed: number; qualified: number }> = {};
       logs.forEach(log => {
         const name = log.agent?.fullName || 'Unassigned';
-        if (!agentMap[name]) agentMap[name] = { name, total: 0, connected: 0, missed: 0, qualified: 0, inbound: 0, outbound: 0 };
+        if (!agentMap[name]) agentMap[name] = { name, total: 0, connected: 0, missed: 0, qualified: 0 };
         agentMap[name].total++;
         if (['connected_positive', 'connected_callback'].includes(log.callStatus)) agentMap[name].connected++;
         if (log.callStatus === 'not_connected') agentMap[name].missed++;
         if (log.callStatus === 'connected_positive') agentMap[name].qualified++;
-        const notes = (log.notes || '').toLowerCase();
-        if (notes.includes('inbound')) agentMap[name].inbound++;
-        else if (notes.includes('outbound')) agentMap[name].outbound++;
       });
       const perf = Object.values(agentMap)
         .map(a => ({ ...a, rate: a.total > 0 ? Math.round((a.connected / a.total) * 100) : 0 }))
@@ -1236,20 +953,6 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
   }, [token, filters.dateFrom, filters.dateTo, filters.agentId, filters.direction]);
 
   useEffect(() => { fetchReportData(); }, [fetchReportData]);
-
-  // ─── Derived stats for inbound/outbound ───
-  const inboundTotal = stats?.inboundTotal ?? 0;
-  const outboundTotal = stats?.outboundTotal ?? 0;
-  const inboundConnected = stats?.inboundConnected ?? 0;
-  const outboundConnected = stats?.outboundConnected ?? 0;
-  const inboundMissed = stats?.inboundMissed ?? 0;
-  const outboundMissed = stats?.outboundMissed ?? 0;
-
-  // ─── Direction Pie ───
-  const directionPieData = [
-    { name: 'Incoming', value: inboundTotal, color: '#22c55e' },
-    { name: 'Outgoing', value: outboundTotal, color: '#6366f1' },
-  ].filter(d => d.value > 0);
 
   // Pie data
   const pieData = stats ? [
@@ -1288,7 +991,12 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
               <Input type="date" className="h-7 w-fit text-xs border-none shadow-none px-0 py-0 bg-transparent focus-visible:ring-0"
                 value={filters.dateTo} onChange={e => setFilters(p => ({ ...p, dateTo: e.target.value }))} min={filters.dateFrom} />
             </div>
-            {[{ label: 'Today', days: 0 }, { label: 'This Week', days: 7 }, { label: 'This Month', days: 30 }].map(p => (
+            {/* Quick range presets */}
+            {[
+              { label: 'Today', days: 0 },
+              { label: 'This Week', days: 7 },
+              { label: 'This Month', days: 30 },
+            ].map(p => (
               <Button key={p.label} variant="outline" size="sm" className="h-8 text-xs"
                 onClick={() => {
                   const today = format(new Date(), 'yyyy-MM-dd');
@@ -1298,6 +1006,7 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
                 {p.label}
               </Button>
             ))}
+            {/* Agent filter (admin only) */}
             {agents.length > 0 && (
               <Select value={filters.agentId} onValueChange={v => setFilters(p => ({ ...p, agentId: v }))}>
                 <SelectTrigger className="h-8 text-xs w-36">
@@ -1324,255 +1033,124 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
 
         {/* ─── KPI STAT CARDS ─── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <KpiCard title="Total Calls" value={stats.totalCalls} icon={Phone} color="blue" subtitle={`${stats.connectRate}% connect rate`} />
-          <KpiCard title="Qualified" value={stats.positive} icon={ThumbsUp} color="green"
-            subtitle={stats.totalCalls > 0 ? `${Math.round((stats.positive / stats.totalCalls) * 100)}% of all calls` : '—'} trend="up" />
-          <KpiCard title="Missed Calls" value={stats.notAnswered} icon={PhoneMissed} color="red"
-            subtitle={stats.totalCalls > 0 ? `${Math.round((stats.notAnswered / stats.totalCalls) * 100)}% miss rate` : '—'} trend="down" />
-          <KpiCard title="Callbacks Pending" value={stats.callback || 0} icon={Clock} color="amber" subtitle="Awaiting follow-up" />
-        </div>
-
-        {/* ─── INBOUND vs OUTBOUND BREAKDOWN ─── */}
-        <div>
-          <div className="flex items-center gap-2 mb-3">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Incoming vs Outgoing Breakdown</h3>
-            <div className="flex-1 h-px bg-border" />
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Inbound Card */}
-            <Card className="border-l-4 border-l-green-500 bg-green-50/30">
-              <CardContent className="p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <div className="p-2 rounded-lg bg-green-100 text-green-700">
-                      <ArrowDownLeft className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-green-800">Incoming Calls</p>
-                      <p className="text-xs text-green-600">Calls received from customers</p>
-                    </div>
-                  </div>
-                  <span className="text-3xl font-bold text-green-700">{inboundTotal}</span>
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-white/70 rounded-lg p-3 text-center border border-green-100">
-                    <p className="text-lg font-bold text-green-700">{inboundConnected}</p>
-                    <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Answered</p>
-                    <p className="text-[10px] text-green-600 font-semibold">
-                      {inboundTotal > 0 ? `${Math.round((inboundConnected / inboundTotal) * 100)}%` : '—'}
-                    </p>
-                  </div>
-                  <div className="bg-white/70 rounded-lg p-3 text-center border border-green-100">
-                    <p className="text-lg font-bold text-red-600">{inboundMissed}</p>
-                    <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Missed</p>
-                    <p className="text-[10px] text-red-500 font-semibold">
-                      {inboundTotal > 0 ? `${Math.round((inboundMissed / inboundTotal) * 100)}%` : '—'}
-                    </p>
-                  </div>
-                  <div className="bg-white/70 rounded-lg p-3 text-center border border-green-100">
-                    <p className="text-lg font-bold text-amber-600">
-                      {inboundTotal > 0 ? `${Math.round((inboundConnected / inboundTotal) * 100)}%` : '—'}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Connect Rate</p>
-                    <p className="text-[10px] text-amber-600 font-semibold">efficiency</p>
-                  </div>
-                </div>
-                {inboundTotal > 0 && (
-                  <div className="mt-3">
-                    <div className="flex justify-between text-[10px] text-muted-foreground mb-1">
-                      <span>Answer rate</span>
-                      <span>{Math.round((inboundConnected / inboundTotal) * 100)}%</span>
-                    </div>
-                    <div className="h-1.5 rounded-full bg-green-100 overflow-hidden">
-                      <div className="h-full rounded-full bg-green-500 transition-all"
-                        style={{ width: `${Math.round((inboundConnected / inboundTotal) * 100)}%` }} />
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Outbound Card */}
-            <Card className="border-l-4 border-l-indigo-500 bg-indigo-50/30">
-              <CardContent className="p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <div className="p-2 rounded-lg bg-indigo-100 text-indigo-700">
-                      <ArrowUpRight className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-indigo-800">Outgoing Calls</p>
-                      <p className="text-xs text-indigo-600">Calls made to customers</p>
-                    </div>
-                  </div>
-                  <span className="text-3xl font-bold text-indigo-700">{outboundTotal}</span>
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-white/70 rounded-lg p-3 text-center border border-indigo-100">
-                    <p className="text-lg font-bold text-indigo-700">{outboundConnected}</p>
-                    <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Answered</p>
-                    <p className="text-[10px] text-indigo-600 font-semibold">
-                      {outboundTotal > 0 ? `${Math.round((outboundConnected / outboundTotal) * 100)}%` : '—'}
-                    </p>
-                  </div>
-                  <div className="bg-white/70 rounded-lg p-3 text-center border border-indigo-100">
-                    <p className="text-lg font-bold text-red-600">{outboundMissed}</p>
-                    <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Not Answered</p>
-                    <p className="text-[10px] text-red-500 font-semibold">
-                      {outboundTotal > 0 ? `${Math.round((outboundMissed / outboundTotal) * 100)}%` : '—'}
-                    </p>
-                  </div>
-                  <div className="bg-white/70 rounded-lg p-3 text-center border border-indigo-100">
-                    <p className="text-lg font-bold text-amber-600">
-                      {outboundTotal > 0 ? `${Math.round((outboundConnected / outboundTotal) * 100)}%` : '—'}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Connect Rate</p>
-                    <p className="text-[10px] text-amber-600 font-semibold">efficiency</p>
-                  </div>
-                </div>
-                {outboundTotal > 0 && (
-                  <div className="mt-3">
-                    <div className="flex justify-between text-[10px] text-muted-foreground mb-1">
-                      <span>Answer rate</span>
-                      <span>{Math.round((outboundConnected / outboundTotal) * 100)}%</span>
-                    </div>
-                    <div className="h-1.5 rounded-full bg-indigo-100 overflow-hidden">
-                      <div className="h-full rounded-full bg-indigo-500 transition-all"
-                        style={{ width: `${Math.round((outboundConnected / outboundTotal) * 100)}%` }} />
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+          <KpiCard
+            title="Total Calls"
+            value={stats.totalCalls}
+            icon={Phone}
+            color="blue"
+            subtitle={`${stats.connectRate}% connect rate`}
+          />
+          <KpiCard
+            title="Qualified"
+            value={stats.positive}
+            icon={ThumbsUp}
+            color="green"
+            subtitle={stats.totalCalls > 0 ? `${Math.round((stats.positive / stats.totalCalls) * 100)}% of all calls` : '—'}
+            trend="up"
+          />
+          <KpiCard
+            title="Missed Calls"
+            value={stats.notAnswered}
+            icon={PhoneMissed}
+            color="red"
+            subtitle={stats.totalCalls > 0 ? `${Math.round((stats.notAnswered / stats.totalCalls) * 100)}% miss rate` : '—'}
+            trend="down"
+          />
+          <KpiCard
+            title="Callbacks Pending"
+            value={stats.callback || 0}
+            icon={Clock}
+            color="amber"
+            subtitle="Awaiting follow-up"
+          />
         </div>
 
         {/* ─── SECONDARY METRICS ─── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <MetricTile label="Connect Rate" value={`${stats.connectRate}%`} icon={Target}
-            sub={stats.connectRate >= 50 ? 'Above target' : 'Below target'} good={stats.connectRate >= 50} />
+            sub={stats.connectRate >= 50 ? 'Above target' : 'Below target'}
+            good={stats.connectRate >= 50} />
           <MetricTile label="Unqualified" value={stats.negative} icon={ThumbsDown}
-            sub={stats.totalCalls > 0 ? `${Math.round((stats.negative / stats.totalCalls) * 100)}% reject rate` : '—'} good={false} />
+            sub={stats.totalCalls > 0 ? `${Math.round((stats.negative / stats.totalCalls) * 100)}% reject rate` : '—'}
+            good={false} />
           <MetricTile label="Connected Calls" value={stats.connectedCalls} icon={PhoneCall}
             sub="Answered by customer" good={true} />
           <MetricTile label="New Leads" value={stats.newLeads} icon={Zap}
             sub="In pipeline" good={true} />
         </div>
 
-        {/* ─── CHARTS ROW 1: Trend + Direction Ratio ─── */}
+        {/* ─── CHARTS ROW 1: Trend + Pie ─── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* 7-Day Trend with inbound/outbound */}
+          {/* 7-Day Trend */}
           <Card className="lg:col-span-2">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base font-semibold">7-Day Call Trend</CardTitle>
                 {isLoadingReports && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
               </div>
-              <p className="text-xs text-muted-foreground">Total, incoming & outgoing volume over last 7 days</p>
             </CardHeader>
             <CardContent>
               {trend.length > 0 ? (
                 <ResponsiveContainer width="100%" height={220}>
                   <AreaChart data={trend} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
                     <defs>
-                      <linearGradient id="colorInbound" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#22c55e" stopOpacity={0.2} />
+                      <linearGradient id="colorConnected" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#22c55e" stopOpacity={0.15} />
                         <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="colorOutbound" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2} />
-                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
                       </linearGradient>
                       <linearGradient id="colorMissed" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#ef4444" stopOpacity={0.15} />
                         <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
                       </linearGradient>
+                      <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.15} />
+                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                      </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                     <XAxis dataKey="date" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                    <Tooltip contentStyle={{ borderRadius: 8, border: '1px solid var(--border)', fontSize: 12 }} cursor={{ stroke: 'var(--border)', strokeWidth: 1 }} />
+                    <Tooltip
+                      contentStyle={{ borderRadius: 8, border: '1px solid var(--border)', fontSize: 12 }}
+                      cursor={{ stroke: 'var(--border)', strokeWidth: 1 }}
+                    />
                     <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
-                    <Area type="monotone" dataKey="inbound" name="Incoming" stroke="#22c55e" strokeWidth={2} fill="url(#colorInbound)" dot={{ r: 3 }} />
-                    <Area type="monotone" dataKey="outbound" name="Outgoing" stroke="#6366f1" strokeWidth={2} fill="url(#colorOutbound)" dot={{ r: 3 }} />
+                    <Area type="monotone" dataKey="total" name="Total" stroke="#6366f1" strokeWidth={2} fill="url(#colorTotal)" dot={{ r: 3 }} />
+                    <Area type="monotone" dataKey="connected" name="Connected" stroke="#22c55e" strokeWidth={2} fill="url(#colorConnected)" dot={{ r: 3 }} />
                     <Area type="monotone" dataKey="missed" name="Missed" stroke="#ef4444" strokeWidth={2} fill="url(#colorMissed)" dot={{ r: 3 }} />
                   </AreaChart>
                 </ResponsiveContainer>
-              ) : <EmptyChart label="No trend data available" />}
+              ) : (
+                <EmptyChart label="No trend data available" />
+              )}
             </CardContent>
           </Card>
 
-          {/* Inbound / Outbound Ratio Pie */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base font-semibold">Call Direction Ratio</CardTitle>
-              <p className="text-xs text-muted-foreground">Incoming vs outgoing split</p>
-            </CardHeader>
-            <CardContent>
-              {directionPieData.length > 0 ? (
-                <div className="flex flex-col items-center gap-4">
-                  <ResponsiveContainer width="100%" height={160}>
-                    <PieChart>
-                      <Pie data={directionPieData} cx="50%" cy="50%" innerRadius={45} outerRadius={72} paddingAngle={3} dataKey="value">
-                        {directionPieData.map((entry, index) => (
-                          <Cell key={index} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(v: any, n: string) => [`${v} calls`, n]} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="w-full space-y-2">
-                    {directionPieData.map(d => (
-                      <div key={d.name} className="flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
-                          <span className="text-muted-foreground">{d.name}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold">{d.value}</span>
-                          <span className="text-muted-foreground w-10 text-right">
-                            {stats.totalCalls > 0 ? `${Math.round((d.value / stats.totalCalls) * 100)}%` : '0%'}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  {/* Visual ratio bar */}
-                  {inboundTotal + outboundTotal > 0 && (
-                    <div className="w-full">
-                      <div className="flex rounded-full overflow-hidden h-2.5">
-                        <div className="bg-green-500 transition-all" style={{ width: `${Math.round((inboundTotal / (inboundTotal + outboundTotal)) * 100)}%` }} />
-                        <div className="bg-indigo-500 flex-1" />
-                      </div>
-                      <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
-                        <span className="text-green-600 font-medium">↙ Incoming {Math.round((inboundTotal / (inboundTotal + outboundTotal)) * 100)}%</span>
-                        <span className="text-indigo-600 font-medium">{Math.round((outboundTotal / (inboundTotal + outboundTotal)) * 100)}% Outgoing ↗</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ) : <EmptyChart label="No direction data" />}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* ─── CHARTS ROW 2: Status Dist + Agent Performance ─── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Status Distribution Pie */}
+          {/* Call Status Distribution */}
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-base font-semibold">Status Distribution</CardTitle>
-              <p className="text-xs text-muted-foreground">Call outcome breakdown</p>
             </CardHeader>
             <CardContent>
               {pieData.length > 0 ? (
                 <div className="flex flex-col items-center gap-4">
                   <ResponsiveContainer width="100%" height={160}>
                     <PieChart>
-                      <Pie data={pieData} cx="50%" cy="50%" innerRadius={45} outerRadius={72} paddingAngle={3} dataKey="value">
-                        {pieData.map((entry, index) => <Cell key={index} fill={entry.color} />)}
+                      <Pie
+                        data={pieData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={45}
+                        outerRadius={72}
+                        paddingAngle={3}
+                        dataKey="value"
+                      >
+                        {pieData.map((entry, index) => (
+                          <Cell key={index} fill={entry.color} />
+                        ))}
                       </Pie>
-                      <Tooltip formatter={(v: any, n: string) => [`${v} calls`, n]} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+                      <Tooltip formatter={(v: any, n: string) => [`${v} calls`, n]}
+                        contentStyle={{ borderRadius: 8, fontSize: 12 }} />
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="w-full space-y-2">
@@ -1592,51 +1170,61 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
                     ))}
                   </div>
                 </div>
-              ) : <EmptyChart label="No status data" />}
+              ) : (
+                <EmptyChart label="No status data" />
+              )}
             </CardContent>
           </Card>
+        </div>
 
-          {/* Agent Performance */}
-          <Card className="lg:col-span-2">
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-base font-semibold">Agent Performance Breakdown</CardTitle>
-                  <p className="text-xs text-muted-foreground mt-0.5">Calls handled per agent with incoming/outgoing split</p>
-                </div>
-                {isLoadingReports && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+        {/* ─── CHARTS ROW 2: Agent Performance ─── */}
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-base font-semibold">Agent Performance Breakdown</CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">Calls handled per agent with connect rate</p>
               </div>
-            </CardHeader>
-            <CardContent>
-              {agentPerf.length > 0 ? (
+              {isLoadingReports && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {agentPerf.length > 0 ? (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                {/* Bar chart */}
+                <ResponsiveContainer width="100%" height={240}>
+                  <BarChart data={agentPerf} margin={{ top: 5, right: 10, left: -20, bottom: 40 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-30} textAnchor="end" axisLine={false} tickLine={false} interval={0} />
+                    <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+                    <Bar dataKey="connected" name="Connected" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="missed" name="Missed" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="qualified" name="Qualified" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+
+                {/* Agent leaderboard table */}
                 <div className="space-y-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Leaderboard</p>
                   {agentPerf.map((agent, idx) => (
-                    <div key={agent.name} className="flex items-center gap-3 py-2.5 px-3 rounded-lg hover:bg-muted/50 transition-colors">
+                    <div key={agent.name} className="flex items-center gap-3 py-2 px-3 rounded-lg hover:bg-muted/50 transition-colors">
                       <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${idx === 0 ? 'bg-yellow-100 text-yellow-700' : idx === 1 ? 'bg-gray-100 text-gray-600' : idx === 2 ? 'bg-orange-100 text-orange-600' : 'bg-muted text-muted-foreground'}`}>
                         {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-sm font-medium truncate">{agent.name}</span>
-                          <div className="flex items-center gap-3 text-xs flex-shrink-0">
-                            <span className="flex items-center gap-1 text-green-600 font-semibold">
-                              <ArrowDownLeft className="h-3 w-3" />{agent.inbound}
-                            </span>
-                            <span className="flex items-center gap-1 text-indigo-600 font-semibold">
-                              <ArrowUpRight className="h-3 w-3" />{agent.outbound}
-                            </span>
-                            <span className="text-muted-foreground">{agent.total} total</span>
-                          </div>
+                          <span className="text-xs font-bold text-muted-foreground flex-shrink-0">{agent.total} calls</span>
                         </div>
-                        <div className="flex items-center gap-2 mt-1.5">
-                          {/* Inbound/Outbound stacked mini bar */}
-                          {agent.total > 0 && (
-                            <div className="flex rounded-full overflow-hidden h-1.5 flex-1">
-                              <div className="bg-green-400 transition-all" style={{ width: `${Math.round((agent.inbound / agent.total) * 100)}%` }} title={`Incoming: ${agent.inbound}`} />
-                              <div className="bg-indigo-400 transition-all" style={{ width: `${Math.round((agent.outbound / agent.total) * 100)}%` }} title={`Outgoing: ${agent.outbound}`} />
-                              <div className="bg-muted flex-1" />
-                            </div>
-                          )}
+                        <div className="flex items-center gap-2 mt-1">
+                          <div className="flex-1 bg-muted rounded-full h-1.5 overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-green-500 to-emerald-400 transition-all"
+                              style={{ width: `${agent.rate}%` }}
+                            />
+                          </div>
                           <span className={`text-xs font-semibold flex-shrink-0 ${agent.rate >= 60 ? 'text-green-600' : agent.rate >= 40 ? 'text-amber-600' : 'text-red-600'}`}>
                             {agent.rate}%
                           </span>
@@ -1645,10 +1233,12 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
                     </div>
                   ))}
                 </div>
-              ) : <EmptyChart label="No agent data for this period" />}
-            </CardContent>
-          </Card>
-        </div>
+              </div>
+            ) : (
+              <EmptyChart label="No agent data for this period" />
+            )}
+          </CardContent>
+        </Card>
 
         {/* ─── SUMMARY TABLE ─── */}
         <Card>
@@ -1668,8 +1258,6 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
               <TableBody>
                 {[
                   { label: 'Total Calls Made', value: stats.totalCalls, pct: 100, good: null },
-                  { label: '↙ Incoming Calls', value: inboundTotal, pct: stats.totalCalls > 0 ? Math.round((inboundTotal / stats.totalCalls) * 100) : 0, good: null },
-                  { label: '↗ Outgoing Calls', value: outboundTotal, pct: stats.totalCalls > 0 ? Math.round((outboundTotal / stats.totalCalls) * 100) : 0, good: null },
                   { label: 'Connected (Answered)', value: stats.connectedCalls, pct: stats.totalCalls > 0 ? Math.round((stats.connectedCalls / stats.totalCalls) * 100) : 0, good: true },
                   { label: 'Qualified Leads', value: stats.positive, pct: stats.totalCalls > 0 ? Math.round((stats.positive / stats.totalCalls) * 100) : 0, good: true },
                   { label: 'Callback Scheduled', value: stats.callback || 0, pct: stats.totalCalls > 0 ? Math.round(((stats.callback || 0) / stats.totalCalls) * 100) : 0, good: null },
@@ -1681,7 +1269,9 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
                   <TableRow key={row.label} className="hover:bg-muted/30">
                     <TableCell className="font-medium text-sm">{row.label}</TableCell>
                     <TableCell className="text-right font-bold">{row.value}</TableCell>
-                    <TableCell className="text-right text-muted-foreground text-sm">{row.pct !== null ? `${row.pct}%` : '—'}</TableCell>
+                    <TableCell className="text-right text-muted-foreground text-sm">
+                      {row.pct !== null ? `${row.pct}%` : '—'}
+                    </TableCell>
                     <TableCell className="text-right">
                       {row.good === null ? (
                         <Badge variant="outline" className="text-xs">Neutral</Badge>
@@ -1731,8 +1321,8 @@ function AnalyticsView({ token, filters, setFilters, agents, onRefresh, isRefres
       if (filters.dateFrom) query.append('dateFrom', filters.dateFrom);
       if (filters.dateTo) query.append('dateTo', filters.dateTo);
       if (filters.agentId !== 'all') query.append('agentId', filters.agentId);
-      if (filters.direction !== 'all') query.append('direction', filters.direction);
-
+      if (filters.direction !== 'all') query.append('direction', filters.direction); // New
+      
       const res = await fetch(`${API_URL}/call-logs?${query}&take=1000`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -1744,40 +1334,30 @@ function AnalyticsView({ token, filters, setFilters, agents, onRefresh, isRefres
 
   useEffect(() => { fetchLogs(); }, [fetchLogs]);
 
-  // ── Separate inbound/outbound logs ──
-  const inboundLogs = useMemo(() => logs.filter(l => (l.notes || '').toLowerCase().includes('inbound')), [logs]);
-  const outboundLogs = useMemo(() => logs.filter(l => (l.notes || '').toLowerCase().includes('outbound')), [logs]);
-
-  // ── Hourly heatmap split by direction ──
+  // ── Hourly heatmap (0–23) ──
   const hourlyData = useMemo(() => {
-    const counts: Record<number, { hour: string; total: number; connected: number; inbound: number; outbound: number }> = {};
+    const counts: Record<number, { hour: string; total: number; connected: number }> = {};
     for (let h = 0; h < 24; h++) {
-      counts[h] = { hour: `${h.toString().padStart(2, '0')}:00`, total: 0, connected: 0, inbound: 0, outbound: 0 };
+      counts[h] = { hour: `${h.toString().padStart(2, '0')}:00`, total: 0, connected: 0 };
     }
     logs.forEach(log => {
       const h = new Date(log.callDate).getHours();
       counts[h].total++;
       if (['connected_positive', 'connected_callback'].includes(log.callStatus)) counts[h].connected++;
-      const notes = (log.notes || '').toLowerCase();
-      if (notes.includes('inbound')) counts[h].inbound++;
-      else if (notes.includes('outbound')) counts[h].outbound++;
     });
     return Object.values(counts).filter(d => d.total > 0);
   }, [logs]);
 
-  // ── Day-of-week split by direction ──
+  // ── Day-of-week breakdown ──
   const dowData = useMemo(() => {
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const counts: Record<number, { day: string; total: number; connected: number; qualified: number; inbound: number; outbound: number }> = {};
-    days.forEach((d, i) => { counts[i] = { day: d, total: 0, connected: 0, qualified: 0, inbound: 0, outbound: 0 }; });
+    const counts: Record<number, { day: string; total: number; connected: number; qualified: number }> = {};
+    days.forEach((d, i) => { counts[i] = { day: d, total: 0, connected: 0, qualified: 0 }; });
     logs.forEach(log => {
       const dow = new Date(log.callDate).getDay();
       counts[dow].total++;
       if (['connected_positive', 'connected_callback'].includes(log.callStatus)) counts[dow].connected++;
       if (log.callStatus === 'connected_positive') counts[dow].qualified++;
-      const notes = (log.notes || '').toLowerCase();
-      if (notes.includes('inbound')) counts[dow].inbound++;
-      else if (notes.includes('outbound')) counts[dow].outbound++;
     });
     return Object.values(counts);
   }, [logs]);
@@ -1814,18 +1394,11 @@ function AnalyticsView({ token, filters, setFilters, agents, onRefresh, isRefres
         map[log.callStatus].count++;
       }
     });
-    return Object.values(map).map(d => ({ ...d, avg: d.count > 0 ? Math.round(d.sum / d.count) : 0 }));
+    return Object.values(map).map(d => ({
+      ...d,
+      avg: d.count > 0 ? Math.round(d.sum / d.count) : 0,
+    }));
   }, [logs]);
-
-  // ── Avg duration inbound vs outbound ──
-  const avgDurationByDirection = useMemo(() => {
-    const inboundConnected = inboundLogs.filter(l => l.callDuration && l.callDuration > 0);
-    const outboundConnected = outboundLogs.filter(l => l.callDuration && l.callDuration > 0);
-    return {
-      inbound: inboundConnected.length > 0 ? Math.round(inboundConnected.reduce((s, l) => s + l.callDuration, 0) / inboundConnected.length) : 0,
-      outbound: outboundConnected.length > 0 ? Math.round(outboundConnected.reduce((s, l) => s + l.callDuration, 0) / outboundConnected.length) : 0,
-    };
-  }, [inboundLogs, outboundLogs]);
 
   // ── Overall avg duration ──
   const overallAvgDuration = useMemo(() => {
@@ -1845,20 +1418,6 @@ function AnalyticsView({ token, filters, setFilters, agents, onRefresh, isRefres
       { stage: 'Qualified', value: qualified, color: '#f59e0b' },
     ];
   }, [logs]);
-
-  // ── Inbound vs outbound outcome comparison ──
-  const directionOutcomeData = useMemo(() => {
-    const getOutcomes = (arr: any[]) => ({
-      qualified: arr.filter(l => l.callStatus === 'connected_positive').length,
-      callback: arr.filter(l => l.callStatus === 'connected_callback').length,
-      missed: arr.filter(l => l.callStatus === 'not_connected').length,
-      unqualified: arr.filter(l => l.callStatus === 'not_interested').length,
-    });
-    return [
-      { direction: 'Incoming', ...getOutcomes(inboundLogs) },
-      { direction: 'Outgoing', ...getOutcomes(outboundLogs) },
-    ];
-  }, [inboundLogs, outboundLogs]);
 
   const formatDuration = (s: number) => s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
 
@@ -1931,14 +1490,18 @@ function AnalyticsView({ token, filters, setFilters, agents, onRefresh, isRefres
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <Card className="bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm">
             <CardContent className="p-5">
-              <div className="p-2.5 rounded-xl bg-indigo-100 text-indigo-600 w-fit mb-3"><Phone className="h-5 w-5" /></div>
+              <div className="p-2.5 rounded-xl bg-indigo-100 text-indigo-600 w-fit mb-3">
+                <Phone className="h-5 w-5" />
+              </div>
               <p className="text-2xl font-bold">{logs.length.toLocaleString()}</p>
               <p className="text-xs font-semibold mt-0.5 opacity-90">Total Calls Analysed</p>
             </CardContent>
           </Card>
           <Card className="bg-green-50 border-green-200 text-green-700 shadow-sm">
             <CardContent className="p-5">
-              <div className="p-2.5 rounded-xl bg-green-100 text-green-600 w-fit mb-3"><Clock className="h-5 w-5" /></div>
+              <div className="p-2.5 rounded-xl bg-green-100 text-green-600 w-fit mb-3">
+                <Clock className="h-5 w-5" />
+              </div>
               <p className="text-2xl font-bold">{overallAvgDuration > 0 ? formatDuration(overallAvgDuration) : '—'}</p>
               <p className="text-xs font-semibold mt-0.5 opacity-90">Avg Call Duration</p>
               <p className="text-xs opacity-70 mt-1">Connected calls only</p>
@@ -1946,9 +1509,13 @@ function AnalyticsView({ token, filters, setFilters, agents, onRefresh, isRefres
           </Card>
           <Card className="bg-amber-50 border-amber-200 text-amber-700 shadow-sm">
             <CardContent className="p-5">
-              <div className="p-2.5 rounded-xl bg-amber-100 text-amber-600 w-fit mb-3"><Target className="h-5 w-5" /></div>
+              <div className="p-2.5 rounded-xl bg-amber-100 text-amber-600 w-fit mb-3">
+                <Target className="h-5 w-5" />
+              </div>
               <p className="text-2xl font-bold">
-                {logs.length > 0 ? `${Math.round((logs.filter(l => l.callStatus === 'connected_positive').length / logs.length) * 100)}%` : '—'}
+                {logs.length > 0
+                  ? `${Math.round((logs.filter(l => l.callStatus === 'connected_positive').length / logs.length) * 100)}%`
+                  : '—'}
               </p>
               <p className="text-xs font-semibold mt-0.5 opacity-90">Qualification Rate</p>
               <p className="text-xs opacity-70 mt-1">Qualified / total calls</p>
@@ -1956,114 +1523,17 @@ function AnalyticsView({ token, filters, setFilters, agents, onRefresh, isRefres
           </Card>
           <Card className="bg-blue-50 border-blue-200 text-blue-700 shadow-sm">
             <CardContent className="p-5">
-              <div className="p-2.5 rounded-xl bg-blue-100 text-blue-600 w-fit mb-3"><Award className="h-5 w-5" /></div>
+              <div className="p-2.5 rounded-xl bg-blue-100 text-blue-600 w-fit mb-3">
+                <Award className="h-5 w-5" />
+              </div>
               <p className="text-2xl font-bold">
                 {(() => {
-                  const best = hourlyData.reduce((a, b) => b.total > a.total ? b : a, { hour: '—', total: 0, connected: 0, inbound: 0, outbound: 0 });
+                  const best = hourlyData.reduce((a, b) => b.total > a.total ? b : a, { hour: '—', total: 0 });
                   return best.total > 0 ? best.hour : '—';
                 })()}
               </p>
               <p className="text-xs font-semibold mt-0.5 opacity-90">Peak Calling Hour</p>
               <p className="text-xs opacity-70 mt-1">Highest volume hour</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* ── INCOMING VS OUTGOING ANALYSIS ── */}
-        <div>
-          <div className="flex items-center gap-2 mb-3">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Incoming vs Outgoing Analysis</h3>
-            <div className="flex-1 h-px bg-border" />
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-            {/* Inbound mini stats */}
-            <Card className="border-l-4 border-l-green-500 bg-green-50/20">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <ArrowDownLeft className="h-4 w-4 text-green-600" />
-                  <span className="font-bold text-green-700 text-sm">Incoming Calls — {inboundLogs.length}</span>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="text-center">
-                    <p className="text-xl font-bold text-green-600">
-                      {inboundLogs.length > 0 ? `${Math.round((inboundLogs.filter(l => ['connected_positive', 'connected_callback'].includes(l.callStatus)).length / inboundLogs.length) * 100)}%` : '—'}
-                    </p>
-                    <p className="text-xs text-muted-foreground">Connect Rate</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-xl font-bold text-green-600">
-                      {avgDurationByDirection.inbound > 0 ? formatDuration(avgDurationByDirection.inbound) : '—'}
-                    </p>
-                    <p className="text-xs text-muted-foreground">Avg Duration</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-lg font-bold text-green-600">{inboundLogs.filter(l => l.callStatus === 'connected_positive').length}</p>
-                    <p className="text-xs text-muted-foreground">Qualified</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-lg font-bold text-red-500">{inboundLogs.filter(l => l.callStatus === 'not_connected').length}</p>
-                    <p className="text-xs text-muted-foreground">Missed</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Outbound mini stats */}
-            <Card className="border-l-4 border-l-indigo-500 bg-indigo-50/20">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <ArrowUpRight className="h-4 w-4 text-indigo-600" />
-                  <span className="font-bold text-indigo-700 text-sm">Outgoing Calls — {outboundLogs.length}</span>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="text-center">
-                    <p className="text-xl font-bold text-indigo-600">
-                      {outboundLogs.length > 0 ? `${Math.round((outboundLogs.filter(l => ['connected_positive', 'connected_callback'].includes(l.callStatus)).length / outboundLogs.length) * 100)}%` : '—'}
-                    </p>
-                    <p className="text-xs text-muted-foreground">Connect Rate</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-xl font-bold text-indigo-600">
-                      {avgDurationByDirection.outbound > 0 ? formatDuration(avgDurationByDirection.outbound) : '—'}
-                    </p>
-                    <p className="text-xs text-muted-foreground">Avg Duration</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-lg font-bold text-indigo-600">{outboundLogs.filter(l => l.callStatus === 'connected_positive').length}</p>
-                    <p className="text-xs text-muted-foreground">Qualified</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-lg font-bold text-red-500">{outboundLogs.filter(l => l.callStatus === 'not_connected').length}</p>
-                    <p className="text-xs text-muted-foreground">Not Answered</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Direction × Outcome Comparison Chart */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base font-semibold">Incoming vs Outgoing — Outcome Comparison</CardTitle>
-              <p className="text-xs text-muted-foreground">How each call direction performs across all outcomes</p>
-            </CardHeader>
-            <CardContent>
-              {hasData ? (
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={directionOutcomeData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                    <XAxis dataKey="direction" tick={{ fontSize: 12, fontWeight: 600 }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                    <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                    <Bar dataKey="qualified" name="Qualified" fill="#22c55e" radius={[3, 3, 0, 0]} />
-                    <Bar dataKey="callback" name="Callback" fill="#3b82f6" radius={[3, 3, 0, 0]} />
-                    <Bar dataKey="missed" name="Missed" fill="#ef4444" radius={[3, 3, 0, 0]} />
-                    <Bar dataKey="unqualified" name="Unqualified" fill="#6b7280" radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : <EmptyChart label="No data for comparison" />}
             </CardContent>
           </Card>
         </div>
@@ -2094,7 +1564,10 @@ function AnalyticsView({ token, filters, setFilters, agents, onRefresh, isRefres
                           </div>
                         </div>
                         <div className="h-7 rounded-lg overflow-hidden bg-muted">
-                          <div className="h-full rounded-lg transition-all flex items-center pl-3" style={{ width: `${Math.max(pct, 4)}%`, backgroundColor: stage.color }}>
+                          <div
+                            className="h-full rounded-lg transition-all flex items-center pl-3"
+                            style={{ width: `${Math.max(pct, 4)}%`, backgroundColor: stage.color }}
+                          >
                             {pct > 15 && <span className="text-white text-xs font-bold">{pct}%</span>}
                           </div>
                         </div>
@@ -2131,35 +1604,16 @@ function AnalyticsView({ token, filters, setFilters, agents, onRefresh, isRefres
                         <span className="text-sm font-bold">{formatDuration(d.avg)}</span>
                       </div>
                       <div className="h-2 rounded-full bg-muted overflow-hidden">
-                        <div className="h-full rounded-full"
-                          style={{ width: `${Math.min(100, (d.avg / Math.max(...avgDurationByStatus.map(x => x.avg), 1)) * 100)}%`, backgroundColor: d.color }} />
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${Math.min(100, (d.avg / Math.max(...avgDurationByStatus.map(x => x.avg), 1)) * 100)}%`,
+                            backgroundColor: d.color,
+                          }}
+                        />
                       </div>
                     </div>
                   ))}
-                  {/* Inbound vs Outbound avg duration */}
-                  {(avgDurationByDirection.inbound > 0 || avgDurationByDirection.outbound > 0) && (
-                    <div className="pt-3 border-t space-y-3">
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">By Direction</p>
-                      {[
-                        { label: 'Incoming Avg', value: avgDurationByDirection.inbound, color: '#22c55e' },
-                        { label: 'Outgoing Avg', value: avgDurationByDirection.outbound, color: '#6366f1' },
-                      ].filter(d => d.value > 0).map(d => (
-                        <div key={d.label}>
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center gap-2">
-                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
-                              <span className="text-sm font-medium">{d.label}</span>
-                            </div>
-                            <span className="text-sm font-bold">{formatDuration(d.value)}</span>
-                          </div>
-                          <div className="h-2 rounded-full bg-muted overflow-hidden">
-                            <div className="h-full rounded-full"
-                              style={{ width: `${Math.min(100, (d.value / Math.max(avgDurationByDirection.inbound, avgDurationByDirection.outbound, 1)) * 100)}%`, backgroundColor: d.color }} />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                   {avgDurationByStatus.every(d => d.count === 0) && (
                     <p className="text-sm text-muted-foreground text-center py-6">No duration data available</p>
                   )}
@@ -2173,7 +1627,7 @@ function AnalyticsView({ token, filters, setFilters, agents, onRefresh, isRefres
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-semibold">Hourly Call Volume</CardTitle>
-            <p className="text-xs text-muted-foreground">Incoming vs outgoing calls throughout the day</p>
+            <p className="text-xs text-muted-foreground">When your team makes the most calls throughout the day</p>
           </CardHeader>
           <CardContent>
             {hourlyData.length > 0 ? (
@@ -2184,8 +1638,8 @@ function AnalyticsView({ token, filters, setFilters, agents, onRefresh, isRefres
                   <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
                   <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
                   <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="inbound" name="Incoming" fill="#22c55e" radius={[3, 3, 0, 0]} stackId="a" />
-                  <Bar dataKey="outbound" name="Outgoing" fill="#6366f1" radius={[3, 3, 0, 0]} stackId="a" />
+                  <Bar dataKey="total" name="Total" fill="#6366f1" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="connected" name="Connected" fill="#22c55e" radius={[3, 3, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : <EmptyChart label="No hourly data for this period" />}
@@ -2198,7 +1652,7 @@ function AnalyticsView({ token, filters, setFilters, agents, onRefresh, isRefres
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-base font-semibold">Calls by Day of Week</CardTitle>
-              <p className="text-xs text-muted-foreground">Incoming vs outgoing by day</p>
+              <p className="text-xs text-muted-foreground">Which days see the highest calling activity</p>
             </CardHeader>
             <CardContent>
               {hasData ? (
@@ -2209,8 +1663,8 @@ function AnalyticsView({ token, filters, setFilters, agents, onRefresh, isRefres
                     <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
                     <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
                     <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                    <Bar dataKey="inbound" name="Incoming" fill="#22c55e" radius={[3, 3, 0, 0]} />
-                    <Bar dataKey="outbound" name="Outgoing" fill="#6366f1" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="total" name="Total" fill="#8b5cf6" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="connected" name="Connected" fill="#22c55e" radius={[3, 3, 0, 0]} />
                     <Bar dataKey="qualified" name="Qualified" fill="#f59e0b" radius={[3, 3, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -2279,8 +1733,14 @@ function KpiCard({ title, value, icon: Icon, color, subtitle, trend }: {
     <Card className={`${colors[color]} shadow-sm`}>
       <CardContent className="p-5">
         <div className="flex items-start justify-between mb-3">
-          <div className={`p-2.5 rounded-xl ${iconBg[color]}`}><Icon className="h-5 w-5" /></div>
-          {trend && (trend === 'up' ? <TrendingUp className="h-4 w-4 text-green-500" /> : <TrendingDown className="h-4 w-4 text-red-500" />)}
+          <div className={`p-2.5 rounded-xl ${iconBg[color]}`}>
+            <Icon className="h-5 w-5" />
+          </div>
+          {trend && (
+            trend === 'up'
+              ? <TrendingUp className="h-4 w-4 text-green-500" />
+              : <TrendingDown className="h-4 w-4 text-red-500" />
+          )}
         </div>
         <p className="text-2xl font-bold tracking-tight">{value.toLocaleString()}</p>
         <p className="text-xs font-semibold mt-0.5 opacity-90">{title}</p>
@@ -2299,7 +1759,9 @@ function MetricTile({ label, value, icon: Icon, sub, good }: {
   return (
     <Card className="border bg-card shadow-sm">
       <CardContent className="p-4 flex items-center gap-3">
-        <div className={`p-2 rounded-lg ${good ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}><Icon className="h-4 w-4" /></div>
+        <div className={`p-2 rounded-lg ${good ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+          <Icon className="h-4 w-4" />
+        </div>
         <div className="min-w-0">
           <p className="text-lg font-bold leading-none">{typeof value === 'number' ? value.toLocaleString() : value}</p>
           <p className="text-xs font-medium text-muted-foreground mt-0.5 truncate">{label}</p>
