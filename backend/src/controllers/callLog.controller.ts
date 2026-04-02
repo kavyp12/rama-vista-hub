@@ -60,30 +60,37 @@ export const initiateMcubeCall = async (req: AuthRequest, res: Response) => {
 
     // ── FIX: Immediately save a pending CallLog so call appears in CRM right away ──
     // The webhook will enrich this later with duration/recording once MCUBE posts back.
-    const cleanLeadPhone = String(leadPhone).replace(/\D/g, '').slice(-10);
-    const lead = await prisma.lead.findFirst({
-      where: { phone: { contains: cleanLeadPhone } }
-    });
+  const cleanLeadPhone = String(leadPhone).replace(/\D/g, '').slice(-10);
+let lead = await prisma.lead.findFirst({
+  where: { phone: { contains: cleanLeadPhone } }
+});
 
-    if (!lead) {
-      // If the lead doesn't exist in our CRM database, we shouldn't fail silently.
-      // We must tell the frontend that it cannot log a call for a non-existent lead.
-      return res.status(404).json({ 
-        error: `Could not log call. No lead found in the CRM with phone number ${cleanLeadPhone}. Make sure the lead is saved first.` 
-      });
-    }
+if (!lead) {
+  // Auto-create an unverified lead so the call gets logged in CRM
+  lead = await prisma.lead.create({
+    data: {
+      name: `Unverified - ${cleanLeadPhone}`,
+      phone: cleanLeadPhone,
+      stage: 'unverified' as any,
+      source: 'outbound_call',
+      assignedToId: currentUser.id,   // assign to whoever is calling
+    },
+    include: { assignedTo: true }
+  });
+  console.log(`🆕 Auto-created lead for outbound call: ${cleanLeadPhone}`);
+}
 
-    // Stamp last contacted so lead list stays fresh
-    await prisma.lead.update({
-      where: { id: lead.id },
-      data: { lastContactedAt: new Date() }
-    });
+// Stamp last contacted
+await prisma.lead.update({
+  where: { id: lead.id },
+  data: { lastContactedAt: new Date() }
+});
 
-    return res.status(200).json({
-      success: true,
-      message: 'Call initiated via MCUBE',
-      mcubeResponse: response.data
-    });
+return res.status(200).json({
+  success: true,
+  message: 'Call initiated via MCUBE',
+  mcubeResponse: response.data
+});
 
   } catch (error) {
     console.error('MCUBE Initiate Call Error:', error);
