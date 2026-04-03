@@ -48,7 +48,7 @@ import {
   RefreshCw,
   ArrowUpRight,
   Play,
-Mic,
+  Mic,
   ArrowDownLeft,
   Edit, // 👈 ADD THIS RIGHT HERE
 } from 'lucide-react';
@@ -165,7 +165,7 @@ export default function Telecalling() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
-  
+
 
   const [isEditNameOpen, setIsEditNameOpen] = useState(false);
   const [nameToEdit, setNameToEdit] = useState('');
@@ -182,7 +182,7 @@ export default function Telecalling() {
       if (!res.ok) throw new Error();
       toast({ title: 'Updated', description: 'Caller name updated successfully.' });
       setIsEditNameOpen(false);
-      fetchData(); 
+      fetchData();
     } catch {
       toast({ title: 'Error', description: 'Could not update name.', variant: 'destructive' });
     }
@@ -193,7 +193,7 @@ export default function Telecalling() {
       const res = await fetch(`${API_URL}/leads/${leadId}`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stage: 'new' }), 
+        body: JSON.stringify({ stage: 'new' }),
       });
       if (!res.ok) throw new Error();
       toast({ title: 'Pushed to Leads', description: 'Caller successfully added to your active Leads pipeline.' });
@@ -209,11 +209,11 @@ export default function Telecalling() {
   }, [activeView, setSearchParams]);
 
   // Fetch agents list for filter dropdown (admin only)
-// REPLACE THIS:
-// Fetch agents list for filter dropdown (Admins and Sales Agents)
+  // REPLACE THIS:
+  // Fetch agents list for filter dropdown (Admins and Sales Agents)
   useEffect(() => {
     if (user?.role !== 'admin' && user?.role !== 'sales_manager') return;
-    
+
     // Fetch all users, then filter to only those who take calls
     fetch(`${API_URL}/users`, {
       headers: { Authorization: `Bearer ${token}` }
@@ -228,7 +228,7 @@ export default function Telecalling() {
           setAgents([]);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [token, user]);
   // ─── ACTIVE FILTER COUNT ───
   const activeFilterCount = useMemo(() => {
@@ -245,7 +245,7 @@ export default function Telecalling() {
   }, [filters]);
 
   // ─── FETCH DATA ───
-  const fetchData = useCallback(async () => {
+ const fetchData = useCallback(async () => {
     if (activeView === 'reports') return;
     setIsLoading(true);
     setTableData([]);
@@ -277,13 +277,17 @@ export default function Telecalling() {
         if (filters.minDuration !== 'all') query.append('minDuration', filters.minDuration);
         if (filters.source !== 'all') query.append('source', filters.source);
         if (filters.direction !== 'all') query.append('direction', filters.direction);
+        // Always sort by date descending — newest call first
+        query.append('sortBy', 'callDate');
+        query.append('sortOrder', 'desc');
 
         const res = await fetch(`${API_URL}/call-logs?${query}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (!res.ok) throw new Error('Failed to fetch logs');
         const logs = await res.json();
-        setTableData(logs.map((log: any) => ({
+
+        const mapped: TableRowData[] = logs.map((log: any) => ({
           id: log.id,
           isLeadRow: false,
           leadId: log.leadId,
@@ -296,7 +300,14 @@ export default function Telecalling() {
           agent: log.agent,
           isArchived: log.isArchived,
           deletedAt: log.deletedAt,
-        })));
+        }));
+
+        // Client-side safety sort — always newest first regardless of backend
+        mapped.sort((a, b) =>
+          new Date(b.displayDate).getTime() - new Date(a.displayDate).getTime()
+        );
+
+        setTableData(mapped);
       }
     } catch (err) {
       toast({ title: 'Error', description: 'Failed to load data', variant: 'destructive' });
@@ -322,7 +333,7 @@ export default function Telecalling() {
       });
       const data = await res.json();
       setStats(data);
-    } catch {}
+    } catch { }
   }, [token, filters, activeView]);
 
   useEffect(() => { fetchStats(); }, [fetchStats]);
@@ -437,24 +448,24 @@ export default function Telecalling() {
   // Helper to get call direction from notes
   // KEEP getCallDirection as is, then ADD extractRecording right below it:
 
-const getCallDirection = (notes: string | null): 'inbound' | 'outbound' | null => {
-  if (!notes) return null;
-  if (notes.toLowerCase().includes('inbound')) return 'inbound';
-  if (notes.toLowerCase().includes('outbound')) return 'outbound';
-  return null;
-};
+  const getCallDirection = (notes: string | null): 'inbound' | 'outbound' | null => {
+    if (!notes) return null;
+    if (notes.toLowerCase().includes('inbound')) return 'inbound';
+    if (notes.toLowerCase().includes('outbound')) return 'outbound';
+    return null;
+  };
 
-const MCUBE_RECORDING_BASE_URL = 'https://mcube.vmc.in/Recordings'; // ← confirm this URL with MCUBE
+  const MCUBE_RECORDING_BASE_URL = 'https://mcube.vmc.in/Recordings'; // ← confirm this URL with MCUBE
 
-const extractRecording = (notes: string | null): string | null => {
-  if (!notes) return null;
-  const match = notes.match(/Recording:\s*([^\s|]+)/i);
-  if (!match) return null;
-  const val = match[1].trim();
-  if (!val || val === 'None' || val === 'none' || val === 'N/A' || val === '') return null;
-  if (val.startsWith('http://') || val.startsWith('https://')) return val;
-  return `${MCUBE_RECORDING_BASE_URL}/${val}`; // builds full URL from filename
-};
+  const extractRecording = (notes: string | null): string | null => {
+    if (!notes) return null;
+    const match = notes.match(/Recording:\s*([^\s|]+)/i);
+    if (!match) return null;
+    const val = match[1].trim();
+    if (!val || val === 'None' || val === 'none' || val === 'N/A' || val === '') return null;
+    if (val.startsWith('http://') || val.startsWith('https://')) return val;
+    return `${MCUBE_RECORDING_BASE_URL}/${val}`; // builds full URL from filename
+  };
 
   return (
     <DashboardLayout title="Telecalling Center" description="Manage your call operations">
@@ -858,82 +869,115 @@ const extractRecording = (notes: string | null): string | null => {
                                     <span className="text-xs text-muted-foreground">—</span>
                                   )}
                                 </TableCell>
-                                <TableCell><StatusBadge status={row.callStatus} /></TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-  <div className="flex flex-col gap-1.5 my-1">
-    <span className="text-xs font-mono font-medium">
-      {row.duration ? `${Math.floor(row.duration / 60)}m ${row.duration % 60}s` : '—'}
-    </span>
-    {(() => {
-      const rec = extractRecording(row.notes);
-      if (!rec) return null;
-      return (
-        <a href={rec} target="_blank" rel="noreferrer"
-          className="text-[10px] bg-blue-50 text-blue-600 rounded px-1.5 py-0.5 w-fit border border-blue-100 hover:bg-blue-100 flex items-center gap-1 font-sans shadow-sm transition-colors">
-          <Play className="h-2.5 w-2.5 fill-blue-600" />
-          Play Audio
-        </a>
-      );
-    })()}
-  </div>
-</TableCell>
+                                <TableCell>
+                                  {(() => {
+                                    const rec = extractRecording(row.notes);
+                                    // If DB says "not_connected" but a recording exists OR duration > 0
+                                    // → it was clearly connected. A missed call cannot have a recording.
+                                    const effectiveStatus =
+                                      row.callStatus === 'not_connected' && (rec || (row.duration && row.duration > 0))
+                                        ? 'connected_positive'
+                                        : row.callStatus;
+                                    return <StatusBadge status={effectiveStatus} />;
+                                  })()}
+                                </TableCell>
+
+
+                                <TableCell className="text-sm text-muted-foreground">
+                                  <div className="flex flex-col gap-1.5 my-1">
+                                    {(() => {
+                                      const rec = extractRecording(row.notes);
+                                      const hasRecording = !!rec;
+
+                                      // Extract duration from notes as fallback
+                                      // MCUBE sometimes stores "Duration: 32" inside notes
+                                      let displayDuration: string = '—';
+                                      if (row.duration && row.duration > 0) {
+                                        const mins = Math.floor(row.duration / 60);
+                                        const secs = row.duration % 60;
+                                        displayDuration = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+                                      } else if (hasRecording) {
+                                        // Recording exists but DB duration is null — show "see recording"
+                                        displayDuration = '⏱ In recording';
+                                      }
+
+                                      return (
+                                        <>
+                                          <span className="text-xs font-mono font-medium">{displayDuration}</span>
+                                          {hasRecording && (
+                                            <a
+                                              href={rec}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              className="text-[10px] bg-blue-50 text-blue-600 rounded px-1.5 py-0.5 w-fit border border-blue-100 hover:bg-blue-100 flex items-center gap-1 font-sans shadow-sm transition-colors"
+                                            >
+                                              <Play className="h-2.5 w-2.5 fill-blue-600" />
+                                              Play Audio
+                                            </a>
+                                          )}
+                                        </>
+                                      );
+                                    })()}
+                                  </div>
+                                </TableCell>
+
                                 <TableCell className="text-right pr-4">
-  <DropdownMenu>
-    <DropdownMenuTrigger asChild>
-      <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
-        <MoreVertical className="h-4 w-4" />
-      </Button>
-    </DropdownMenuTrigger>
-    <DropdownMenuContent align="end" className="w-48">
-      <DropdownMenuItem onClick={() => handleViewDetails(row)}>
-        View Details
-      </DropdownMenuItem>
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <MoreVertical className="h-4 w-4" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="w-48">
+                                      <DropdownMenuItem onClick={() => handleViewDetails(row)}>
+                                        View Details
+                                      </DropdownMenuItem>
 
-      {/* NEW: Edit Name */}
-      <DropdownMenuItem onClick={() => {
-        setLeadIdToEdit(row.leadId);
-        setNameToEdit(row.lead?.name || '');
-        setIsEditNameOpen(true);
-      }}>
-        <Edit className="h-3.5 w-3.5 mr-2" /> Edit Caller Name
-      </DropdownMenuItem>
+                                      {/* NEW: Edit Name */}
+                                      <DropdownMenuItem onClick={() => {
+                                        setLeadIdToEdit(row.leadId);
+                                        setNameToEdit(row.lead?.name || '');
+                                        setIsEditNameOpen(true);
+                                      }}>
+                                        <Edit className="h-3.5 w-3.5 mr-2" /> Edit Caller Name
+                                      </DropdownMenuItem>
 
-      {/* NEW: Push to Leads */}
-      {row.lead?.stage === 'unverified' && (
-        <DropdownMenuItem 
-          onClick={() => handlePushToLeads(row.leadId)} 
-          className="text-green-600 focus:text-green-700 font-medium"
-        >
-          <ArrowRightCircle className="h-3.5 w-3.5 mr-2" /> Push to Leads
-        </DropdownMenuItem>
-      )}
+                                      {/* NEW: Push to Leads */}
+                                      {row.lead?.stage === 'unverified' && (
+                                        <DropdownMenuItem
+                                          onClick={() => handlePushToLeads(row.leadId)}
+                                          className="text-green-600 focus:text-green-700 font-medium"
+                                        >
+                                          <ArrowRightCircle className="h-3.5 w-3.5 mr-2" /> Push to Leads
+                                        </DropdownMenuItem>
+                                      )}
 
-      {!row.isLeadRow && (
-        <>
-          <DropdownMenuItem onClick={() => handleCallAction(row)}>
-            <Phone className="h-3.5 w-3.5 mr-2" /> Call Again
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => handleArchive(row.id)}>
-            <Archive className="h-3.5 w-3.5 mr-2" /> Archive
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => confirmDelete(row.id)} className="text-destructive focus:text-destructive">
-            <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
-          </DropdownMenuItem>
-        </>
-      )}
-      {row.isLeadRow && (
-        <>
-          <DropdownMenuItem onClick={() => handleCallAction(row)}>
-            <Phone className="h-3.5 w-3.5 mr-2" /> Initiate Call
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => handleDeleteLead(row.leadId)} className="text-destructive focus:text-destructive">
-            <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete Lead
-          </DropdownMenuItem>
-        </>
-      )}
-    </DropdownMenuContent>
-  </DropdownMenu>
-</TableCell>
+                                      {!row.isLeadRow && (
+                                        <>
+                                          <DropdownMenuItem onClick={() => handleCallAction(row)}>
+                                            <Phone className="h-3.5 w-3.5 mr-2" /> Call Again
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem onClick={() => handleArchive(row.id)}>
+                                            <Archive className="h-3.5 w-3.5 mr-2" /> Archive
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem onClick={() => confirmDelete(row.id)} className="text-destructive focus:text-destructive">
+                                            <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+                                          </DropdownMenuItem>
+                                        </>
+                                      )}
+                                      {row.isLeadRow && (
+                                        <>
+                                          <DropdownMenuItem onClick={() => handleCallAction(row)}>
+                                            <Phone className="h-3.5 w-3.5 mr-2" /> Initiate Call
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem onClick={() => handleDeleteLead(row.leadId)} className="text-destructive focus:text-destructive">
+                                            <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete Lead
+                                          </DropdownMenuItem>
+                                        </>
+                                      )}
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </TableCell>
                               </TableRow>
                             );
                           })
@@ -949,104 +993,104 @@ const extractRecording = (notes: string | null): string | null => {
       </div>
 
       {/* ─── VIEW DETAILS DIALOG ─── */}
-   {/* ─── VIEW DETAILS DIALOG ─── */}
-<Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-  <DialogContent className="sm:max-w-md">
-    <DialogHeader>
-      <DialogTitle>Call Details</DialogTitle>
-    </DialogHeader>
-    {selectedItem && (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Client Name</label>
-            <Input defaultValue={selectedItem.lead?.name} readOnly className="bg-muted" />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Phone</label>
-            <Input defaultValue={selectedItem.lead?.phone} readOnly className="bg-muted" />
-          </div>
-        </div>
-        {!selectedItem.isLeadRow && (
-          <>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</label>
-                <div className="pt-1"><StatusBadge status={selectedItem.callStatus} /></div>
+      {/* ─── VIEW DETAILS DIALOG ─── */}
+      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Call Details</DialogTitle>
+          </DialogHeader>
+          {selectedItem && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Client Name</label>
+                  <Input defaultValue={selectedItem.lead?.name} readOnly className="bg-muted" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Phone</label>
+                  <Input defaultValue={selectedItem.lead?.phone} readOnly className="bg-muted" />
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Duration</label>
-                <Input
-                  defaultValue={selectedItem.duration ? `${Math.floor(selectedItem.duration / 60)}m ${selectedItem.duration % 60}s` : 'N/A'}
-                  readOnly className="bg-muted" />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Direction</label>
-              <div className="pt-1">
-                {(() => {
-                  const dir = getCallDirection(selectedItem.notes);
-                  return dir === 'inbound' ? (
-                    <span className="inline-flex items-center gap-1 text-sm font-medium text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full">
-                      <ArrowDownLeft className="h-3.5 w-3.5" /> Incoming Call
-                    </span>
-                  ) : dir === 'outbound' ? (
-                    <span className="inline-flex items-center gap-1 text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-full">
-                      <ArrowUpRight className="h-3.5 w-3.5" /> Outgoing Call
-                    </span>
-                  ) : <span className="text-sm text-muted-foreground">Unknown</span>;
-                })()}
-              </div>
-            </div>
+              {!selectedItem.isLeadRow && (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</label>
+                      <div className="pt-1"><StatusBadge status={selectedItem.callStatus} /></div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Duration</label>
+                      <Input
+                        defaultValue={selectedItem.duration ? `${Math.floor(selectedItem.duration / 60)}m ${selectedItem.duration % 60}s` : 'N/A'}
+                        readOnly className="bg-muted" />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Direction</label>
+                    <div className="pt-1">
+                      {(() => {
+                        const dir = getCallDirection(selectedItem.notes);
+                        return dir === 'inbound' ? (
+                          <span className="inline-flex items-center gap-1 text-sm font-medium text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full">
+                            <ArrowDownLeft className="h-3.5 w-3.5" /> Incoming Call
+                          </span>
+                        ) : dir === 'outbound' ? (
+                          <span className="inline-flex items-center gap-1 text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-full">
+                            <ArrowUpRight className="h-3.5 w-3.5" /> Outgoing Call
+                          </span>
+                        ) : <span className="text-sm text-muted-foreground">Unknown</span>;
+                      })()}
+                    </div>
+                  </div>
 
-            {/* ✅ FIXED: Call Recording Player */}
-{(() => {
-  const rec = extractRecording(selectedItem.notes);
-  return (
-    <div className="space-y-1.5">
-      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Call Recording</label>
-      {rec ? (
-        <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
-          <audio controls className="w-full h-10">
-            <source src={rec} type="audio/mpeg" />
-            <source src={rec} type="audio/wav" />
-          </audio>
-          <a href={rec} target="_blank" rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:underline font-medium">
-            <Play className="h-3 w-3 fill-blue-600" />
-            Open / Download Recording
-          </a>
-        </div>
-      ) : (
-        <p className="text-sm text-muted-foreground italic">No recording available</p>
-      )}
-    </div>
-  );
-})()}
-          </>
-        )}
-        <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Notes</label>
-          <textarea
-            className="w-full min-h-[80px] rounded-md border bg-muted px-3 py-2 text-sm resize-none"
-            defaultValue={selectedItem.notes || ''}
-            readOnly
-          />
-        </div>
-        {selectedItem.isLeadRow && (
-          <Button className="w-full gap-2" onClick={() => { handleCallAction(selectedItem); setIsEditOpen(false); }}>
-            <Phone className="h-4 w-4" /> Initiate Call
-          </Button>
-        )}
-      </div>
-    )}
-    <DialogFooter>
-      <Button variant="outline" onClick={() => setIsEditOpen(false)}>Close</Button>
-    </DialogFooter>
-  </DialogContent>
-</Dialog>
+                  {/* ✅ FIXED: Call Recording Player */}
+                  {(() => {
+                    const rec = extractRecording(selectedItem.notes);
+                    return (
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Call Recording</label>
+                        {rec ? (
+                          <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+                            <audio controls className="w-full h-10">
+                              <source src={rec} type="audio/mpeg" />
+                              <source src={rec} type="audio/wav" />
+                            </audio>
+                            <a href={rec} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:underline font-medium">
+                              <Play className="h-3 w-3 fill-blue-600" />
+                              Open / Download Recording
+                            </a>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground italic">No recording available</p>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </>
+              )}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Notes</label>
+                <textarea
+                  className="w-full min-h-[80px] rounded-md border bg-muted px-3 py-2 text-sm resize-none"
+                  defaultValue={selectedItem.notes || ''}
+                  readOnly
+                />
+              </div>
+              {selectedItem.isLeadRow && (
+                <Button className="w-full gap-2" onClick={() => { handleCallAction(selectedItem); setIsEditOpen(false); }}>
+                  <Phone className="h-4 w-4" /> Initiate Call
+                </Button>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-     
+
       {/* ─── EDIT CALLER NAME DIALOG ─── */}
       <Dialog open={isEditNameOpen} onOpenChange={setIsEditNameOpen}>
         <DialogContent className="sm:max-w-sm">
@@ -1056,9 +1100,9 @@ const extractRecording = (notes: string | null): string | null => {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Name</label>
-              <Input 
-                value={nameToEdit} 
-                onChange={(e) => setNameToEdit(e.target.value)} 
+              <Input
+                value={nameToEdit}
+                onChange={(e) => setNameToEdit(e.target.value)}
                 placeholder="Enter caller's real name"
                 autoFocus
               />
@@ -1123,14 +1167,14 @@ function StatusBadge({ status }: { status: string }) {
       icon: Phone,
     },
   };
- 
+
   const cfg = configs[status] || {
     label: status,
     className: 'bg-muted text-muted-foreground border-border',
     icon: Phone,
   };
   const Icon = cfg.icon;
- 
+
   return (
     <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border ${cfg.className}`}>
       <Icon className="h-3 w-3" />
@@ -1138,7 +1182,7 @@ function StatusBadge({ status }: { status: string }) {
     </span>
   );
 }
- 
+
 
 // ─────────────────────────────────────────────
 // DIRECTION BADGE MINI
