@@ -1,125 +1,113 @@
 // scripts/fixCallStatus.ts
-// Run once with: npx ts-node scripts/fixCallStatus.ts
-// This fixes all old call logs that were wrongly marked as not_connected
-// AND fixes records where callDuration is null/0 but Duration is stored in notes
-
 import { PrismaClient } from '@prisma/client';
+import * as mm from 'music-metadata';
+import axios from 'axios';
 
 const prisma = new PrismaClient();
+const MCUBE_RECORDING_BASE_URL = 'https://recordings.mcube.com';
+
+// Helper to delay loops so we don't spam the MCUBE server
+const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 async function main() {
-  console.log('🔍 Finding wrongly marked call logs...\n');
+  console.log('🔍 Starting Call Log Database Fixes...\n');
 
   // ── FIX 1: Has callDuration > 0 but marked as not_connected ──
-  // A call with real duration cannot be missed
   const durationFix = await prisma.callLog.updateMany({
-    where: {
-      callStatus: 'not_connected',
-      callDuration: {
-        gt: 0,  // duration > 0 means the call was answered
-      },
-    },
-    data: {
-      callStatus: 'connected_positive',
-    },
+    where: { callStatus: 'not_connected', callDuration: { gt: 0 } },
+    data: { callStatus: 'connected_positive' },
   });
+  console.log(`✅ Fixed ${durationFix.count} records marked as missed but had duration`);
 
-  console.log(`✅ Fixed ${durationFix.count} records with duration > 0 but marked as missed`);
-
-  // ── FIX 2: Has a real recording filename in notes but marked as not_connected ──
-  // A missed call cannot have a recording
+  // ── FIX 2: Has a recording in notes but marked as not_connected ──
   const allWronglyMissed = await prisma.callLog.findMany({
-    where: {
-      callStatus: 'not_connected',
-      notes: {
-        contains: 'Recording:',
-      },
-    },
-    select: {
-      id: true,
-      notes: true,
-      callDuration: true,
-    },
+    where: { callStatus: 'not_connected', notes: { contains: 'Recording:' } },
+    select: { id: true, notes: true },
   });
-
-  // Filter in JS — Prisma can't do NOT LIKE on multiple values cleanly
   const toFix = allWronglyMissed.filter(log => {
-    const notes = log.notes || '';
-    const match = notes.match(/Recording:\s*([^\s|]+)/i);
-    if (!match) return false;
-    const val = match[1].trim().toLowerCase();
-    // Skip if recording is None/N/A/empty
-    return val && val !== 'none' && val !== 'n/a' && val !== '';
+    const match = (log.notes || '').match(/Recording:\s*([^\s|]+)/i);
+    return match && match[1].trim() !== 'None' && match[1].trim() !== 'N/A';
   });
-
   if (toFix.length > 0) {
-    const ids = toFix.map(l => l.id);
-    const recordingFix = await prisma.callLog.updateMany({
-      where: {
-        id: { in: ids },
-      },
-      data: {
-        callStatus: 'connected_positive',
-      },
+    await prisma.callLog.updateMany({
+      where: { id: { in: toFix.map(l => l.id) } },
+      data: { callStatus: 'connected_positive' },
     });
-    console.log(`✅ Fixed ${recordingFix.count} records with recording but marked as missed`);
-  } else {
-    console.log('ℹ️  No recording-based status fixes needed');
+    console.log(`✅ Fixed ${toFix.length} records marked as missed but had audio files`);
   }
 
-  // ── FIX 3: callDuration is null/0 but notes contains "Duration: X" ──
-  // The webhook stores duration in the notes string; backfill it to the DB column
-  console.log('\n🔍 Fixing missing callDuration from notes...');
+  // ── FIX 3: Backfill Duration from Notes ──
   const logsWithNullDuration = await prisma.callLog.findMany({
-    where: {
-      OR: [
-        { callDuration: null },
-        { callDuration: 0 },
-      ],
-      notes: {
-        contains: 'Duration:',
-      },
-    },
-    select: {
-      id: true,
-      notes: true,
-      callDuration: true,
-    },
+    where: { OR: [{ callDuration: null }, { callDuration: 0 }], notes: { contains: 'Duration:' } },
+    select: { id: true, notes: true },
   });
-
-  let durationBackfillCount = 0;
+  let noteDurationCount = 0;
   for (const log of logsWithNullDuration) {
     const match = (log.notes || '').match(/Duration:\s*(\d+)/i);
-    if (!match) continue;
-    const parsedDur = parseInt(match[1], 10);
-    if (isNaN(parsedDur) || parsedDur <= 0) continue;
-
-    await prisma.callLog.update({
-      where: { id: log.id },
-      data: { callDuration: parsedDur },
-    });
-    durationBackfillCount++;
+    if (match && parseInt(match[1], 10) > 0) {
+      await prisma.callLog.update({ where: { id: log.id }, data: { callDuration: parseInt(match[1], 10) } });
+      noteDurationCount++;
+    }
   }
-  console.log(`✅ Backfilled callDuration for ${durationBackfillCount} records from notes`);
+  console.log(`✅ Fixed ${noteDurationCount} durations pulled from text notes`);
 
-  // ── FIX 4: Any record with a real recording should be marked connected ──
-  // Re-check: there may be records that still have 0 callDuration after FIX 3
-  // and are connected_positive purely because of the recording — that's fine.
-  // But mark any remaining not_connected with recordings as connected.
-  console.log('\n🎉 Done! All old bad call statuses have been corrected.');
-
-  // ── Print summary ──
-  const finalStats = await prisma.callLog.groupBy({
-    by: ['callStatus'],
-    _count: true,
+  console.log('\n🔍 Scanning for calls with missing durations but valid audio files...');
+  
+  const recordsNeedingAudioFetch = await prisma.callLog.findMany({
+    where: { 
+      OR: [{ callDuration: null }, { callDuration: 0 }],
+      notes: { contains: 'Recording:' }
+    },
+    select: { id: true, notes: true }
   });
-  console.log('\n📊 Final DB Status Counts:');
-  finalStats.forEach(s => console.log(`   ${s.callStatus}: ${s._count}`));
 
-  // ── Print duration coverage ──
-  const withDuration = await prisma.callLog.count({ where: { callDuration: { gt: 0 } } });
-  const totalLogs = await prisma.callLog.count({ where: { deletedAt: null } });
-  console.log(`\n📈 Duration Coverage: ${withDuration} / ${totalLogs} records have a duration stored in DB`);
+  let audioFetchSuccess = 0;
+  
+  for (const log of recordsNeedingAudioFetch) {
+    const match = (log.notes || '').match(/Recording:\s*([^\s|]+)/i);
+    if (!match) continue;
+    
+    const val = match[1].trim();
+    if (val.toLowerCase() === 'none' || val.toLowerCase() === 'n/a' || val === '') continue;
+
+    const cleanPath = val.startsWith('/') ? val.slice(1) : val;
+    const fullAudioUrl = cleanPath.startsWith('http') ? cleanPath : `${MCUBE_RECORDING_BASE_URL}/${cleanPath}`;
+
+    try {
+      // 1. Fetch as stream via Axios
+      const response = await axios({
+          method: 'get',
+          url: fullAudioUrl,
+          responseType: 'stream',
+      });
+
+      // 2. Parse stream
+      const metadata = await mm.parseStream(response.data, { mimeType: 'audio/wav' }, { duration: true, skipCovers: true });
+      
+      if (metadata.format.duration) {
+        const durationSecs = Math.round(metadata.format.duration);
+        await prisma.callLog.update({
+          where: { id: log.id },
+          data: { callDuration: durationSecs }
+        });
+        audioFetchSuccess++;
+        process.stdout.write(`\r✅ Fetched audio duration for ${audioFetchSuccess} old records...`);
+      }
+
+      // 3. Destroy stream
+      if (response.data && typeof response.data.destroy === 'function') {
+        response.data.destroy();
+      }
+    } catch (err: any) {
+      // Ignore errors for 404s (if MCUBE deleted old files)
+    }
+    
+    // Tiny delay to prevent spamming MCUBE's servers during the loop
+    await delay(500); 
+  }
+  console.log(`\n✅ Finished fetching audio durations from MCUBE servers.`);
+
+  console.log('\n🎉 Done! Database is completely patched.');
 }
 
 main()

@@ -4,6 +4,7 @@ import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { addHours } from 'date-fns';
 import axios from 'axios';
+import * as mm from 'music-metadata';
 
 // ─────────────────────────────────────────────
 // VALIDATION SCHEMA
@@ -18,6 +19,41 @@ const createCallLogSchema = z.object({
 });
 
 
+// ─────────────────────────────────────────────
+// HELPER: FETCH AUDIO DURATION IN BACKGROUND
+// ─────────────────────────────────────────────
+async function fetchAndUpdateDuration(callLogId: string, audioUrl: string) {
+  try {
+    console.log(`⏳ Background: Fetching duration from ${audioUrl}`);
+    
+    // 1. Fetch the file as a readable stream using Axios
+    const response = await axios({
+      method: 'get',
+      url: audioUrl,
+      responseType: 'stream',
+    });
+
+    // 2. Parse the stream directly (music-metadata stops reading once it finds the duration)
+    const metadata = await mm.parseStream(response.data, { mimeType: 'audio/wav' }, { duration: true, skipCovers: true });
+    
+    if (metadata.format.duration) {
+      const durationSecs = Math.round(metadata.format.duration);
+      await prisma.callLog.update({
+        where: { id: callLogId },
+        data: { callDuration: durationSecs }
+      });
+      console.log(`✅ Background Success: Set duration to ${durationSecs}s for call ${callLogId}`);
+    }
+    
+    // 3. Destroy the stream safely to free up server memory
+    if (response.data && typeof response.data.destroy === 'function') {
+      response.data.destroy();
+    }
+
+  } catch (error: any) {
+    console.error(`❌ Background duration fetch failed for ${callLogId}:`, error.message);
+  }
+}
 // ─────────────────────────────────────────────
 // FUNCTION 1: INITIATE OUTBOUND CALL VIA MCUBE
 // POST /api/call-logs/initiate-mcube
@@ -242,17 +278,23 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
       console.log(`🆕 New lead created: ${lead.name}`);
     }
  
-    // ─────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────
     // 4. UPSERT CALL LOG (Create strictly ONE record per Call ID)
     // ─────────────────────────────────────────────────────────────────────
+    const MCUBE_RECORDING_BASE_URL = 'https://recordings.mcube.com';
+    let fullAudioUrl: string | null = null;
+    
+    if (hasRecording) {
+      const cleanPath = filename.startsWith('/') ? filename.slice(1) : filename;
+      fullAudioUrl = `${MCUBE_RECORDING_BASE_URL}/${cleanPath}`;
+    }
+
     if (callid && callid !== 'N/A' && callid !== '') {
       const existingLog = await prisma.callLog.findFirst({
         where: { notes: { contains: `Call ID: ${callid}` } }
       });
  
       if (existingLog) {
-        // Just update the EXACT ONE existing log
-        // Prefer to keep existing duration if new one is null (webhook sometimes fires twice)
         const updatedDuration = durationInSeconds ?? existingLog.callDuration;
         await prisma.callLog.update({
           where: { id: existingLog.id },
@@ -262,14 +304,20 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
             notes: baseNotes,
           }
         });
-        console.log(`✅ Upserted existing log for Call ID: ${callid} → status: ${callStatus}, duration: ${updatedDuration}s`);
+        
+        // 👇 NEW: Trigger background fetch if duration is still 0/null but audio exists
+        if ((!updatedDuration || updatedDuration <= 0) && fullAudioUrl) {
+          fetchAndUpdateDuration(existingLog.id, fullAudioUrl);
+        }
+
+        console.log(`✅ Upserted existing log for Call ID: ${callid}`);
         return res.status(200).send('OK: Call log updated (upsert by callid)');
       }
     }
  
     // If no existing log exists, create EXACTLY ONE new log
     if (targetAgentId) {
-      await prisma.callLog.create({
+      const newLog = await prisma.callLog.create({
         data: {
           leadId: lead.id,
           agentId: targetAgentId,
@@ -280,13 +328,16 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
         }
       });
 
-      // Update lead last contacted time
+      // 👇 NEW: Trigger background fetch if duration is 0/null but audio exists
+      if ((!durationInSeconds || durationInSeconds <= 0) && fullAudioUrl) {
+        fetchAndUpdateDuration(newLog.id, fullAudioUrl);
+      }
+
       await prisma.lead.update({
         where: { id: lead.id },
         data: { lastContactedAt: new Date() }
       });
 
-      // Create a follow up task if needed
       const taskNote = isConnected
         ? `📞 Call logged for ${lead.name} (${cleanLeadPhone}). Please follow up when free.`
         : `📵 Missed call from ${lead.name} (${cleanLeadPhone}). Please call them back.`;
@@ -305,6 +356,7 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
     }
  
     return res.status(200).send('OK: Call processed successfully');
+
  
   } catch (error) {
     console.error('❌ MCUBE Webhook Error:', error);
