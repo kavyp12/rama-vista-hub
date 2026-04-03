@@ -17,7 +17,7 @@ function chunkArray<T>(array: T[], size: number): T[][] {
 }
 
 async function main() {
-  console.log('🔄 ULTIMATE REBUILD: Recalculating ALL MCUBE Call Logs from scratch...\n');
+  console.log('🔄 ULTIMATE REBUILD V2: Recalculating ALL MCUBE Call Logs based STRICTLY on Duration...\n');
 
   // Grab EVERY call log that came from MCUBE
   const allMcubeLogs = await prisma.callLog.findMany({
@@ -61,9 +61,9 @@ async function main() {
         }
       }
 
-      // 2. Fetch Absolute True Duration from MCUBE Server
+      // 2. Fetch Absolute True Duration from MCUBE Server (if we don't already know it)
       let fetchedDuration = null;
-      if (hasRecording) {
+      if (hasRecording && (log.callDuration === null || log.callDuration === 0)) {
         try {
           const response = await axios({
               method: 'get',
@@ -88,17 +88,19 @@ async function main() {
 
       // 3. Determine the 100% correct Final Truth
       const finalDuration = fetchedDuration ?? extractedDuration ?? log.callDuration ?? null;
-      const isConnected = hasRecording || (finalDuration !== null && finalDuration > 0);
+      
+      // ✨ NEW STRICT RULE: Recordings DO NOT matter. ONLY duration > 0 makes it connected.
+      const isConnected = (finalDuration !== null && finalDuration > 0);
       
       let finalStatus = log.callStatus;
       
       if (isConnected) {
-        // If it was connected, make sure it's not marked as missed
+        // If it actually has talk time, make sure it's connected
         if (finalStatus === 'not_connected') {
           finalStatus = 'connected_positive';
         }
       } else {
-        // If there is NO duration and NO recording, it MUST be a missed call
+        // If duration is 0, it MUST be a missed call, even if there is an IVR recording
         if (finalStatus === 'connected_positive') {
           finalStatus = 'not_connected';
         }
@@ -129,12 +131,12 @@ async function main() {
     }));
 
     processedCount += chunk.length;
-    process.stdout.write(`\r⚡ Processed ${processedCount}/${allMcubeLogs.length} | Status Fixed: ${statusChangedCount} | Durations Fixed: ${durationUpdatedCount}`);
+    process.stdout.write(`\r⚡ Processed ${processedCount}/${allMcubeLogs.length} | Status Demoted/Fixed: ${statusChangedCount} | Durations Fixed: ${durationUpdatedCount}`);
     
     await delay(300); 
   }
   
-  console.log(`\n\n✅ 100% COMPLETE. Every single MCUBE call log has been forcefully rebuilt to match the new rules.`);
+  console.log(`\n\n✅ 100% COMPLETE. Old database records have been perfectly aligned with the strict duration rule.`);
 }
 
 main()

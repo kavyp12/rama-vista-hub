@@ -17,43 +17,71 @@ const createCallLogSchema = z.object({
   callbackScheduledAt: z.string().optional().nullable(),
   rejectionReason: z.string().optional().nullable()
 });
-
+// Helper function to wait
+const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 // ─────────────────────────────────────────────
 // HELPER: FETCH AUDIO DURATION IN BACKGROUND
 // ─────────────────────────────────────────────
 async function fetchAndUpdateDuration(callLogId: string, audioUrl: string) {
-  try {
-    console.log(`⏳ Background: Fetching duration from ${audioUrl}`);
-    
-    // 1. Fetch the file as a readable stream using Axios
-    const response = await axios({
-      method: 'get',
-      url: audioUrl,
-      responseType: 'stream',
-    });
-
-    // 2. Parse the stream directly (music-metadata stops reading once it finds the duration)
-    const metadata = await mm.parseStream(response.data, { mimeType: 'audio/wav' }, { duration: true, skipCovers: true });
-    
-    if (metadata.format.duration) {
-      const durationSecs = Math.round(metadata.format.duration);
-      await prisma.callLog.update({
-        where: { id: callLogId },
-        data: { callDuration: durationSecs }
+  // Your smart schedule: Try 1 (Wait 30s), Try 2 (Wait 60s), Try 3 (Wait 60s)
+  const waitTimes = [30000, 60000, 60000]; 
+  
+  for (let i = 0; i < waitTimes.length; i++) {
+    try {
+      const waitSecs = waitTimes[i] / 1000;
+      console.log(`⏳ Background (Attempt ${i + 1}/3): Waiting ${waitSecs}s for MCUBE...`);
+      
+      // Wait for the scheduled amount of time
+      await delay(waitTimes[i]); 
+      
+      console.log(`⏳ Background (Attempt ${i + 1}/3): Checking URL...`);
+      
+      const response = await axios({
+        method: 'get',
+        url: audioUrl,
+        responseType: 'stream',
+        timeout: 10000
       });
-      console.log(`✅ Background Success: Set duration to ${durationSecs}s for call ${callLogId}`);
-    }
-    
-    // 3. Destroy the stream safely to free up server memory
-    if (response.data && typeof response.data.destroy === 'function') {
-      response.data.destroy();
-    }
 
-  } catch (error: any) {
-    console.error(`❌ Background duration fetch failed for ${callLogId}:`, error.message);
+      const metadata = await mm.parseStream(response.data, { mimeType: 'audio/wav' }, { duration: true, skipCovers: true });
+      
+      if (metadata.format.duration) {
+        const durationSecs = Math.round(metadata.format.duration);
+        
+        const updateData: any = { callDuration: durationSecs };
+        
+        // ✨ Force status to connected if we found a valid duration
+        if (durationSecs > 0) {
+          updateData.callStatus = 'connected_positive';
+        }
+
+        await prisma.callLog.update({
+          where: { id: callLogId },
+          data: updateData
+        });
+        
+        console.log(`✅ Background Success on Attempt ${i + 1}! Set duration to ${durationSecs}s for call ${callLogId}`);
+        
+        if (response.data && typeof response.data.destroy === 'function') {
+          response.data.destroy();
+        }
+        
+        // SUCCESS! We found the duration, so we use 'return' to completely stop checking and exit the loop.
+        return; 
+      }
+      
+    } catch (error: any) {
+      console.error(`❌ Attempt ${i + 1} failed for ${callLogId}. MCUBE file still not ready.`);
+      // It failed, but because it's in a loop, it will just loop around to the next wait time!
+    }
   }
+  
+  // If the loop finishes all 3 tries and hasn't 'returned' yet, it means MCUBE never saved the file.
+  console.log(`🛑 Background Worker gave up on ${callLogId}. File never appeared on MCUBE after 3 tries.`);
 }
+
+
 // ─────────────────────────────────────────────
 // FUNCTION 1: INITIATE OUTBOUND CALL VIA MCUBE
 // POST /api/call-logs/initiate-mcube
@@ -211,6 +239,10 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
     // 2. BULLETPROOF CONNECTION STATUS
     // If there is a recording file, OR duration > 0, the call was connected.
     // ─────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
+    // 2. BULLETPROOF CONNECTION STATUS
+    // If duration > 0, the call was connected.
+    // ─────────────────────────────────────────────────────────────────────
     const rawDialstatus = String(dialstatus || '').toUpperCase().trim();
     const rawStatus = String(status || '').toLowerCase().trim();
     const hasRecording = filename && filename !== '' && filename.toLowerCase() !== 'none';
@@ -222,7 +254,7 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
       rawStatus.includes('complete') ||
       rawStatus.includes('connected') ||
       rawStatus.includes('answered') ||
-      hasRecording || 
+      // ❌ Removed 'hasRecording' check from here!
       (durationInSeconds !== null && durationInSeconds > 0);
  
     const callStatus: 'connected_positive' | 'not_connected' = isConnected ? 'connected_positive' : 'not_connected';

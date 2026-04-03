@@ -212,7 +212,7 @@ export default function Telecalling() {
   // REPLACE THIS:
   // Fetch agents list for filter dropdown (Admins and Sales Agents)
   useEffect(() => {
-    if (user?.role !== 'admin' && user?.role !== 'sales_manager' && user?.role !== 'superadmin') return;
+    if (user?.role !== 'admin' && user?.role !== 'sales_manager') return;
 
     // Fetch all users, then filter to only those who take calls
     fetch(`${API_URL}/users`, {
@@ -222,7 +222,7 @@ export default function Telecalling() {
       .then(data => {
         if (Array.isArray(data)) {
           // Keep only admins and sales_agents so IVR handlers appear in the dropdown
-          const eligibleAgents = data.filter(u => u.role === 'admin' || u.role === 'sales_agent' || u.role === 'superadmin');
+          const eligibleAgents = data.filter(u => u.role === 'admin' || u.role === 'sales_agent');
           setAgents(eligibleAgents);
         } else {
           setAgents([]);
@@ -899,30 +899,8 @@ export default function Telecalling() {
                                     <span className="text-xs text-muted-foreground">—</span>
                                   )}
                                 </TableCell>
-                                <TableCell>
-                                  {(() => {
-                                    // 1. Leave new web leads as "Pending"
-                                    if (row.isLeadRow) return <StatusBadge status={row.callStatus} />;
-
-                                    // 2. Get the exact duration number
-                                    const noteDur = extractDurationFromNotes(row.notes);
-                                    const durSecs = (row.duration && row.duration > 0) ? row.duration : noteDur;
-                                    
-                                    // 3. YOUR NEW RULE: Any duration > 0 is Connected. Blank/0 is Missed.
-                                    let effectiveStatus = row.callStatus;
-                                    
-                                    if (durSecs && durSecs > 0) {
-                                      // If it has duration, ensure it shows as Connected
-                                      if (effectiveStatus === 'not_connected') {
-                                        effectiveStatus = 'connected_positive'; 
-                                      }
-                                    } else {
-                                      // If duration is 0, empty, or unreadable, FORCE it to show as Missed
-                                      effectiveStatus = 'not_connected';
-                                    }
-
-                                    return <StatusBadge status={effectiveStatus} />;
-                                  })()}
+                             <TableCell>
+                                  <StatusBadge status={row.isLeadRow ? 'pending' : row.callStatus} />
                                 </TableCell>
 
 
