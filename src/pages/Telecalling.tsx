@@ -276,7 +276,11 @@ export default function Telecalling() {
         if (filters.agentId !== 'all') query.append('agentId', filters.agentId);
         if (filters.minDuration !== 'all') query.append('minDuration', filters.minDuration);
         if (filters.source !== 'all') query.append('source', filters.source);
-        if (filters.direction !== 'all') query.append('direction', filters.direction);
+        // For missed tab: always show ALL directions (inbound + outbound missed calls)
+        // For other tabs: respect the direction filter
+        if (activeView !== 'missed' && filters.direction !== 'all') query.append('direction', filters.direction);
+        // Always include admin/IVR calls in the data
+        query.append('includeAdmin', 'true');
         // Always sort by date descending — newest call first
         query.append('sortBy', 'callDate');
         query.append('sortOrder', 'desc');
@@ -323,6 +327,8 @@ export default function Telecalling() {
       if (filters.dateTo) query.append('dateTo', filters.dateTo);
       if (filters.agentId !== 'all') query.append('agentId', filters.agentId);
       if (filters.direction !== 'all') query.append('direction', filters.direction);
+      // Always include admin/IVR calls in stats
+      query.append('includeAdmin', 'true');
 
       if (activeView === 'inbound' || activeView === 'outbound') {
         query.set('direction', activeView);
@@ -556,6 +562,11 @@ export default function Telecalling() {
                       {tableData.length} records
                     </span>
                   )}
+                  {activeView === 'missed' && (
+                    <span className="text-xs text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full font-medium">
+                      Incoming + Outgoing
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   {/* ─── FILTER BUTTON + FLOATING POPOVER ─── */}
@@ -678,7 +689,8 @@ export default function Telecalling() {
                               </Select>
                             </div>
 
-                            {/* Call Direction */}
+                            {/* Call Direction — hidden for Missed tab (always shows all directions) */}
+                            {activeView !== 'missed' && (
                             <div className="space-y-1.5">
                               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Call Direction</label>
                               <div className="grid grid-cols-3 gap-1.5">
@@ -702,6 +714,7 @@ export default function Telecalling() {
                                 })}
                               </div>
                             </div>
+                            )}
 
                             {/* Agent (admin only) */}
                             {agents.length > 0 && (
@@ -1276,6 +1289,8 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
       if (filters.dateTo) query.append('dateTo', filters.dateTo);
       if (filters.agentId !== 'all') query.append('agentId', filters.agentId);
       if (filters.direction !== 'all') query.append('direction', filters.direction);
+      // Include admin/IVR calls for complete report data
+      query.append('includeAdmin', 'true');
 
       const res = await fetch(`${API_URL}/call-logs?${query}&take=1000`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -1824,6 +1839,8 @@ function AnalyticsView({ token, filters, setFilters, agents, onRefresh, isRefres
       if (filters.dateTo) query.append('dateTo', filters.dateTo);
       if (filters.agentId !== 'all') query.append('agentId', filters.agentId);
       if (filters.direction !== 'all') query.append('direction', filters.direction);
+      // Include admin/IVR calls for complete analytics
+      query.append('includeAdmin', 'true');
 
       const res = await fetch(`${API_URL}/call-logs?${query}&take=1000`, {
         headers: { Authorization: `Bearer ${token}` }
