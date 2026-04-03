@@ -100,20 +100,16 @@ export default function Leads() {
     dateFilter !== 'all'
   ].filter(Boolean).length;
 
-  useEffect(() => {
-    if (token) {
-      fetchData();
-      if (canAssignLeads) fetchAgents();
-    }
-  }, [token, canAssignLeads]);
 
   // CACHE CONSTANTS
+ // CACHE CONSTANTS
  // CACHE CONSTANTS
   const CACHE_KEY = 'crm_leads_data';
   const CACHE_TIME_KEY = 'crm_leads_timestamp';
   const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-  async function fetchData() {
+  // 👇 1. Wrap the entire function in useCallback
+  const fetchData = useCallback(async () => {
     console.log('[Leads Manager] 🔍 Checking local cache...');
     
     // 1. INSTANT LOAD FROM CACHE
@@ -123,20 +119,16 @@ export default function Leads() {
     if (cachedData && cacheTimestamp) {
       const isCacheValid = (Date.now() - parseInt(cacheTimestamp)) < CACHE_DURATION_MS;
       if (isCacheValid) {
-        console.log('[Leads Manager] ✅ Valid cache found! Instantly rendering leads from memory.');
         setLeads(JSON.parse(cachedData));
-        setLoading(false); // Instantly remove loader
+        setLoading(false); 
       } else {
-        console.log('[Leads Manager] ⏳ Cache exists but is expired (>24 hours). Waiting for network...');
         setLoading(true);
       }
     } else {
-      console.log('[Leads Manager] ❌ No cache found (First visit). Waiting for network...');
       setLoading(true); 
     }
 
     // 2. BACKGROUND REVALIDATION
-    console.log('[Leads Manager] 🔄 Starting silent background sync with server...');
     try {
       const res = await fetch(`${API_URL}/leads`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -144,10 +136,7 @@ export default function Leads() {
       const data = await res.json();
       
       if (Array.isArray(data)) {
-        console.log(`[Leads Manager] 📥 Downloaded ${data.length} fresh leads from database.`);
-        setLeads(data); // Silently update UI 
-        
-        // Save new data to cache
+        setLeads(data); 
         localStorage.setItem(CACHE_KEY, JSON.stringify(data));
         localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
         console.log('[Leads Manager] 💾 Cache updated successfully.');
@@ -160,7 +149,16 @@ export default function Leads() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [token]); // 👇 2. Add token here to the dependency array
+
+
+  // 3. NOW, use the effect to call it (PASTE IT HERE!)
+  useEffect(() => {
+    if (token) {
+      fetchData();
+      if (canAssignLeads) fetchAgents();
+    }
+  }, [token, canAssignLeads, fetchData]);
   
   async function fetchAgents() {
     try {
@@ -678,10 +676,9 @@ export default function Leads() {
                 {/* CRITICAL: We slice the array here so we only render 50 at a time */}
                 {filteredLeads.slice(0, visibleCount).map((lead) => (
                   <LeadCard
-                    key={lead.id}
-                    lead={lead}
-                    profiles={agents}
-                    onUpdate={fetchData} // This will trigger the silent background sync
+                key={lead.id}
+                lead={lead}
+                onUpdate={fetchData} // This will trigger the silent background sync
                     onEdit={(l) => { setLeadToEdit(l); setIsEditDialogOpen(true); }}
                     selected={selectedLeads.has(lead.id)}
                     onSelect={canAssignLeads ? () => toggleSelect(lead.id) : undefined}
