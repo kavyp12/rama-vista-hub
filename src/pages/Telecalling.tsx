@@ -50,6 +50,8 @@ import {
   Play,
   Mic,
   ArrowDownLeft,
+  ChevronDown, // 👈 ADD THIS
+  ChevronUp,   // 👈 ADD THIS
   Edit, // 👈 ADD THIS RIGHT HERE
 } from 'lucide-react';
 import { format, parseISO, subDays, startOfWeek, endOfWeek } from 'date-fns';
@@ -165,6 +167,8 @@ export default function Telecalling() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
+
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);  
 
 
   const [isEditNameOpen, setIsEditNameOpen] = useState(false);
@@ -495,45 +499,57 @@ export default function Telecalling() {
       <div className="flex flex-col lg:flex-row h-[calc(100vh-110px)] md:h-[calc(100vh-140px)] gap-4 lg:gap-6">
 
         {/* ─── SIDEBAR ─── */}
-        <Card className="w-full lg:w-64 flex-shrink-0 h-auto lg:h-full overflow-hidden flex flex-col border-r bg-card">
-          <CardHeader className="pb-2 pt-4 px-4">
-            <CardTitle className="text-sm uppercase text-muted-foreground font-bold tracking-wider">Navigation</CardTitle>
-          </CardHeader>
-          <ScrollArea className="flex-1 max-h-[250px] lg:max-h-none">
-            <div className="p-2 space-y-1">
-              {menuItems.map((item, idx) =>
-                item.type === 'separator' ? (
-                  <Separator key={idx} className="my-2" />
-                ) : (
-                  <Button
-                    key={item.id}
-                    variant={activeView === item.id ? 'secondary' : 'ghost'}
-                    className={`w-full justify-start gap-3 h-10 ${item.className || ''} ${activeView === item.id ? 'bg-primary/10 text-primary font-semibold' : ''}`}
-                    onClick={() => setActiveView(item.id || 'reports')}
-                  >
-                    {item.icon && <item.icon className="h-4 w-4" />}
-                    <span className="truncate">{item.label}</span>
-                    {stats ? (() => {
-                      let count = 0;
-                      let badgeClass = 'bg-primary/10 text-primary';
-                      if (item.id === 'all') count = stats.totalCalls;
-                      else if (item.id === 'missed') { count = stats.notAnswered; badgeClass = 'bg-red-100 text-red-600'; }
-                      else if (item.id === 'qualified') count = stats.positive;
-                      else if (item.id === 'unqualified') count = stats.negative;
-                      else if (item.id === 'new_leads') { count = stats.newLeads; badgeClass = 'bg-blue-100 text-blue-600'; }
-                      else if (item.id === 'inbound') { count = stats.inboundTotal || 0; badgeClass = 'bg-green-100 text-green-700'; }
-                      else if (item.id === 'outbound') { count = stats.outboundTotal || 0; badgeClass = 'bg-indigo-100 text-indigo-700'; }
-                      if (count > 0) return (
-                        <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-bold ${badgeClass}`}>{count}</span>
-                      );
-                      return null;
-                    })() : null}
-                  </Button>
-                )
-              )}
-            </div>
-          </ScrollArea>
-        </Card>
+<Card className="w-full lg:w-64 flex-shrink-0 h-auto lg:h-full overflow-hidden flex flex-col border-r bg-card lg:rounded-none lg:border-y-0 lg:border-l-0">
+  <CardHeader 
+    className="pb-2 pt-4 px-4 flex flex-row items-center justify-between cursor-pointer lg:cursor-default"
+    onClick={() => setIsMobileNavOpen(!isMobileNavOpen)}
+  >
+    <CardTitle className="text-sm uppercase text-muted-foreground font-bold tracking-wider">Navigation</CardTitle>
+    <Button variant="ghost" size="icon" className="h-6 w-6 lg:hidden">
+      {isMobileNavOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+    </Button>
+  </CardHeader>
+  
+  <div className={`flex-1 overflow-hidden flex-col ${isMobileNavOpen ? 'flex' : 'hidden lg:flex'}`}>
+    <ScrollArea className="flex-1 max-h-[300px] lg:max-h-none">
+      <div className="p-2 space-y-1">
+        {menuItems.map((item, idx) =>
+          item.type === 'separator' ? (
+            <Separator key={idx} className="my-2" />
+          ) : (
+            <Button
+              key={item.id}
+              variant={activeView === item.id ? 'secondary' : 'ghost'}
+              className={`w-full justify-start gap-3 h-10 ${item.className || ''} ${activeView === item.id ? 'bg-primary/10 text-primary font-semibold' : ''}`}
+              onClick={() => {
+                setActiveView(item.id || 'reports');
+                setIsMobileNavOpen(false); // 👈 Auto-close on mobile after selecting
+              }}
+            >
+              {item.icon && <item.icon className="h-4 w-4" />}
+              <span className="truncate">{item.label}</span>
+              {stats ? (() => {
+                let count = 0;
+                let badgeClass = 'bg-primary/10 text-primary';
+                if (item.id === 'all') count = stats.totalCalls;
+                else if (item.id === 'missed') { count = stats.notAnswered; badgeClass = 'bg-red-100 text-red-600'; }
+                else if (item.id === 'qualified') count = stats.positive;
+                else if (item.id === 'unqualified') count = stats.negative;
+                else if (item.id === 'new_leads') { count = stats.newLeads; badgeClass = 'bg-blue-100 text-blue-600'; }
+                else if (item.id === 'inbound') { count = stats.inboundTotal || 0; badgeClass = 'bg-green-100 text-green-700'; }
+                else if (item.id === 'outbound') { count = stats.outboundTotal || 0; badgeClass = 'bg-indigo-100 text-indigo-700'; }
+                if (count > 0) return (
+                  <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-bold ${badgeClass}`}>{count}</span>
+                );
+                return null;
+              })() : null}
+            </Button>
+          )
+        )}
+      </div>
+    </ScrollArea>
+  </div>
+</Card>
 
         {/* ─── MAIN CONTENT ─── */}
         <div className="flex-1 h-full flex flex-col min-w-0">
@@ -588,8 +604,10 @@ export default function Telecalling() {
 
                     {showFilters && (
                       <>
-                        <div className="fixed inset-0 z-40" onClick={() => setShowFilters(false)} />
-                        <div className="absolute right-0 top-[calc(100%+8px)] z-50 w-[340px] rounded-xl border bg-background shadow-2xl overflow-hidden">
+                      <div className="fixed inset-0 z-40 bg-background/50 sm:bg-transparent backdrop-blur-sm sm:backdrop-blur-none" onClick={() => setShowFilters(false)} />
+          
+          {/* 👈 CRITICAL FIX: Changed classes here to make it fixed on mobile, absolute on desktop */}
+          <div className="fixed sm:absolute inset-x-4 top-32 sm:inset-auto sm:right-0 sm:top-[calc(100%+8px)] z-50 sm:w-[340px] rounded-xl border bg-background shadow-2xl overflow-hidden">
 
                           {/* ── HEADER ── */}
                           <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
@@ -1013,10 +1031,10 @@ export default function Telecalling() {
       </div>
 
       {/* ─── VIEW DETAILS DIALOG ─── */}
-      {/* ─── VIEW DETAILS DIALOG ─── */}
       <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
+  {/* 👈 CRITICAL FIX: Added max-h-[85vh] and overflow-y-auto */}
+  <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
+    <DialogHeader>
             <DialogTitle>Call Details</DialogTitle>
           </DialogHeader>
           {selectedItem && (

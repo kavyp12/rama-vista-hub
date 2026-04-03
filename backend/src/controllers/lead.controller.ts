@@ -96,6 +96,7 @@ export const getLeads = async (req: AuthRequest, res: Response) => {
 
     const leads = await prisma.lead.findMany({
       where,
+      take: 200, // <-- CRITICAL FIX: Limits to 200 most recent to prevent PC/Mobile lag
       include: {
         assignedTo: {
           select: { id: true, fullName: true, email: true, avatarUrl: true }
@@ -115,11 +116,12 @@ export const getLeads = async (req: AuthRequest, res: Response) => {
             project: { select: { name: true, location: true } }
           },
           orderBy: { scheduledAt: 'desc' }
-          // No take limit — Pipeline needs ALL visits to group per-project correctly
+          // No take limit — kept intact for your Pipeline grouping
         },
         callLogs: {
           select: { id: true, callStatus: true, callDate: true, notes: true, type: true },
           orderBy: { callDate: 'desc' },
+          take: 1 // <-- MASSIVE OPTIMIZATION: Only sends the 1 most recent call log, saving huge amounts of data
         },
         propertyRecommendations: {
           select: { propertyId: true }
@@ -128,13 +130,12 @@ export const getLeads = async (req: AuthRequest, res: Response) => {
       orderBy: { createdAt: 'desc' }
     });
 
-    return res.json(leads);
+    return res.json(leads); // Matches frontend expectation perfectly
   } catch (error) {
     console.error('Get Leads Error:', error);
     return res.status(500).json({ error: 'Failed to fetch leads' });
   }
 };
-
 export const getLead = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
