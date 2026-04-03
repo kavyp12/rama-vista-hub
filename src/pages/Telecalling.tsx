@@ -212,7 +212,7 @@ export default function Telecalling() {
   // REPLACE THIS:
   // Fetch agents list for filter dropdown (Admins and Sales Agents)
   useEffect(() => {
-    if (user?.role !== 'admin' && user?.role !== 'sales_manager') return;
+    if (user?.role !== 'admin' && user?.role !== 'sales_manager' && user?.role !== 'superadmin') return;
 
     // Fetch all users, then filter to only those who take calls
     fetch(`${API_URL}/users`, {
@@ -222,7 +222,7 @@ export default function Telecalling() {
       .then(data => {
         if (Array.isArray(data)) {
           // Keep only admins and sales_agents so IVR handlers appear in the dropdown
-          const eligibleAgents = data.filter(u => u.role === 'admin' || u.role === 'sales_agent');
+          const eligibleAgents = data.filter(u => u.role === 'admin' || u.role === 'sales_agent' || u.role === 'superadmin');
           setAgents(eligibleAgents);
         } else {
           setAgents([]);

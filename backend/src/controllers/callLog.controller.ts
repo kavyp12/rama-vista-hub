@@ -537,7 +537,7 @@ export const createCallLog = async (req: AuthRequest, res: Response) => {
 
 export const getCallLogs = async (req: AuthRequest, res: Response) => {
   try {
-    const { leadId, view, search, date, dateFrom, dateTo, callStatus, agentId, minDuration, direction } = req.query;
+    const { leadId, view, search, date, dateFrom, dateTo, callStatus, agentId, minDuration, direction, take } = req.query;
 
     const where: any = { deletedAt: null };
     if (leadId) where.leadId = leadId;
@@ -577,31 +577,32 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
     }
 
     // ── Agent filter ──
+    // sales_agent: only their own calls
+    // admin / superadmin / sales_manager: all calls (or filtered by agentId if specified)
     if (req.user!.role === 'sales_agent') {
       where.agentId = req.user!.userId;
     } else if (agentId && agentId !== 'all') {
       where.agentId = agentId as string;
     }
+    // superadmin / admin with no agentId filter = no restriction (sees everything)
 
     // ── Minimum call duration filter ──
     if (minDuration && minDuration !== 'all') {
       where.callDuration = { gte: parseInt(minDuration as string, 10) };
     }
 
-    // ── Direction Filter (from Dropdown) ──
-    if (direction && direction !== 'all') {
-      where.notes = { contains: direction === 'inbound' ? 'Inbound' : 'Outbound', mode: 'insensitive' };
-    }
-
-    // ── View presets ──
+    // ── View presets (set BEFORE direction filter so direction can override for non-direction views) ──
     switch (view) {
-      case 'missed': where.callStatus = 'not_connected'; break;
+      case 'missed':
+        // Show ALL missed calls — both inbound and outbound — never restrict direction
+        where.callStatus = 'not_connected';
+        break;
       case 'attended': where.callStatus = { in: ['connected_positive', 'connected_callback', 'not_interested'] }; break;
       case 'qualified': where.callStatus = 'connected_positive'; break;
       case 'unqualified': where.callStatus = 'not_interested'; break;
       case 'archive': where.isArchived = true; break;
-      case 'inbound': where.notes = { contains: 'Inbound', mode: 'insensitive' }; break; // New
-      case 'outbound': where.notes = { contains: 'Outbound', mode: 'insensitive' }; break; // New
+      case 'inbound': where.notes = { contains: 'Inbound', mode: 'insensitive' }; break;
+      case 'outbound': where.notes = { contains: 'Outbound', mode: 'insensitive' }; break;
       case 'active': {
         if (!date && !dateFrom) {
           const startOfDay = new Date();
@@ -617,6 +618,12 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
       default: break;
     }
 
+    // ── Direction Filter (applied AFTER view presets) ──
+    // Skip for views that already handle direction (inbound/outbound/missed)
+    if (direction && direction !== 'all' && view !== 'inbound' && view !== 'outbound' && view !== 'missed') {
+      where.notes = { contains: direction === 'inbound' ? 'Inbound' : 'Outbound', mode: 'insensitive' };
+    }
+
     const callLogs = await prisma.callLog.findMany({
       where,
       include: {
@@ -624,7 +631,7 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
         agent: { select: { id: true, fullName: true } }
       },
       orderBy: { callDate: 'desc' },
-      take: 500
+      take: take ? Math.min(parseInt(take as string, 10), 2000) : 500
     });
 
     return res.json(callLogs);
@@ -648,6 +655,8 @@ export const completeFollowUpTask = async (req: AuthRequest, res: Response) => {
 
 export const getCallStats = async (req: AuthRequest, res: Response) => {
   try {
+    // sales_agent is always scoped to their own data
+    // admin, superadmin, sales_manager can see all (or filter by agentId)
     const agentId =
       req.user!.role === 'sales_agent'
         ? req.user!.userId
