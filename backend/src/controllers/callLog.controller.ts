@@ -320,8 +320,15 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
     let fullAudioUrl: string | null = null;
     
     if (hasRecording) {
-      const cleanPath = filename.startsWith('/') ? filename.slice(1) : filename;
-      fullAudioUrl = `${MCUBE_RECORDING_BASE_URL}/${cleanPath}`;
+      let cleanPath = filename.trim();
+      // ✨ BULLETPROOF CHECK: If MCUBE already includes 'http', use it exactly as-is!
+      if (cleanPath.startsWith('http://') || cleanPath.startsWith('https://')) {
+        fullAudioUrl = cleanPath;
+      } else {
+        // Otherwise, add the base URL
+        if (cleanPath.startsWith('/')) cleanPath = cleanPath.slice(1);
+        fullAudioUrl = `${MCUBE_RECORDING_BASE_URL}/${cleanPath}`;
+      }
     }
 
     if (callid && callid !== 'N/A' && callid !== '') {
