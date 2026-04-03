@@ -130,10 +130,10 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
       status,
       callType,
       filename,
-      duration,
       callid,
       agentname,
     } = callData;
+    // Note: duration/billsec accessed via callData.duration and callData.billsec below
  
     const rawLeadPhone = (customer || callfrom || '') as string;
     const rawAgentPhone = (executive || callto || '') as string;
@@ -150,8 +150,11 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
     // 1. EXACT DURATION PARSING (No Dummy Data)
     // ─────────────────────────────────────────────────────────────────────
     let durationInSeconds: number | null = null;
-    if (duration) {
-      const d = String(duration).trim();
+    // MCUBE may send duration as seconds, mm:ss, or hh:mm:ss
+    // Also check 'billsec' (some MCUBE versions use this for actual talk time)
+    const rawDuration = callData.billsec || callData.duration;
+    if (rawDuration) {
+      const d = String(rawDuration).trim();
       if (d.includes(':')) {
         const parts = d.split(':').map(Number);
         if (parts.length === 3) durationInSeconds = (parts[0] || 0) * 3600 + (parts[1] || 0) * 60 + (parts[2] || 0);
@@ -161,6 +164,12 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
         durationInSeconds = isNaN(parsed) ? null : parsed;
       }
     }
+    // If duration parsed to 0 but a recording exists, treat as null (recording is the source of truth)
+    // The frontend will show duration from the audio file itself
+    if (durationInSeconds !== null && durationInSeconds <= 0) {
+      durationInSeconds = null;
+    }
+    console.log(`⏱ Duration parsed: ${durationInSeconds}s (raw: ${rawDuration}, billsec: ${callData.billsec}, duration: ${callData.duration})`);
 
     // ─────────────────────────────────────────────────────────────────────
     // 2. BULLETPROOF CONNECTION STATUS
@@ -184,7 +193,9 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
     
     const callTypeLabel = callType || 'Inbound';
     const recordingValue = hasRecording ? filename : 'None';
-    const baseNotes = `Auto-logged via MCUBE ${callTypeLabel} | Call ID: ${callid || 'N/A'} | Agent: ${agentname || cleanAgentPhone || 'Unknown'} | Recording: ${recordingValue}`;
+    // Always include Duration in notes so the frontend can parse it as a fallback
+    const durationLabel = durationInSeconds !== null && durationInSeconds > 0 ? `${durationInSeconds}` : '0';
+    const baseNotes = `Auto-logged via MCUBE ${callTypeLabel} | Call ID: ${callid || 'N/A'} | Agent: ${agentname || cleanAgentPhone || 'Unknown'} | Duration: ${durationLabel} | Recording: ${recordingValue}`;
  
     // ─────────────────────────────────────────────────────────────────────
     // 3. FIND THE EXACT 1 AGENT & 1 LEAD
@@ -241,15 +252,17 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
  
       if (existingLog) {
         // Just update the EXACT ONE existing log
+        // Prefer to keep existing duration if new one is null (webhook sometimes fires twice)
+        const updatedDuration = durationInSeconds ?? existingLog.callDuration;
         await prisma.callLog.update({
           where: { id: existingLog.id },
           data: {
             callStatus,
-            callDuration: durationInSeconds ?? existingLog.callDuration,
+            callDuration: updatedDuration,
             notes: baseNotes,
           }
         });
-        console.log(`✅ Upserted existing log for Call ID: ${callid} → status: ${callStatus}, duration: ${durationInSeconds}s`);
+        console.log(`✅ Upserted existing log for Call ID: ${callid} → status: ${callStatus}, duration: ${updatedDuration}s`);
         return res.status(200).send('OK: Call log updated (upsert by callid)');
       }
     }

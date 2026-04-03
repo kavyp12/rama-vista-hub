@@ -457,20 +457,32 @@ export default function Telecalling() {
 
   const MCUBE_RECORDING_BASE_URL = 'https://recordings.mcube.com';
 
-const extractRecording = (notes: string | null): string | null => {
-  if (!notes) return null;
-  // Match everything after "Recording:" to end of string (filename can contain slashes)
-  const match = notes.match(/Recording:\s*(.+?)(\s*\|.*)?$/im);
-  if (!match) return null;
-  const val = match[1].trim();
-  // Reject empty/None values
-  if (!val || ['none', 'n/a', '', 'null', 'undefined'].includes(val.toLowerCase())) return null;
-  // Already a full URL — return as-is
-  if (val.startsWith('http://') || val.startsWith('https://')) return val;
-  // MCUBE sends full path like: mcubefiles112/classic/2026/04/5348/inbound/xxx.wav
-  // Just prepend the base domain
-  return `${MCUBE_RECORDING_BASE_URL}/${val}`;
-};
+  const extractRecording = (notes: string | null): string | null => {
+    if (!notes) return null;
+    // Match the recording value — it can be a full URL or a relative path
+    // Notes format: "... | Recording: mcubefiles112/classic/2026/04/5348/inbound/xxx.wav"
+    // The recording value ends at end of string (no more | delimiters after it)
+    const match = notes.match(/Recording:\s*([^\s|][^|]*?)\s*(?:\||$)/im);
+    if (!match) return null;
+    const val = match[1].trim();
+    // Reject empty / None / N/A values
+    if (!val || ['none', 'n/a', '', 'null', 'undefined'].includes(val.toLowerCase())) return null;
+    // Already a full URL — return as-is
+    if (val.startsWith('http://') || val.startsWith('https://')) return val;
+    // MCUBE sends relative path: mcubefiles112/classic/2026/04/5348/inbound/xxx.wav
+    // Prepend the base domain with a single slash
+    const cleanPath = val.startsWith('/') ? val.slice(1) : val;
+    return `${MCUBE_RECORDING_BASE_URL}/${cleanPath}`;
+  };
+
+  // Parse duration from notes as fallback (MCUBE sometimes stores "Duration: 32" in notes)
+  const extractDurationFromNotes = (notes: string | null): number | null => {
+    if (!notes) return null;
+    const match = notes.match(/Duration:\s*(\d+)/i);
+    if (!match) return null;
+    const val = parseInt(match[1], 10);
+    return isNaN(val) || val <= 0 ? null : val;
+  };
 
   return (
     <DashboardLayout title="Telecalling Center" description="Manage your call operations">
@@ -894,16 +906,15 @@ const extractRecording = (notes: string | null): string | null => {
                                       const rec = extractRecording(row.notes);
                                       const hasRecording = !!rec;
 
-                                      // Extract duration from notes as fallback
-                                      // MCUBE sometimes stores "Duration: 32" inside notes
+                                      // Determine display duration:
+                                      // Priority: DB callDuration → notes fallback → show —
                                       let displayDuration: string = '—';
-                                      if (row.duration && row.duration > 0) {
-                                        const mins = Math.floor(row.duration / 60);
-                                        const secs = row.duration % 60;
+                                      const noteDur = extractDurationFromNotes(row.notes);
+                                      const durSecs = (row.duration && row.duration > 0) ? row.duration : noteDur;
+                                      if (durSecs && durSecs > 0) {
+                                        const mins = Math.floor(durSecs / 60);
+                                        const secs = durSecs % 60;
                                         displayDuration = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-                                      } else if (hasRecording) {
-                                        // Recording exists but DB duration is null — show "see recording"
-                                        displayDuration = '⏱ In recording';
                                       }
 
                                       return (
@@ -1065,21 +1076,30 @@ const extractRecording = (notes: string | null): string | null => {
                         <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Call Recording</label>
                         {rec ? (
                           <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
-                            <audio controls className="w-full h-10">
-                              <source src={rec} type="audio/mpeg" />
+                            {/* Use preload="metadata" so duration loads even from cross-origin WAV */}
+                            <audio
+                              controls
+                              preload="metadata"
+                              crossOrigin="anonymous"
+                              className="w-full h-10"
+                              key={rec}
+                            >
                               <source src={rec} type="audio/wav" />
+                              <source src={rec} type="audio/mpeg" />
+                              <source src={rec} type="audio/ogg" />
+                              Your browser does not support the audio element.
                             </audio>
                             <a href={rec} target="_blank" rel="noopener noreferrer"
                               className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:underline font-medium">
                               <Play className="h-3 w-3 fill-blue-600" />
-                              Open / Download Recording
+                              Open in new tab / Download
                             </a>
                           </div>
                         ) : (
-  <p className="text-sm text-muted-foreground italic">
-    No recording — call connected but not recorded by MCUBE
-  </p>
-)}
+                          <p className="text-sm text-muted-foreground italic">
+                            No recording available for this call
+                          </p>
+                        )}
                       </div>
                     );
                   })()}
