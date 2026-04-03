@@ -23,71 +23,85 @@ const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 // ─────────────────────────────────────────────
 // HELPER: FETCH AUDIO DURATION IN BACKGROUND
 // ─────────────────────────────────────────────
-// ─────────────────────────────────────────────
-// HELPER: FETCH AUDIO DURATION IN BACKGROUND
-// ─────────────────────────────────────────────
-async function fetchAndUpdateDuration(callLogId: string, audioUrl: string) {
-  // Your smart schedule: Try 1 (Wait 30s), Try 2 (Wait 60s), Try 3 (Wait 60s)
-  const waitTimes = [30000, 60000, 60000]; 
-  
-  for (let i = 0; i < waitTimes.length; i++) {
-    try {
-      const waitSecs = waitTimes[i] / 1000;
-      console.log(`⏳ Background (Attempt ${i + 1}/3): Waiting ${waitSecs}s for MCUBE...`);
-      
-      await delay(waitTimes[i]); 
-      
-      console.log(`⏳ Background (Attempt ${i + 1}/3): Checking URL: ${audioUrl}`);
-      
-      // 1. Use ArrayBuffer instead of Stream for perfect reliability on short audio files
-      const response = await axios({
-        method: 'get',
-        url: audioUrl,
-        responseType: 'arraybuffer', // Download straight to memory buffer
-        timeout: 15000,
-        headers: {
-          // Pretend to be a real browser to bypass MCUBE bot protection
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'audio/wav, audio/*, */*'
+// ─────────────────────────────────────────────────────────────────────
+    // 4. UPSERT CALL LOG (Create strictly ONE record per Call ID)
+    // ─────────────────────────────────────────────────────────────────────
+    const MCUBE_RECORDING_BASE_URL = 'https://recordings.mcube.com';
+    let fullAudioUrl: string | null = null;
+    
+    if (hasRecording) {
+      const cleanPath = filename.startsWith('/') ? filename.slice(1) : filename;
+      // ✨ THE FIX: Check if MCUBE already sent 'http' to prevent double-URLs!
+      fullAudioUrl = cleanPath.startsWith('http') ? cleanPath : `${MCUBE_RECORDING_BASE_URL}/${cleanPath}`;
+    }
+
+    if (callid && callid !== 'N/A' && callid !== '') {
+      const existingLog = await prisma.callLog.findFirst({
+        where: { notes: { contains: `Call ID: ${callid}` } }
+      });
+ 
+      if (existingLog) {
+        const updatedDuration = durationInSeconds ?? existingLog.callDuration;
+        await prisma.callLog.update({
+          where: { id: existingLog.id },
+          data: {
+            callStatus,
+            callDuration: updatedDuration,
+            notes: baseNotes,
+          }
+        });
+        
+        // Trigger background fetch if duration is still 0/null but audio exists
+        if ((!updatedDuration || updatedDuration <= 0) && fullAudioUrl) {
+          fetchAndUpdateDuration(existingLog.id, fullAudioUrl);
+        }
+
+        console.log(`✅ Upserted existing log for Call ID: ${callid}`);
+        return res.status(200).send('OK: Call log updated (upsert by callid)');
+      }
+    }
+ 
+    // If no existing log exists, create EXACTLY ONE new log
+    if (targetAgentId) {
+      const newLog = await prisma.callLog.create({
+        data: {
+          leadId: lead.id,
+          agentId: targetAgentId,
+          callStatus,
+          callDate: new Date(),
+          callDuration: durationInSeconds,
+          notes: baseNotes,
         }
       });
 
-      // 2. Parse the buffer directly
-      const buffer = Buffer.from(response.data);
-      const metadata = await mm.parseBuffer(buffer, { mimeType: 'audio/wav' }, { duration: true, skipCovers: true });
-      
-      // Use !== undefined to ensure 0-second durations don't get skipped
-      if (metadata.format.duration !== undefined) {
-        const durationSecs = Math.round(metadata.format.duration);
-        
-        const updateData: any = { callDuration: durationSecs };
-        
-        // Force status to connected if we found a valid duration > 0
-        if (durationSecs > 0) {
-          updateData.callStatus = 'connected_positive';
-        }
-
-        await prisma.callLog.update({
-          where: { id: callLogId },
-          data: updateData
-        });
-        
-        console.log(`✅ Background Success on Attempt ${i + 1}! Set duration to ${durationSecs}s for call ${callLogId}`);
-        
-        // SUCCESS! Exit the loop.
-        return; 
+      // Trigger background fetch if duration is 0/null but audio exists
+      if ((!durationInSeconds || durationInSeconds <= 0) && fullAudioUrl) {
+        fetchAndUpdateDuration(newLog.id, fullAudioUrl);
       }
-      
-    } catch (error: any) {
-      // Print the ACTUAL error message and status code (e.g., 404 or 403)
-      const status = error.response?.status;
-      const msg = error.message;
-      console.error(`❌ Attempt ${i + 1} failed for ${callLogId}. Status: ${status || 'N/A'} - ${msg}`);
+
+      await prisma.lead.update({
+        where: { id: lead.id },
+        data: { lastContactedAt: new Date() }
+      });
+
+      const taskNote = isConnected
+        ? `📞 Call logged for ${lead.name} (${cleanLeadPhone}). Please follow up when free.`
+        : `📵 Missed call from ${lead.name} (${cleanLeadPhone}). Please call them back.`;
+
+      await prisma.followUpTask.create({
+        data: {
+          leadId: lead.id,
+          agentId: targetAgentId,
+          taskType: 'callback',
+          scheduledAt: new Date(),
+          notes: taskNote,
+        }
+      });
+
+      console.log(`✅ Call logged strictly under ONE user ID: ${targetAgentId}`);
     }
-  }
-  
-  console.log(`🛑 Background Worker gave up on ${callLogId}. File never appeared on MCUBE after 3 tries.`);
-}
+ 
+    return res.status(200).send('OK: Call processed successfully');
 
 
 
