@@ -888,13 +888,26 @@ export default function Telecalling() {
                                 </TableCell>
                                 <TableCell>
                                   {(() => {
-                                    const rec = extractRecording(row.notes);
-                                    // If DB says "not_connected" but a recording exists OR duration > 0
-                                    // → it was clearly connected. A missed call cannot have a recording.
-                                    const effectiveStatus =
-                                      row.callStatus === 'not_connected' && (rec || (row.duration && row.duration > 0))
-                                        ? 'connected_positive'
-                                        : row.callStatus;
+                                    // 1. Leave new web leads as "Pending"
+                                    if (row.isLeadRow) return <StatusBadge status={row.callStatus} />;
+
+                                    // 2. Get the exact duration number
+                                    const noteDur = extractDurationFromNotes(row.notes);
+                                    const durSecs = (row.duration && row.duration > 0) ? row.duration : noteDur;
+                                    
+                                    // 3. YOUR NEW RULE: Any duration > 0 is Connected. Blank/0 is Missed.
+                                    let effectiveStatus = row.callStatus;
+                                    
+                                    if (durSecs && durSecs > 0) {
+                                      // If it has duration, ensure it shows as Connected
+                                      if (effectiveStatus === 'not_connected') {
+                                        effectiveStatus = 'connected_positive'; 
+                                      }
+                                    } else {
+                                      // If duration is 0, empty, or unreadable, FORCE it to show as Missed
+                                      effectiveStatus = 'not_connected';
+                                    }
+
                                     return <StatusBadge status={effectiveStatus} />;
                                   })()}
                                 </TableCell>
