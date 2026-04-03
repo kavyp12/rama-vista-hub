@@ -17,72 +17,56 @@ const createCallLogSchema = z.object({
   callbackScheduledAt: z.string().optional().nullable(),
   rejectionReason: z.string().optional().nullable()
 });
+// Add this helper if you don't have it at the top of the file
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
-// ─────────────────────────────────────────────
-// HELPER: FETCH AUDIO DURATION IN BACKGROUND
-// ─────────────────────────────────────────────
 async function fetchAndUpdateDuration(callLogId: string, audioUrl: string) {
-  // Your smart schedule: Try 1 (Wait 30s), Try 2 (Wait 60s), Try 3 (Wait 60s)
-  const waitTimes = [30000, 60000, 60000]; 
+  // Try only 2 times instead of 3, and wait 30 seconds to let MCUBE upload it
+  const waitTimes = [30000, 45000]; 
   
   for (let i = 0; i < waitTimes.length; i++) {
     try {
-      const waitSecs = waitTimes[i] / 1000;
-      console.log(`⏳ Background (Attempt ${i + 1}/3): Waiting ${waitSecs}s for MCUBE...`);
-      
+      console.log(`⏳ Background (Attempt ${i + 1}/2): Waiting ${waitTimes[i]/1000}s for MCUBE...`);
       await delay(waitTimes[i]); 
       
-      console.log(`⏳ Background (Attempt ${i + 1}/3): Checking URL: ${audioUrl}`);
-      
-      // 1. Use ArrayBuffer instead of Stream for perfect reliability on short audio files
+      // 1. CRITICAL: Use 'stream' to prevent downloading megabytes into RAM
       const response = await axios({
         method: 'get',
         url: audioUrl,
-        responseType: 'arraybuffer', // Download straight to memory buffer
-        timeout: 15000,
-        headers: {
-          // Pretend to be a real browser to bypass MCUBE bot protection
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'audio/wav, audio/*, */*'
-        }
+        responseType: 'stream', 
+        timeout: 10000
       });
 
-      // 2. Parse the buffer directly
-      const buffer = Buffer.from(response.data);
-      const metadata = await mm.parseBuffer(buffer, { mimeType: 'audio/wav' }, { duration: true, skipCovers: true });
+      // 2. CRITICAL: Use `skipPostHeaders: true` so it stops reading the file the exact millisecond it finds the duration
+      const metadata = await mm.parseStream(
+        response.data, 
+        { mimeType: 'audio/wav' }, 
+        { duration: true, skipCovers: true, skipPostHeaders: true } 
+      );
       
-      // Use !== undefined to ensure 0-second durations don't get skipped
+      // 3. CRITICAL: Destroy the stream instantly so it stops downloading the audio
+      response.data.destroy();
+
       if (metadata.format.duration !== undefined) {
         const durationSecs = Math.round(metadata.format.duration);
         
         const updateData: any = { callDuration: durationSecs };
-        
-        // Force status to connected if we found a valid duration > 0
-        if (durationSecs > 0) {
-          updateData.callStatus = 'connected_positive';
-        }
+        if (durationSecs > 0) updateData.callStatus = 'connected_positive';
 
         await prisma.callLog.update({
           where: { id: callLogId },
           data: updateData
         });
         
-        console.log(`✅ Background Success on Attempt ${i + 1}! Set duration to ${durationSecs}s for call ${callLogId}`);
-        
-        // SUCCESS! Exit the loop.
-        return; 
+        console.log(`✅ Success! Duration set to ${durationSecs}s for call ${callLogId}`);
+        return; // Success! Exit the loop immediately.
       }
       
     } catch (error: any) {
-      // Print the ACTUAL error message and status code (e.g., 404 or 403)
-      const status = error.response?.status;
-      const msg = error.message;
-      console.error(`❌ Attempt ${i + 1} failed for ${callLogId}. Status: ${status || 'N/A'} - ${msg}`);
+      console.error(`❌ Attempt ${i + 1} failed for ${callLogId} (File not ready yet)`);
     }
   }
-  
-  console.log(`🛑 Background Worker gave up on ${callLogId}. File never appeared on MCUBE after 3 tries.`);
+  console.log(`🛑 Gave up on ${callLogId} after 2 tries.`);
 }
 
 // ─────────────────────────────────────────────
