@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAuth, usePermissions } from '@/lib/auth-context';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ import { LeadCard } from '@/components/leads/LeadCard';
 import { EditLeadDialog } from '@/components/leads/EditLeadDialog';
 import { Plus, Search, Users, RefreshCw, MapPin, Filter, X, Upload, CheckSquare, UserCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
@@ -82,6 +83,8 @@ export default function Leads() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [budgetUnit, setBudgetUnit] = useState<'L' | 'Cr' | 'K'>('L');
+  const [visibleCount, setVisibleCount] = useState(50);
+  const observerTarget = useRef<HTMLDivElement>(null);
   const [formData, setFormData] = useState({
     name: '', phone: '', email: '', source: 'Website',
     temperature: 'warm', budgetMin: '', budgetMax: '',
@@ -104,21 +107,61 @@ export default function Leads() {
     }
   }, [token, canAssignLeads]);
 
+  // CACHE CONSTANTS
+ // CACHE CONSTANTS
+  const CACHE_KEY = 'crm_leads_data';
+  const CACHE_TIME_KEY = 'crm_leads_timestamp';
+  const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
+
   async function fetchData() {
-    setLoading(true);
+    console.log('[Leads Manager] 🔍 Checking local cache...');
+    
+    // 1. INSTANT LOAD FROM CACHE
+    const cachedData = localStorage.getItem(CACHE_KEY);
+    const cacheTimestamp = localStorage.getItem(CACHE_TIME_KEY);
+    
+    if (cachedData && cacheTimestamp) {
+      const isCacheValid = (Date.now() - parseInt(cacheTimestamp)) < CACHE_DURATION_MS;
+      if (isCacheValid) {
+        console.log('[Leads Manager] ✅ Valid cache found! Instantly rendering leads from memory.');
+        setLeads(JSON.parse(cachedData));
+        setLoading(false); // Instantly remove loader
+      } else {
+        console.log('[Leads Manager] ⏳ Cache exists but is expired (>24 hours). Waiting for network...');
+        setLoading(true);
+      }
+    } else {
+      console.log('[Leads Manager] ❌ No cache found (First visit). Waiting for network...');
+      setLoading(true); 
+    }
+
+    // 2. BACKGROUND REVALIDATION
+    console.log('[Leads Manager] 🔄 Starting silent background sync with server...');
     try {
       const res = await fetch(`${API_URL}/leads`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      if (Array.isArray(data)) setLeads(data);
+      
+      if (Array.isArray(data)) {
+        console.log(`[Leads Manager] 📥 Downloaded ${data.length} fresh leads from database.`);
+        setLeads(data); // Silently update UI 
+        
+        // Save new data to cache
+        localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+        localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
+        console.log('[Leads Manager] 💾 Cache updated successfully.');
+      }
     } catch (error) {
-      toast({ title: 'Error', description: 'Failed to fetch leads', variant: 'destructive' });
+      console.error('[Leads Manager] 🚨 Background sync failed:', error);
+      if (!cachedData) {
+        toast({ title: 'Error', description: 'Failed to fetch leads', variant: 'destructive' });
+      }
     } finally {
       setLoading(false);
     }
   }
-
+  
   async function fetchAgents() {
     try {
       const res = await fetch(`${API_URL}/users?role=sales_agent`, {
@@ -319,6 +362,30 @@ export default function Leads() {
       if (!a.isPriority && b.isPriority) return 1;
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
+
+    // 1. Reset visible count back to 50 whenever you type a search or change a filter
+  useEffect(() => {
+    setVisibleCount(50);
+  }, [searchQuery, stageFilter, sourceFilter, temperatureFilter, assignedAgentFilter, dateFilter, startDate, endDate]);
+
+  // 2. Intersection Observer to load 50 more when scrolling to the bottom
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0].isIntersecting && visibleCount < filteredLeads.length) {
+          setVisibleCount(prev => prev + 50);
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    if (observerTarget.current) {
+      observer.observe(observerTarget.current);
+    }
+
+    return () => observer.disconnect();
+  }, [visibleCount, filteredLeads.length]);
+
 
   return (
     <DashboardLayout title="Leads" description={canAssignLeads ? "Manage and track your potential customers" : "My Assigned Leads & Action Items"}>
@@ -592,7 +659,7 @@ export default function Leads() {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto pb-6">
+      <div className="flex-1 overflow-y-auto pb-6 relative">
           {loading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {[...Array(8)].map((_, i) => <Card key={i} className="animate-pulse h-48 bg-muted/20" />)}
@@ -606,19 +673,29 @@ export default function Leads() {
               </CardContent>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {filteredLeads.map((lead) => (
-                <LeadCard
-                  key={lead.id}
-                  lead={lead}
-                  profiles={agents}
-                  onUpdate={fetchData}
-                  onEdit={(l) => { setLeadToEdit(l); setIsEditDialogOpen(true); }}
-                  selected={selectedLeads.has(lead.id)}
-                  onSelect={canAssignLeads ? () => toggleSelect(lead.id) : undefined}
-                />
-              ))}
-            </div>
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {/* CRITICAL: We slice the array here so we only render 50 at a time */}
+                {filteredLeads.slice(0, visibleCount).map((lead) => (
+                  <LeadCard
+                    key={lead.id}
+                    lead={lead}
+                    profiles={agents}
+                    onUpdate={fetchData} // This will trigger the silent background sync
+                    onEdit={(l) => { setLeadToEdit(l); setIsEditDialogOpen(true); }}
+                    selected={selectedLeads.has(lead.id)}
+                    onSelect={canAssignLeads ? () => toggleSelect(lead.id) : undefined}
+                  />
+                ))}
+              </div>
+              
+              {/* Invisible div that triggers the "Load More" when scrolled into view */}
+              <div ref={observerTarget} className="h-10 w-full mt-4 flex items-center justify-center">
+                {visibleCount < filteredLeads.length && (
+                  <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
+                )}
+              </div>
+            </>
           )}
         </div>
 

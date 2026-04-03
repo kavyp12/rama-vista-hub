@@ -70,19 +70,20 @@ const bulkImportSchema = z.object({
 // --- CONTROLLERS ---
 
 export const getLeads = async (req: AuthRequest, res: Response) => {
+  // 1. Log the incoming request and start a timer
+  console.log(`\n[Backend] 📥 Incoming request to /leads from User: ${req.user!.userId}`);
+  console.log(`[Backend] 🔍 Query Params:`, req.query);
+  const startTime = Date.now();
+
   try {
     const { stage, temperature, source, assignedTo, needsFollowup, phone } = req.query;
-
     const where: any = {};
 
     if (stage) where.stage = stage;
     if (temperature) where.temperature = temperature;
     if (source) where.source = source;
     if (assignedTo) where.assignedToId = assignedTo;
-
-    if (phone) {
-      where.phone = { contains: String(phone) };
-    }
+    if (phone) where.phone = { contains: String(phone) };
 
     if (needsFollowup === 'true') {
       const now = new Date();
@@ -94,9 +95,11 @@ export const getLeads = async (req: AuthRequest, res: Response) => {
       where.assignedToId = req.user!.userId;
     }
 
+    console.log(`[Backend] ⚙️  Executing Prisma query...`);
+
     const leads = await prisma.lead.findMany({
       where,
-      take: 200, // <-- CRITICAL FIX: Limits to 200 most recent to prevent PC/Mobile lag
+      // NO take limit here - we want all leads for frontend caching
       include: {
         assignedTo: {
           select: { id: true, fullName: true, email: true, avatarUrl: true }
@@ -116,12 +119,11 @@ export const getLeads = async (req: AuthRequest, res: Response) => {
             project: { select: { name: true, location: true } }
           },
           orderBy: { scheduledAt: 'desc' }
-          // No take limit — kept intact for your Pipeline grouping
         },
         callLogs: {
           select: { id: true, callStatus: true, callDate: true, notes: true, type: true },
           orderBy: { callDate: 'desc' },
-          take: 1 // <-- MASSIVE OPTIMIZATION: Only sends the 1 most recent call log, saving huge amounts of data
+          take: 1 // CRITICAL: Keeps payload small by only sending the last call
         },
         propertyRecommendations: {
           select: { propertyId: true }
@@ -130,12 +132,18 @@ export const getLeads = async (req: AuthRequest, res: Response) => {
       orderBy: { createdAt: 'desc' }
     });
 
-    return res.json(leads); // Matches frontend expectation perfectly
+    // 2. Calculate how long it took and log the success
+    const duration = Date.now() - startTime;
+    console.log(`[Backend] ✅ Success! Sent ${leads.length} leads in ${duration}ms`);
+
+    return res.json(leads);
   } catch (error) {
-    console.error('Get Leads Error:', error);
+    // 3. Log any errors that occur
+    console.error('[Backend] 🚨 ERROR in getLeads:', error);
     return res.status(500).json({ error: 'Failed to fetch leads' });
   }
 };
+
 export const getLead = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
