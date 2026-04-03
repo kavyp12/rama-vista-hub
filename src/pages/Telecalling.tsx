@@ -455,17 +455,22 @@ export default function Telecalling() {
     return null;
   };
 
-  const MCUBE_RECORDING_BASE_URL = 'https://mcube.vmc.in/Recordings'; // ← confirm this URL with MCUBE
+  const MCUBE_RECORDING_BASE_URL = 'https://recordings.mcube.com';
 
-  const extractRecording = (notes: string | null): string | null => {
-    if (!notes) return null;
-    const match = notes.match(/Recording:\s*([^\s|]+)/i);
-    if (!match) return null;
-    const val = match[1].trim();
-    if (!val || val === 'None' || val === 'none' || val === 'N/A' || val === '') return null;
-    if (val.startsWith('http://') || val.startsWith('https://')) return val;
-    return `${MCUBE_RECORDING_BASE_URL}/${val}`; // builds full URL from filename
-  };
+const extractRecording = (notes: string | null): string | null => {
+  if (!notes) return null;
+  // Match everything after "Recording:" to end of string (filename can contain slashes)
+  const match = notes.match(/Recording:\s*(.+?)(\s*\|.*)?$/im);
+  if (!match) return null;
+  const val = match[1].trim();
+  // Reject empty/None values
+  if (!val || ['none', 'n/a', '', 'null', 'undefined'].includes(val.toLowerCase())) return null;
+  // Already a full URL — return as-is
+  if (val.startsWith('http://') || val.startsWith('https://')) return val;
+  // MCUBE sends full path like: mcubefiles112/classic/2026/04/5348/inbound/xxx.wav
+  // Just prepend the base domain
+  return `${MCUBE_RECORDING_BASE_URL}/${val}`;
+};
 
   return (
     <DashboardLayout title="Telecalling Center" description="Manage your call operations">
@@ -1019,11 +1024,20 @@ export default function Telecalling() {
                       <div className="pt-1"><StatusBadge status={selectedItem.callStatus} /></div>
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Duration</label>
-                      <Input
-                        defaultValue={selectedItem.duration ? `${Math.floor(selectedItem.duration / 60)}m ${selectedItem.duration % 60}s` : 'N/A'}
-                        readOnly className="bg-muted" />
-                    </div>
+  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Duration</label>
+  <Input
+    defaultValue={(() => {
+      if (selectedItem.duration && selectedItem.duration > 0) {
+        const mins = Math.floor(selectedItem.duration / 60);
+        const secs = selectedItem.duration % 60;
+        return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+      }
+      const rec = extractRecording(selectedItem.notes);
+      if (rec) return 'See recording (duration not stored)';
+      return 'N/A';
+    })()}
+    readOnly className="bg-muted" />
+</div>
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Direction</label>
@@ -1062,8 +1076,10 @@ export default function Telecalling() {
                             </a>
                           </div>
                         ) : (
-                          <p className="text-sm text-muted-foreground italic">No recording available</p>
-                        )}
+  <p className="text-sm text-muted-foreground italic">
+    No recording — call connected but not recorded by MCUBE
+  </p>
+)}
                       </div>
                     );
                   })()}
