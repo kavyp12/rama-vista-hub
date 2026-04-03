@@ -17,97 +17,124 @@ function chunkArray<T>(array: T[], size: number): T[][] {
 }
 
 async function main() {
-  console.log('🔍 Starting Call Log Database Fixes...\n');
+  console.log('🔄 ULTIMATE REBUILD: Recalculating ALL MCUBE Call Logs from scratch...\n');
 
-  // ── FIX 1: Has callDuration > 0 but marked as not_connected ──
-  const durationFix = await prisma.callLog.updateMany({
-    where: { callStatus: 'not_connected', callDuration: { gt: 0 } },
-    data: { callStatus: 'connected_positive' },
-  });
-  console.log(`✅ Fixed ${durationFix.count} records marked as missed but had duration`);
-
-  // ── FIX 2: Has a recording in notes but marked as not_connected ──
-  const allWronglyMissed = await prisma.callLog.findMany({
-    where: { callStatus: 'not_connected', notes: { contains: 'Recording:' } },
-    select: { id: true, notes: true },
-  });
-  const toFix = allWronglyMissed.filter(log => {
-    const match = (log.notes || '').match(/Recording:\s*([^\s|]+)/i);
-    return match && match[1].trim() !== 'None' && match[1].trim() !== 'N/A';
-  });
-  if (toFix.length > 0) {
-    await prisma.callLog.updateMany({
-      where: { id: { in: toFix.map(l => l.id) } },
-      data: { callStatus: 'connected_positive' },
-    });
-    console.log(`✅ Fixed ${toFix.length} records marked as missed but had audio files`);
-  }
-
-  // ── FAST AUDIO FETCHING (FORCED FULL SCAN) ──
-  console.log('\n🔍 FORCED SCAN: Checking ALL calls that have an audio recording...');
-  
-  // 👇 Notice the filter for "callDuration: 0" is GONE. It grabs everything with a recording.
-  const recordsNeedingAudioFetch = await prisma.callLog.findMany({
-    where: { 
-      notes: { contains: 'Recording:' }
-    },
-    select: { id: true, notes: true }
+  // Grab EVERY call log that came from MCUBE
+  const allMcubeLogs = await prisma.callLog.findMany({
+    where: { notes: { contains: 'MCUBE' } },
+    select: { id: true, notes: true, callStatus: true, callDuration: true }
   });
 
-  console.log(`Found ${recordsNeedingAudioFetch.length} total records with audio. Processing...`);
+  console.log(`Found ${allMcubeLogs.length} total MCUBE call logs. Re-evaluating every single one...`);
 
   const CONCURRENCY_LIMIT = 15; 
-  const chunks = chunkArray(recordsNeedingAudioFetch, CONCURRENCY_LIMIT);
+  const chunks = chunkArray(allMcubeLogs, CONCURRENCY_LIMIT);
   
-  let audioFetchSuccess = 0;
   let processedCount = 0;
+  let statusChangedCount = 0;
+  let durationUpdatedCount = 0;
   
   for (const chunk of chunks) {
     await Promise.all(chunk.map(async (log) => {
-      const match = (log.notes || '').match(/Recording:\s*([^\s|]+)/i);
-      if (!match) return;
+      const notes = log.notes || '';
       
-      const val = match[1].trim();
-      if (val.toLowerCase() === 'none' || val.toLowerCase() === 'n/a' || val === '') return;
+      // 1. Extract raw data from notes
+      const recMatch = notes.match(/Recording:\s*([^\s|]+)/i);
+      const durMatch = notes.match(/Duration:\s*(\d+)/i);
+      
+      let hasRecording = false;
+      let fullAudioUrl = '';
+      if (recMatch) {
+        const val = recMatch[1].trim();
+        if (val.toLowerCase() !== 'none' && val.toLowerCase() !== 'n/a' && val !== '') {
+          hasRecording = true;
+          const cleanPath = val.startsWith('/') ? val.slice(1) : val;
+          fullAudioUrl = cleanPath.startsWith('http') ? cleanPath : `${MCUBE_RECORDING_BASE_URL}/${cleanPath}`;
+        }
+      }
 
-      const cleanPath = val.startsWith('/') ? val.slice(1) : val;
-      const fullAudioUrl = cleanPath.startsWith('http') ? cleanPath : `${MCUBE_RECORDING_BASE_URL}/${cleanPath}`;
+      let extractedDuration = null;
+      if (durMatch) {
+        const parsed = parseInt(durMatch[1], 10);
+        if (!isNaN(parsed) && parsed > 0) {
+          extractedDuration = parsed;
+        }
+      }
 
-      try {
-        const response = await axios({
-            method: 'get',
-            url: fullAudioUrl,
-            responseType: 'stream',
-            timeout: 5000
-        });
-
-        const metadata = await mm.parseStream(response.data, { mimeType: 'audio/wav' }, { duration: true, skipCovers: true });
-        
-        if (metadata.format.duration) {
-          const durationSecs = Math.round(metadata.format.duration);
-          await prisma.callLog.update({
-            where: { id: log.id },
-            data: { callDuration: durationSecs }
+      // 2. Fetch Absolute True Duration from MCUBE Server
+      let fetchedDuration = null;
+      if (hasRecording) {
+        try {
+          const response = await axios({
+              method: 'get',
+              url: fullAudioUrl,
+              responseType: 'stream',
+              timeout: 5000
           });
-          audioFetchSuccess++;
-        }
 
-        if (response.data && typeof response.data.destroy === 'function') {
-          response.data.destroy();
+          const metadata = await mm.parseStream(response.data, { mimeType: 'audio/wav' }, { duration: true, skipCovers: true });
+          
+          if (metadata.format.duration) {
+            fetchedDuration = Math.round(metadata.format.duration);
+          }
+
+          if (response.data && typeof response.data.destroy === 'function') {
+            response.data.destroy();
+          }
+        } catch (err: any) {
+          // File missing or timeout from MCUBE servers
         }
-      } catch (err: any) {
-        // Silently ignore broken links
+      }
+
+      // 3. Determine the 100% correct Final Truth
+      const finalDuration = fetchedDuration ?? extractedDuration ?? log.callDuration ?? null;
+      const isConnected = hasRecording || (finalDuration !== null && finalDuration > 0);
+      
+      let finalStatus = log.callStatus;
+      
+      if (isConnected) {
+        // If it was connected, make sure it's not marked as missed
+        if (finalStatus === 'not_connected') {
+          finalStatus = 'connected_positive';
+        }
+      } else {
+        // If there is NO duration and NO recording, it MUST be a missed call
+        if (finalStatus === 'connected_positive') {
+          finalStatus = 'not_connected';
+        }
+      }
+
+      // 4. Force Update Database
+      let needsUpdate = false;
+      const updateData: any = {};
+
+      if (finalDuration !== log.callDuration) {
+        updateData.callDuration = finalDuration;
+        needsUpdate = true;
+        durationUpdatedCount++;
+      }
+
+      if (finalStatus !== log.callStatus) {
+        updateData.callStatus = finalStatus;
+        needsUpdate = true;
+        statusChangedCount++;
+      }
+
+      if (needsUpdate) {
+        await prisma.callLog.update({
+          where: { id: log.id },
+          data: updateData
+        });
       }
     }));
 
     processedCount += chunk.length;
-    process.stdout.write(`\r⚡ Processed ${processedCount}/${recordsNeedingAudioFetch.length} | ✅ Re-synced: ${audioFetchSuccess}`);
+    process.stdout.write(`\r⚡ Processed ${processedCount}/${allMcubeLogs.length} | Status Fixed: ${statusChangedCount} | Durations Fixed: ${durationUpdatedCount}`);
     
     await delay(300); 
   }
   
-  console.log(`\n\n✅ Finished heavily syncing audio durations from MCUBE servers.`);
-  console.log('🎉 Done! Your past database is 100% up to date.');
+  console.log(`\n\n✅ 100% COMPLETE. Every single MCUBE call log has been forcefully rebuilt to match the new rules.`);
 }
 
 main()
