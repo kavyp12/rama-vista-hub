@@ -175,6 +175,10 @@ export default function Telecalling() {
   const [nameToEdit, setNameToEdit] = useState('');
   const [leadIdToEdit, setLeadIdToEdit] = useState('');
 
+  const [isFollowUpOpen, setIsFollowUpOpen] = useState(false);
+  const [followUpDate, setFollowUpDate] = useState('');
+  const [followUpLogId, setFollowUpLogId] = useState('');
+
 
   const handleSaveName = async () => {
     try {
@@ -204,6 +208,40 @@ export default function Telecalling() {
       fetchData();
     } catch {
       toast({ title: 'Error', description: 'Could not push to leads.', variant: 'destructive' });
+    }
+  };
+
+  const handleMarkConnected = async (id: string) => {
+    try {
+      const res = await fetch(`${API_URL}/call-logs/${id}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callStatus: 'connected_positive' }),
+      });
+      if (!res.ok) throw new Error();
+      toast({ title: 'Updated', description: 'Missed call marked as Connected.' });
+      fetchData();
+      fetchStats();
+    } catch {
+      toast({ title: 'Error', description: 'Could not update status.', variant: 'destructive' });
+    }
+  };
+
+  const handleScheduleFollowUp = async () => {
+    if (!followUpDate || !followUpLogId) return;
+    try {
+      const res = await fetch(`${API_URL}/call-logs/${followUpLogId}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callbackScheduledAt: new Date(followUpDate).toISOString(), callStatus: 'connected_callback' }),
+      });
+      if (!res.ok) throw new Error();
+      toast({ title: 'Scheduled', description: 'Follow-up successfully scheduled.' });
+      setIsFollowUpOpen(false);
+      setFollowUpDate('');
+      fetchData();
+    } catch {
+      toast({ title: 'Error', description: 'Could not schedule follow-up.', variant: 'destructive' });
     }
   };
 
@@ -301,7 +339,8 @@ export default function Telecalling() {
           leadId: log.leadId,
           agentId: log.agentId,
           callStatus: log.callStatus,
-          displayDate: log.callDate,
+          // 👇 CHANGED: Show the scheduled Follow-Up Date instead of the old call date!
+          displayDate: activeView === 'follow_ups' && log.callbackScheduledAt ? log.callbackScheduledAt : log.callDate,
           duration: log.callDuration,
           notes: log.notes,
           lead: log.lead,
@@ -310,10 +349,13 @@ export default function Telecalling() {
           deletedAt: log.deletedAt,
         }));
 
-        // Client-side safety sort — always newest first regardless of backend
-        mapped.sort((a, b) =>
-          new Date(b.displayDate).getTime() - new Date(a.displayDate).getTime()
-        );
+        // 👇 CHANGED: Sort follow-ups so the most urgent/upcoming ones are at the top!
+        mapped.sort((a, b) => {
+          if (activeView === 'follow_ups') {
+            return new Date(a.displayDate).getTime() - new Date(b.displayDate).getTime(); // Ascending (Urgent first)
+          }
+          return new Date(b.displayDate).getTime() - new Date(a.displayDate).getTime(); // Descending (Newest calls first)
+        });
 
         setTableData(mapped);
       }
@@ -362,6 +404,7 @@ export default function Telecalling() {
     { id: 'reports', label: 'Reports', icon: BarChart3 },
     { type: 'separator' },
     { id: 'new_leads', label: 'New Web Leads', icon: Globe, className: 'text-blue-600 font-medium bg-blue-50/50' },
+    { id: 'follow_ups', label: 'Follow Ups', icon: Clock, className: 'text-amber-600 font-medium bg-amber-50/50' }, // 👈 ADDED THIS
     { type: 'separator' },
     { id: 'all', label: 'All Calls', icon: Phone },
     { id: 'inbound', label: 'Incoming Calls', icon: PhoneIncoming },
@@ -533,6 +576,7 @@ export default function Telecalling() {
                 let badgeClass = 'bg-primary/10 text-primary';
                 if (item.id === 'all') count = stats.totalCalls;
                 else if (item.id === 'missed') { count = stats.notAnswered; badgeClass = 'bg-red-100 text-red-600'; }
+                else if (item.id === 'follow_ups') { count = stats.callback; badgeClass = 'bg-amber-100 text-amber-700'; }
                 else if (item.id === 'qualified') count = stats.positive;
                 else if (item.id === 'unqualified') count = stats.negative;
                 else if (item.id === 'new_leads') { count = stats.newLeads; badgeClass = 'bg-blue-100 text-blue-600'; }
@@ -874,32 +918,35 @@ export default function Telecalling() {
                             return (
                               <TableRow key={row.id} className="hover:bg-muted/50 transition-colors group">
                                 <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                                  <div className="flex flex-col">
-                                    <span className="text-foreground font-medium">{format(parseISO(row.displayDate), 'MMM dd, yyyy')}</span>
-                                    <span className="text-[10px]">{format(parseISO(row.displayDate), 'hh:mm a')}</span>
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex items-center gap-2">
-                                    <Avatar className="h-8 w-8 border bg-background">
-                                      <AvatarFallback className="text-[10px] bg-primary/5 text-primary">
-                                        {row.lead?.name?.substring(0, 2).toUpperCase() || 'NA'}
-                                      </AvatarFallback>
-                                    </Avatar>
-                                    <div>
-                                      <span className="font-semibold text-sm block">
-                                        {row.lead?.name
-                                          ? row.lead.name.replace('Unverified MCUBE Caller - ', 'New Inquiry: ').replace('New Lead - ', 'New Inquiry: ')
-                                          : 'Unknown Lead'}
-                                      </span>
-                                      {row.isLeadRow ? (
-                                        <span className="text-[10px] text-blue-600 font-medium">New Website Lead</span>
-                                      ) : (
-                                        <span className="text-[10px] text-muted-foreground uppercase">{row.lead?.stage}</span>
+                                    <div className="flex flex-col">
+                                      <span className="text-foreground font-medium">{format(parseISO(row.displayDate), 'MMM dd, yyyy')}</span>
+                                      <span className="text-[10px]">{format(parseISO(row.displayDate), 'hh:mm a')}</span>
+                                      {/* 👈 UNIQUE CALL ID ADDED HERE */}
+                                      {!row.isLeadRow && (
+                                        <span className="text-[10px] text-blue-600 font-mono font-bold tracking-wider mt-1 bg-blue-50 w-fit px-1.5 py-0.5 rounded border border-blue-100">
+                                          #{row.id.slice(-6).toUpperCase()}
+                                        </span>
                                       )}
                                     </div>
+                                  </TableCell>
+                                <TableCell>
+                                <div className="flex items-center gap-2">
+                                  <Avatar className="h-8 w-8 border bg-background">
+                                    <AvatarFallback className="text-[10px] bg-primary/5 text-primary">
+                                      {row.lead?.name?.substring(0, 2).toUpperCase() || 'NA'}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  <div>
+                                    <span className="font-semibold text-sm block">
+                                      {row.lead?.name ? row.lead.name.replace('Unverified MCUBE Caller - ', 'New Inquiry: ').replace('New Lead - ', 'New Inquiry: ') : 'Unknown Lead'}
+                                    </span>
+                                    {/* 👈 UNIQUE LEAD ID ADDED HERE */}
+                                    <span className="text-[10px] text-slate-500 font-mono tracking-wide">
+                                      Lead ID: #{row.leadId.slice(-6).toUpperCase()}
+                                    </span>
                                   </div>
-                                </TableCell>
+                                </div>
+                              </TableCell>
                                 <TableCell className="text-sm font-mono">{row.lead?.phone || '—'}</TableCell>
                                 <TableCell className="text-sm text-muted-foreground">{row.agent?.fullName || '—'}</TableCell>
                                 <TableCell>
@@ -967,18 +1014,32 @@ export default function Telecalling() {
                                       </Button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end" className="w-48">
-                                      <DropdownMenuItem onClick={() => handleViewDetails(row)}>
-                                        View Details
-                                      </DropdownMenuItem>
+  <DropdownMenuItem onClick={() => handleViewDetails(row)}>
+    View Details
+  </DropdownMenuItem>
+  
+ {/* 👈 UPDATED: Mark Missed OR Follow-up as Connected */}
+  {!row.isLeadRow && (row.callStatus === 'not_connected' || row.callStatus === 'connected_callback') && (
+    <DropdownMenuItem onClick={() => handleMarkConnected(row.id)} className="text-green-600 focus:text-green-700 font-medium">
+      <CheckCircle2 className="h-3.5 w-3.5 mr-2" /> Mark as Connected
+    </DropdownMenuItem>
+  )}
 
-                                      {/* NEW: Edit Name */}
-                                      <DropdownMenuItem onClick={() => {
-                                        setLeadIdToEdit(row.leadId);
-                                        setNameToEdit(row.lead?.name || '');
-                                        setIsEditNameOpen(true);
-                                      }}>
-                                        <Edit className="h-3.5 w-3.5 mr-2" /> Edit Caller Name
-                                      </DropdownMenuItem>
+  {/* 👈 ADDED: Schedule Follow Up */}
+  {!row.isLeadRow && (
+    <DropdownMenuItem onClick={() => { setFollowUpLogId(row.id); setIsFollowUpOpen(true); }}>
+      <Clock className="h-3.5 w-3.5 mr-2 text-amber-600" /> Schedule Follow-up
+    </DropdownMenuItem>
+  )}
+
+  {/* Existing Actions below... */}
+  <DropdownMenuItem onClick={() => {
+    setLeadIdToEdit(row.leadId);
+    setNameToEdit(row.lead?.name || '');
+    setIsEditNameOpen(true);
+  }}>
+    <Edit className="h-3.5 w-3.5 mr-2" /> Edit Caller Name
+  </DropdownMenuItem>
 
                                       {/* NEW: Push to Leads */}
                                       {row.lead?.stage === 'unverified' && (
@@ -1190,6 +1251,30 @@ export default function Telecalling() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={isFollowUpOpen} onOpenChange={setIsFollowUpOpen}>
+  <DialogContent className="sm:max-w-sm">
+    <DialogHeader>
+      <DialogTitle className="flex items-center gap-2"><Clock className="h-5 w-5 text-amber-600" /> Schedule Follow Up</DialogTitle>
+    </DialogHeader>
+    <div className="space-y-4 py-4">
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Select Date & Time</label>
+        <Input
+          type="datetime-local"
+          value={followUpDate}
+          onChange={(e) => setFollowUpDate(e.target.value)}
+          autoFocus
+        />
+      </div>
+    </div>
+    <DialogFooter>
+      <Button variant="ghost" onClick={() => setIsFollowUpOpen(false)}>Cancel</Button>
+      <Button onClick={handleScheduleFollowUp}>Schedule</Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
+
     </DashboardLayout>
   );
 }

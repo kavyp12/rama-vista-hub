@@ -182,7 +182,7 @@ export const syncLeads = async (req: AuthRequest, res: Response) => {
         name: siteLead.name,
         email: siteLead.email || null,
         phone: siteLead.phone,
-        source: siteLead.source || 'Website Import',
+        source: 'Website',
         stage: mappedStage,
         temperature: mappedTemp,
         projectId: projectId,

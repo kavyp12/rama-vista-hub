@@ -45,6 +45,9 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
   const [isLostReasonOpen, setIsLostReasonOpen] = useState(false);
   const [lostReasonInput, setLostReasonInput] = useState('');
 
+  const [agentSearch, setAgentSearch] = useState('');
+  const [isAssignOpen, setIsAssignOpen] = useState(false);
+
   const assignedId = lead.assignedTo?.id || lead.assignedToId;
   
   let assignedProfile: DisplayProfile | undefined;
@@ -162,6 +165,11 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
   const nextVisit = lead.siteVisits && lead.siteVisits.length > 0 ? lead.siteVisits[0] : null;
   const visitLocationName = nextVisit?.project?.name || nextVisit?.property?.title || "Site Visit";
   const lastCall = lead.callLogs && lead.callLogs.length > 0 ? lead.callLogs[0] : null;
+  
+
+  const filteredProfiles = profiles.filter((p: any) => 
+    p.fullName.toLowerCase().includes(agentSearch.toLowerCase())
+  );
 
   return (
     <>
@@ -307,21 +315,58 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
             {/* Assignment Dropdown */}
             <div className="flex items-center">
               {canAssignLeads ? (
-                 <Select value={assignedId || ''} onValueChange={handleReassign} disabled={isReassigning}>
-                  <SelectTrigger className="h-6 w-auto border-0 p-0 text-xs bg-transparent focus:ring-0 gap-1 text-muted-foreground hover:text-foreground shadow-none">
-                    {assignedProfile ? (
-                       <div className="flex items-center gap-1">
-                         <Avatar className="h-5 w-5 border border-slate-200">
-                           <AvatarImage src={assignedProfile.avatarUrl || undefined} />
-                           <AvatarFallback className="text-[9px] bg-white">{getInitials(assignedProfile.fullName)}</AvatarFallback>
-                         </Avatar>
-                       </div>
-                    ) : (
-                      <div className="flex items-center gap-1 text-muted-foreground"><UserCheck className="h-4 w-4 shrink-0" /><span>Assign</span></div>
-                    )}
-                  </SelectTrigger>
-                  <SelectContent align="end">{profiles.map(p => <SelectItem key={p.id} value={p.id} className="text-xs">{p.fullName}</SelectItem>)}</SelectContent>
-                </Select>
+                <Popover open={isAssignOpen} onOpenChange={setIsAssignOpen}>
+                  <PopoverTrigger asChild>
+                    <Button 
+                      variant="ghost" 
+                      className="h-6 w-auto border-0 p-0 px-1 text-xs bg-transparent focus:ring-0 gap-1 text-muted-foreground hover:text-foreground shadow-none" 
+                      disabled={isReassigning}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {assignedProfile ? (
+                        <div className="flex items-center gap-1">
+                          <Avatar className="h-5 w-5 border border-slate-200">
+                            <AvatarImage src={assignedProfile.avatarUrl || undefined} />
+                            <AvatarFallback className="text-[9px] bg-white">{getInitials(assignedProfile.fullName)}</AvatarFallback>
+                          </Avatar>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 text-muted-foreground"><UserCheck className="h-4 w-4 shrink-0" /><span>Assign</span></div>
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-52 p-0 z-50" align="end" onClick={(e) => e.stopPropagation()}>
+                    <div className="p-2 border-b border-slate-100">
+                      <Input
+                        placeholder="Search agents..."
+                        value={agentSearch}
+                        onChange={(e) => setAgentSearch(e.target.value)}
+                        className="h-8 text-xs"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="max-h-[200px] overflow-y-auto p-1">
+                      {filteredProfiles.length === 0 ? (
+                        <div className="text-xs text-center py-4 text-muted-foreground">No agents found</div>
+                      ) : (
+                        filteredProfiles.map((p: any) => (
+                          <div
+                            key={p.id}
+                            className={`px-2 py-1.5 text-xs cursor-pointer rounded-sm hover:bg-slate-100 flex items-center justify-between ${assignedId === p.id ? 'bg-slate-50 font-medium' : ''}`}
+                            onClick={() => {
+                              handleReassign(p.id);
+                              setIsAssignOpen(false);
+                              setAgentSearch('');
+                            }}
+                          >
+                            {p.fullName}
+                            {assignedId === p.id && <CheckCircle2 className="h-3 w-3 text-blue-600 shrink-0" />}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               ) : (
                 assignedProfile && (
                   <div className="flex items-center gap-1">

@@ -221,7 +221,6 @@ export const createLead = async (req: AuthRequest, res: Response) => {
 export const updateLead = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    // ✅ FIX H3: Validate against explicit schema — raw body is never passed to Prisma
     const data = updateLeadSchema.parse(req.body);
 
     const existingLead = await prisma.lead.findUnique({ where: { id } });
@@ -248,6 +247,48 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
       data: data as any,
       include: { assignedTo: true }
     });
+
+    // 👇 NEW: Sync "Follow-up Scheduler" with Telecalling tab!
+    const nextDateStr = data.nextFollowupAt ? new Date(data.nextFollowupAt).toISOString() : null;
+    const oldDateStr = existingLead.nextFollowupAt ? new Date(existingLead.nextFollowupAt).toISOString() : null;
+
+    // Only trigger if the user actually changed/added a Follow-up date
+    if (data.nextFollowupAt && nextDateStr !== oldDateStr) {
+      const agentIdToAssign = existingLead.assignedToId || req.user!.userId;
+
+      // 1. Clear old pending callbacks to prevent duplicates
+      await prisma.callLog.updateMany({
+        where: { leadId: id, callStatus: 'connected_callback' },
+        data: { callStatus: 'connected_positive' }
+      });
+      await prisma.followUpTask.updateMany({
+        where: { leadId: id, status: 'pending' },
+        data: { status: 'completed', completedAt: new Date() }
+      });
+
+      // 2. Create new active callback so it appears in Telecalling Follow Ups
+      await prisma.callLog.create({
+        data: {
+          leadId: id,
+          agentId: agentIdToAssign,
+          callStatus: 'connected_callback',
+          callDate: new Date(),
+          callbackScheduledAt: new Date(data.nextFollowupAt),
+          notes: data.agentNotes || 'Follow-up scheduled from Lead Workspace'
+        }
+      });
+
+      // 3. Keep a follow-up task active too
+      await prisma.followUpTask.create({
+        data: {
+          leadId: id,
+          agentId: agentIdToAssign,
+          taskType: 'callback',
+          scheduledAt: new Date(data.nextFollowupAt),
+          notes: data.agentNotes || 'Follow-up scheduled from Lead Workspace'
+        }
+      });
+    }
 
     return res.json(lead);
   } catch (error) {

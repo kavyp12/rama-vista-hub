@@ -11,8 +11,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { LeadCard } from '@/components/leads/LeadCard';
 import { EditLeadDialog } from '@/components/leads/EditLeadDialog';
-import { Plus, Search, Users, RefreshCw, MapPin, Filter, X, Upload, CheckSquare, UserCheck } from 'lucide-react';
+import { Plus, Search, Users, RefreshCw, MapPin, Filter, X, Upload, CheckSquare, UserCheck, CheckCircle2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+
+// Add this import near your other @/components/ui imports:
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+
+// Add CheckCircle2 to your existing lucide-react import:
 
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
@@ -82,6 +87,10 @@ export default function Leads() {
   const [isSyncing, setIsSyncing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [addAgentSearch, setAddAgentSearch] = useState('');
+  const [isAddAgentOpen, setIsAddAgentOpen] = useState(false);
+
+  
   const [budgetUnit, setBudgetUnit] = useState<'L' | 'Cr' | 'K'>('L');
   const [visibleCount, setVisibleCount] = useState(50);
   const observerTarget = useRef<HTMLDivElement>(null);
@@ -304,8 +313,11 @@ export default function Leads() {
       // 👇 Hide unverified leads from the main leads dashboard
       if (lead.stage === 'unverified') return false;
 
-      const matchesSearch = lead.name.toLowerCase().includes(searchQuery.toLowerCase()) || lead.phone.includes(searchQuery) || (lead.email && lead.email.toLowerCase().includes(searchQuery.toLowerCase()));
-      
+     const matchesSearch = 
+  lead.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+  lead.phone.includes(searchQuery) || 
+  (lead.email && lead.email.toLowerCase().includes(searchQuery.toLowerCase())) ||
+  lead.id.toUpperCase().includes(searchQuery.toUpperCase()); // 👈 Added Unique ID Search      
       let matchesStage = true;
       // 👇 Updated to explicitly exclude 'unverified' when viewing active_open
       if (stageFilter === 'active_open') {
@@ -599,16 +611,55 @@ export default function Leads() {
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <Label>Assign To</Label>
-                      <Select value={formData.assignedToId} onValueChange={(val) => setFormData({ ...formData, assignedToId: val })}>
-                        <SelectTrigger><SelectValue placeholder="Select Agent (Optional)" /></SelectTrigger>
-                        <SelectContent>
-                          {agents.map((agent) => (
-                            <SelectItem key={agent.id} value={agent.id}>{agent.fullName}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+  <Label>Assign To</Label>
+  <Popover open={isAddAgentOpen} onOpenChange={setIsAddAgentOpen}>
+    <PopoverTrigger asChild>
+      <Button 
+        variant="outline" 
+        role="combobox" 
+        className="w-full justify-between font-normal bg-white"
+      >
+        {formData.assignedToId
+          ? agents.find((agent) => agent.id === formData.assignedToId)?.fullName
+          : "Select Agent (Optional)"}
+        <span className="opacity-50 text-xs">▼</span>
+      </Button>
+    </PopoverTrigger>
+    <PopoverContent className="w-[300px] p-0" align="start">
+      <div className="p-2 border-b border-slate-100">
+        <Input
+          placeholder="Search agents..."
+          value={addAgentSearch}
+          onChange={(e) => setAddAgentSearch(e.target.value)}
+          className="h-8 text-sm"
+          autoFocus
+        />
+      </div>
+      <div className="max-h-[200px] overflow-y-auto p-1">
+        {agents.filter(a => a.fullName.toLowerCase().includes(addAgentSearch.toLowerCase())).length === 0 ? (
+          <div className="text-sm text-center py-4 text-muted-foreground">No agents found</div>
+        ) : (
+          agents
+            .filter(a => a.fullName.toLowerCase().includes(addAgentSearch.toLowerCase()))
+            .map((agent) => (
+              <div
+                key={agent.id}
+                className={`px-2 py-2 text-sm cursor-pointer rounded-sm hover:bg-slate-100 flex items-center justify-between ${formData.assignedToId === agent.id ? 'bg-slate-50 font-medium' : ''}`}
+                onClick={() => {
+                  setFormData({ ...formData, assignedToId: agent.id });
+                  setIsAddAgentOpen(false);
+                  setAddAgentSearch(''); // reset search when closed
+                }}
+              >
+                {agent.fullName}
+                {formData.assignedToId === agent.id && <CheckCircle2 className="h-4 w-4 text-blue-600 shrink-0" />}
+              </div>
+            ))
+        )}
+      </div>
+    </PopoverContent>
+  </Popover>
+</div>
                     <div className="space-y-2"><Label>Notes & Requirements</Label><Textarea placeholder="What does the agent need to know?" value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} /></div>
                     <div className="flex justify-end gap-2 pt-4">
                       <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
@@ -676,13 +727,14 @@ export default function Leads() {
                 {/* CRITICAL: We slice the array here so we only render 50 at a time */}
                 {filteredLeads.slice(0, visibleCount).map((lead) => (
                   <LeadCard
-                key={lead.id}
-                lead={lead}
-                onUpdate={fetchData} // This will trigger the silent background sync
-                    onEdit={(l) => { setLeadToEdit(l); setIsEditDialogOpen(true); }}
-                    selected={selectedLeads.has(lead.id)}
-                    onSelect={canAssignLeads ? () => toggleSelect(lead.id) : undefined}
-                  />
+                  key={lead.id}
+                  lead={lead}
+                  profiles={agents} /* <-- ADD THIS LINE HERE */
+                  onUpdate={fetchData} // This will trigger the silent background sync
+                  onEdit={(l) => { setLeadToEdit(l); setIsEditDialogOpen(true); }}
+                  selected={selectedLeads.has(lead.id)}
+                  onSelect={canAssignLeads ? () => toggleSelect(lead.id) : undefined}
+                />
                 ))}
               </div>
               

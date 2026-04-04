@@ -568,59 +568,57 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
     const where: any = { deletedAt: null };
     if (leadId) where.leadId = leadId;
 
-    // ── Search ──
+    // ── Search (NOW INCLUDES UNIQUE ID SEARCH) ──
     if (search) {
       where.OR = [
         { lead: { name: { contains: search as string, mode: 'insensitive' } } },
-        { lead: { phone: { contains: search as string } } }
+        { lead: { phone: { contains: search as string } } },
+        { id: { endsWith: search as string, mode: 'insensitive' } }, // Search by Call ID
+        { leadId: { endsWith: search as string, mode: 'insensitive' } } // Search by Lead ID
       ];
     }
 
-    // ── Date filter ──
+   // ── Date filter ──
+    const targetDateField = view === 'follow_ups' ? 'callbackScheduledAt' : 'callDate';
+
     if (dateFrom || dateTo) {
-      where.callDate = {};
+      where[targetDateField] = {};
       if (dateFrom) {
         const start = new Date(dateFrom as string);
         start.setHours(0, 0, 0, 0);
-        where.callDate.gte = start;
+        where[targetDateField].gte = start;
       }
       if (dateTo) {
         const end = new Date(dateTo as string);
         end.setHours(23, 59, 59, 999);
-        where.callDate.lte = end;
+        where[targetDateField].lte = end;
       }
     } else if (date) {
       const start = new Date(date as string);
       start.setHours(0, 0, 0, 0);
       const end = new Date(start);
       end.setHours(23, 59, 59, 999);
-      where.callDate = { gte: start, lte: end };
+      where[targetDateField] = { gte: start, lte: end };
     }
 
-    // ── Call status filter ──
-    if (callStatus && callStatus !== 'all') {
-      where.callStatus = callStatus as string;
-    }
-
-    // ── Agent filter ──
-    // sales_agent: only their own calls
-    // admin / superadmin / sales_manager: all calls (or filtered by agentId if specified)
+    // ── Call status & Agent filter ──
+    if (callStatus && callStatus !== 'all') where.callStatus = callStatus as string;
     if (req.user!.role === 'sales_agent') {
       where.agentId = req.user!.userId;
     } else if (agentId && agentId !== 'all') {
       where.agentId = agentId as string;
     }
-    // superadmin / admin with no agentId filter = no restriction (sees everything)
 
-    // ── Minimum call duration filter ──
     if (minDuration && minDuration !== 'all') {
       where.callDuration = { gte: parseInt(minDuration as string, 10) };
     }
 
-    // ── View presets (set BEFORE direction filter so direction can override for non-direction views) ──
+    // ── View presets (ADDED FOLLOW_UPS) ──
     switch (view) {
+      case 'follow_ups':
+        where.callStatus = 'connected_callback'; // 👈 Changed: Only show active callbacks
+        break;
       case 'missed':
-        // Show ALL missed calls — both inbound and outbound — never restrict direction
         where.callStatus = 'not_connected';
         break;
       case 'attended': where.callStatus = { in: ['connected_positive', 'connected_callback', 'not_interested'] }; break;
@@ -644,19 +642,19 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
       default: break;
     }
 
-    // ── Direction Filter (applied AFTER view presets) ──
-    // Skip for views that already handle direction (inbound/outbound/missed)
-    if (direction && direction !== 'all' && view !== 'inbound' && view !== 'outbound' && view !== 'missed') {
+    // ── Direction Filter ──
+    if (direction && direction !== 'all' && !['inbound', 'outbound', 'missed', 'follow_ups'].includes(view as string)) {
       where.notes = { contains: direction === 'inbound' ? 'Inbound' : 'Outbound', mode: 'insensitive' };
     }
 
-    const callLogs = await prisma.callLog.findMany({
+   const callLogs = await prisma.callLog.findMany({
       where,
       include: {
         lead: { select: { id: true, name: true, phone: true, temperature: true, stage: true } },
         agent: { select: { id: true, fullName: true } }
       },
-      orderBy: { callDate: 'desc' },
+      // 👇 CHANGED: Sort by Follow-up date if in Follow Ups view
+      orderBy: view === 'follow_ups' ? { callbackScheduledAt: 'asc' } : { callDate: 'desc' },
       take: take ? Math.min(parseInt(take as string, 10), 2000) : 500
     });
 
@@ -842,7 +840,8 @@ export const updateCallLog = async (req: AuthRequest, res: Response) => {
     const updateSchema = z.object({
       notes: z.string().optional().nullable(),
       isArchived: z.boolean().optional(),
-      callStatus: z.enum(['connected_positive', 'connected_callback', 'not_connected', 'not_interested']).optional()
+      callStatus: z.enum(['connected_positive', 'connected_callback', 'not_connected', 'not_interested']).optional(),
+      callbackScheduledAt: z.string().optional().nullable() // Added for follow-ups
     });
     const data = updateSchema.parse(req.body);
 
@@ -853,7 +852,44 @@ export const updateCallLog = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ error: 'You can only update your own call logs.' });
     }
 
-    const updatedLog = await prisma.callLog.update({ where: { id }, data });
+    const updatePayload: any = { ...data };
+    if (data.callbackScheduledAt) {
+      updatePayload.callbackScheduledAt = new Date(data.callbackScheduledAt);
+    }
+
+    const updatedLog = await prisma.callLog.update({ where: { id }, data: updatePayload });
+
+    // Handle Follow-up Task Creation
+    if (data.callbackScheduledAt) {
+      await prisma.followUpTask.create({
+        data: {
+          leadId: existing.leadId,
+          agentId: existing.agentId,
+          taskType: 'callback',
+          scheduledAt: new Date(data.callbackScheduledAt),
+          notes: 'Manual Follow-up scheduled from Telecalling'
+        }
+      });
+      await prisma.lead.update({
+        where: { id: existing.leadId },
+        data: { nextFollowupAt: new Date(data.callbackScheduledAt) }
+      });
+    }
+
+    // Handle Missed to Connected Conversion
+   if (data.callStatus === 'connected_positive' && (existing.callStatus === 'not_connected' || existing.callStatus === 'connected_callback')) {
+      await prisma.lead.update({
+        where: { id: existing.leadId },
+        data: { stage: 'contacted', temperature: 'hot' }
+      });
+      
+      // 👈 ADDED: Automatically close any pending follow-up tasks for this lead!
+      await prisma.followUpTask.updateMany({
+        where: { leadId: existing.leadId, status: 'pending' },
+        data: { status: 'completed', completedAt: new Date() }
+      });
+    }
+
     return res.json(updatedLog);
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
