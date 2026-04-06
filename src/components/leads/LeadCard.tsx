@@ -241,9 +241,19 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
              )}
           </div>
 
+          {/* Follow up Block */}
+          {lead.nextFollowupAt && (
+             <div className={`rounded-md p-2 border flex items-center gap-2 mt-1 ${new Date(lead.nextFollowupAt) < new Date() ? 'bg-red-50 border-red-100' : 'bg-purple-50 border-purple-100'}`}>
+                 <Calendar className={`h-3 w-3 shrink-0 ${new Date(lead.nextFollowupAt) < new Date() ? 'text-red-600' : 'text-purple-600'}`} />
+                 <span className={`text-xs font-medium truncate ${new Date(lead.nextFollowupAt) < new Date() ? 'text-red-700' : 'text-purple-700'}`}>
+                    Follow-up: {format(new Date(lead.nextFollowupAt), 'MMM d, h:mm a')}
+                 </span>
+             </div>
+          )}
+
           {/* Notes Section */}
           {lead.notes && (
-             <div className="bg-amber-50 rounded-md p-2 border border-amber-100">
+             <div className="bg-amber-50 rounded-md p-2 border border-amber-100 mt-1">
                <div className="flex items-start gap-2">
                  <FileText className="h-3 w-3 text-amber-600 mt-0.5 shrink-0" />
                  <p className="text-[10px] text-amber-800 line-clamp-2 leading-tight" title={lead.notes}>

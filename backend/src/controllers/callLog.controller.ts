@@ -488,6 +488,12 @@ export const createCallLog = async (req: AuthRequest, res: Response) => {
   try {
     const data = createCallLogSchema.parse(req.body);
 
+    const leadInfo = await prisma.lead.findUnique({ where: { id: data.leadId } });
+    if (!leadInfo) return res.status(404).json({ error: 'Lead not found' });
+    if (req.user!.role === 'sales_agent' && leadInfo.assignedToId !== req.user!.userId) {
+      return res.status(403).json({ error: 'You can only log calls for your own leads.' });
+    }
+
     const callLog = await prisma.callLog.create({
       data: {
         leadId: data.leadId,
@@ -870,10 +876,20 @@ export const updateCallLog = async (req: AuthRequest, res: Response) => {
           notes: 'Manual Follow-up scheduled from Telecalling'
         }
       });
-      await prisma.lead.update({
+      
+      const leadOwner = await prisma.lead.findUnique({
         where: { id: existing.leadId },
-        data: { nextFollowupAt: new Date(data.callbackScheduledAt) }
+        include: { assignedTo: true }
       });
+      const isManagedBySalesAgent = leadOwner?.assignedTo?.role === 'sales_agent';
+      
+      // Do not overwrite the sales agent's follow-up schedule if an admin/telecaller does this
+      if (!isManagedBySalesAgent || userId === leadOwner?.assignedToId) {
+        await prisma.lead.update({
+          where: { id: existing.leadId },
+          data: { nextFollowupAt: new Date(data.callbackScheduledAt) }
+        });
+      }
     }
 
     // Handle Missed to Connected Conversion

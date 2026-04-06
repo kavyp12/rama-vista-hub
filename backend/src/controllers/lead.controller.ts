@@ -253,7 +253,7 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
     const oldDateStr = existingLead.nextFollowupAt ? new Date(existingLead.nextFollowupAt).toISOString() : null;
 
     // Only trigger if the user actually changed/added a Follow-up date
-    if (data.nextFollowupAt && nextDateStr !== oldDateStr) {
+    if (data.nextFollowupAt && nextDateStr !== oldDateStr && req.user!.role !== 'sales_agent') {
       const agentIdToAssign = existingLead.assignedToId || req.user!.userId;
 
       // 1. Clear old pending callbacks to prevent duplicates
@@ -318,6 +318,12 @@ export const logCall = async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const data = logCallSchema.parse(req.body);
 
+    const leadInfo = await prisma.lead.findUnique({ where: { id } });
+    if (!leadInfo) return res.status(404).json({ error: 'Lead not found' });
+    if (req.user!.role === 'sales_agent' && leadInfo.assignedToId !== req.user!.userId) {
+      return res.status(403).json({ error: 'You can only log calls for your own leads.' });
+    }
+
     const callLog = await prisma.callLog.create({
       data: {
         leadId: id,
@@ -333,19 +339,27 @@ export const logCall = async (req: AuthRequest, res: Response) => {
 
     let leadUpdates: any = { lastContactedAt: new Date() };
 
+    // Find lead owner
+    const leadOwner = await prisma.lead.findUnique({
+      where: { id },
+      include: { assignedTo: true }
+    });
+    const isManagedBySalesAgent = leadOwner?.assignedTo?.role === 'sales_agent';
+    const canUpdateFollowup = !isManagedBySalesAgent || req.user!.userId === leadOwner?.assignedToId;
+
     // Auto Advance logic
     if (data.callStatus === 'connected_positive') {
       leadUpdates.temperature = 'hot';
       leadUpdates.stage = 'contacted';
     } else if (data.callStatus === 'connected_callback') {
       leadUpdates.stage = 'contacted';
-      if (data.callbackScheduledAt) {
+      if (data.callbackScheduledAt && canUpdateFollowup) {
         leadUpdates.nextFollowupAt = new Date(data.callbackScheduledAt);
       }
     } else if (data.callStatus === 'not_interested') {
       leadUpdates.stage = 'closed';
       leadUpdates.lostReason = data.rejectionReason || 'Not Interested';
-    } else if (data.callbackScheduledAt) {
+    } else if (data.callbackScheduledAt && canUpdateFollowup) {
       leadUpdates.nextFollowupAt = new Date(data.callbackScheduledAt);
     }
 

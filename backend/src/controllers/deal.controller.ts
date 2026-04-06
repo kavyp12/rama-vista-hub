@@ -110,6 +110,13 @@ export const createDeal = async (req: AuthRequest, res: Response) => {
   try {
     const data = createDealSchema.parse(req.body);
 
+    const leadInfo = await prisma.lead.findUnique({ where: { id: data.leadId } });
+    if (!leadInfo) return res.status(404).json({ error: 'Lead not found' });
+
+    if (req.user!.role === 'sales_agent' && leadInfo.assignedToId !== req.user!.userId) {
+      return res.status(403).json({ error: 'You can only create deals for leads assigned to you.' });
+    }
+
     const assignedToId = data.assignedToId || req.user!.userId;
 
     const deal = await prisma.deal.create({

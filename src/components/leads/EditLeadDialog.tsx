@@ -68,8 +68,7 @@ export function EditLeadDialog({ lead, open, onOpenChange, onSuccess }: any) {
     try {
       const multiplier = UNITS[budgetUnit];
       
-      const payload = {
-        name: formData.name, email: formData.email || null, phone: formData.phone,
+      const payload: any = {
         budgetMin: formData.budgetMin ? Number(formData.budgetMin) * multiplier : null,
         budgetMax: formData.budgetMax ? Number(formData.budgetMax) * multiplier : null,
         preferredLocation: formData.preferredLocation || null,
@@ -80,6 +79,12 @@ export function EditLeadDialog({ lead, open, onOpenChange, onSuccess }: any) {
         preferredPropertyType: formData.preferredPropertyType || null,
         nextFollowupAt: formData.nextFollowupAt ? new Date(formData.nextFollowupAt).toISOString() : null
       };
+
+      if (!isLocked) {
+        payload.name = formData.name;
+        payload.email = formData.email || null;
+        payload.phone = formData.phone;
+      }
 
       const res = await fetch(`${API_URL}/leads/${lead.id}`, {
         method: 'PATCH',
@@ -97,12 +102,15 @@ export function EditLeadDialog({ lead, open, onOpenChange, onSuccess }: any) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[650px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[650px] max-h-[90vh] overflow-y-auto" aria-describedby="dialog-description">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             Edit Lead 
             {isLocked && <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground"><Lock className="h-3 w-3 mr-1"/> Restricted View</Badge>}
           </DialogTitle>
+          <div id="dialog-description" className="sr-only">
+            Edit lead details and track follow ups.
+          </div>
         </DialogHeader>
         
         <form onSubmit={handleSubmit} className="space-y-6 py-2">

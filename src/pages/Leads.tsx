@@ -73,6 +73,8 @@ export default function Leads() {
   const [dateFilter, setDateFilter] = useState('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [followUpFilter, setFollowUpFilter] = useState('all');
+  const [followUpDate, setFollowUpDate] = useState('');
   
   // New UI State for Filter Dropdown
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -106,7 +108,8 @@ export default function Leads() {
     sourceFilter !== 'all',
     temperatureFilter !== 'all',
     assignedAgentFilter !== 'all',
-    dateFilter !== 'all'
+    dateFilter !== 'all',
+    followUpFilter !== 'all'
   ].filter(Boolean).length;
 
 
@@ -365,9 +368,41 @@ export default function Leads() {
         }
       }
 
-      return matchesSearch && matchesStage && matchesSource && matchesTemperature && matchesAgent && matchesDate;
+      // Add a follow-up match condition
+      let matchesFollowUp = true;
+      if (followUpFilter === 'needs_followup') {
+        if (!lead.nextFollowupAt) {
+          matchesFollowUp = false;
+        } else {
+          matchesFollowUp = new Date(lead.nextFollowupAt) <= new Date();
+        }
+      } else if (followUpFilter === 'upcoming') {
+        if (!lead.nextFollowupAt) {
+          matchesFollowUp = false;
+        } else {
+          matchesFollowUp = new Date(lead.nextFollowupAt) > new Date();
+        }
+      } else if (followUpFilter === 'no_followup') {
+        matchesFollowUp = !lead.nextFollowupAt;
+      } else if (followUpFilter === 'specific_date') {
+        if (!lead.nextFollowupAt || !followUpDate) {
+          matchesFollowUp = false;
+        } else {
+          const lDate = new Date(lead.nextFollowupAt);
+          const fDate = new Date(followUpDate);
+          matchesFollowUp = lDate.toDateString() === fDate.toDateString();
+        }
+      }
+
+      return matchesSearch && matchesStage && matchesSource && matchesTemperature && matchesAgent && matchesDate && matchesFollowUp;
     })
     .sort((a, b) => {
+      // If filtering by follow-ups, sort by follow up date
+      if (followUpFilter !== 'all') {
+         if (!a.nextFollowupAt) return 1;
+         if (!b.nextFollowupAt) return -1;
+         return new Date(a.nextFollowupAt).getTime() - new Date(b.nextFollowupAt).getTime();
+      }
       if (a.isPriority && !b.isPriority) return -1;
       if (!a.isPriority && b.isPriority) return 1;
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
@@ -376,7 +411,7 @@ export default function Leads() {
     // 1. Reset visible count back to 50 whenever you type a search or change a filter
   useEffect(() => {
     setVisibleCount(50);
-  }, [searchQuery, stageFilter, sourceFilter, temperatureFilter, assignedAgentFilter, dateFilter, startDate, endDate]);
+  }, [searchQuery, stageFilter, sourceFilter, temperatureFilter, assignedAgentFilter, dateFilter, startDate, endDate, followUpFilter, followUpDate]);
 
   // 2. Intersection Observer to load 50 more when scrolling to the bottom
   useEffect(() => {
@@ -442,6 +477,8 @@ export default function Leads() {
                             setDateFilter('all');
                             setTemperatureFilter('all');
                             setAssignedAgentFilter('all');
+                            setFollowUpFilter('all');
+                            setFollowUpDate('');
                             setStartDate('');
                             setEndDate('');
                           }} 
@@ -516,20 +553,36 @@ export default function Leads() {
                         </div>
                       )}
 
-                      <div className="space-y-1.5">
-                        <Label className="text-xs text-muted-foreground">Date Created</Label>
-                        <Select value={dateFilter} onValueChange={setDateFilter}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All Time</SelectItem>
-                            <SelectItem value="today">Today</SelectItem>
-                            <SelectItem value="yesterday">Yesterday</SelectItem>
-                            <SelectItem value="last_7_days">Last 7 Days</SelectItem>
-                            <SelectItem value="last_30_days">Last 30 Days</SelectItem>
-                            <SelectItem value="this_month">This Month</SelectItem>
-                            <SelectItem value="custom">Custom Range</SelectItem>
-                          </SelectContent>
-                        </Select>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs text-muted-foreground">Date Created</Label>
+                          <Select value={dateFilter} onValueChange={setDateFilter}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Time</SelectItem>
+                              <SelectItem value="today">Today</SelectItem>
+                              <SelectItem value="yesterday">Yesterday</SelectItem>
+                              <SelectItem value="last_7_days">Last 7 Days</SelectItem>
+                              <SelectItem value="last_30_days">Last 30 Days</SelectItem>
+                              <SelectItem value="this_month">This Month</SelectItem>
+                              <SelectItem value="custom">Custom Range</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label className="text-xs text-muted-foreground">Follow-ups</Label>
+                          <Select value={followUpFilter} onValueChange={setFollowUpFilter}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All</SelectItem>
+                              <SelectItem value="needs_followup">Missed / Due Today</SelectItem>
+                              <SelectItem value="upcoming">Upcoming</SelectItem>
+                              <SelectItem value="specific_date">Specific Date</SelectItem>
+                              <SelectItem value="no_followup">No Follow-up Set</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
 
                       {dateFilter === 'custom' && (
@@ -537,6 +590,13 @@ export default function Leads() {
                           <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-8 text-xs" />
                           <span className="text-xs text-muted-foreground">to</span>
                           <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-8 text-xs" />
+                        </div>
+                      )}
+
+                      {followUpFilter === 'specific_date' && (
+                        <div className="flex flex-col gap-1 pt-1">
+                          <Label className="text-xs text-muted-foreground">Select Follow-up Date</Label>
+                          <Input type="date" value={followUpDate} onChange={(e) => setFollowUpDate(e.target.value)} className="h-8 text-xs" />
                         </div>
                       )}
 
