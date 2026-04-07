@@ -4,18 +4,13 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 
 /**
  * GET /api/incentives/report
- * Returns per-agent performance metrics for the incentive pipeline.
+ * Returns per-agent performance metrics for the incentive pipeline,
+ * AND per-admin metrics (leads assigned + IVR calls picked).
  *
  * Query params:
  *   dateFrom?: ISO date string (e.g. 2024-01-01) — no dateFrom = all-time
  *   dateTo?:   ISO date string (e.g. 2024-12-31)
  *   agentId?:  filter to one agent
- *
- * Attribution rules:
- *   - Site visits → credited to the agent whose ID matches `conductedBy`. 
- *     If conductedBy is null (older data), falls back to the lead's assignedToId at query time.
- *   - Calls → credited to agentId on the CallLog record.
- *   - Leads → counted for the agent currently assigned (assignedToId) and created in the range.
  */
 export const getIncentiveReport = async (req: AuthRequest, res: Response) => {
   try {
@@ -52,6 +47,13 @@ export const getIncentiveReport = async (req: AuthRequest, res: Response) => {
       orderBy: { fullName: 'asc' }
     });
 
+    // ── Fetch admins for admin incentive section ─────────────────────────────
+    const admins = await prisma.user.findMany({
+      where: { role: 'admin', isActive: true },
+      select: { id: true, fullName: true, email: true, role: true, avatarUrl: true },
+      orderBy: { fullName: 'asc' }
+    });
+
     // ── Fetch all data in parallel ───────────────────────────────────────────
     const svWhere: any = {};
     if (hasDateFilter) svWhere.scheduledAt = dateFilter;
@@ -62,30 +64,38 @@ export const getIncentiveReport = async (req: AuthRequest, res: Response) => {
     const leadWhere: any = {};
     if (hasDateFilter) leadWhere.createdAt = dateFilter;
 
-    const [allSiteVisits, allCalls, allLeads] = await Promise.all([
+    // Admin lead assignments — leads where assignedById is set
+    const assignedLeadWhere: any = { assignedById: { not: null } };
+    if (hasDateFilter) assignedLeadWhere.createdAt = dateFilter;
+
+    const [allSiteVisits, allCalls, allLeads, allAdminAssignedLeads] = await Promise.all([
       prisma.siteVisit.findMany({
         where: svWhere,
         select: {
           id: true,
           scheduledAt: true,
           status: true,
-          conductedBy: true,   // ← primary attribution field
+          conductedBy: true,
           lead: { select: { id: true, assignedToId: true } }
         }
       }),
       prisma.callLog.findMany({
         where: callWhere,
-        select: { id: true, callDate: true, callStatus: true, agentId: true }
+        select: { id: true, callDate: true, callStatus: true, agentId: true, notes: true }
       }),
       prisma.lead.findMany({
         where: leadWhere,
-        select: { id: true, stage: true, assignedToId: true, createdAt: true }
+        select: { id: true, stage: true, assignedToId: true, assignedById: true, createdAt: true }
+      }),
+      prisma.lead.findMany({
+        where: assignedLeadWhere,
+        select: { id: true, assignedById: true, assignedToId: true, stage: true, createdAt: true }
       })
     ]);
 
     // ── Compute per-agent metrics ────────────────────────────────────────────
     const report = agents.map(agent => {
-      // LEADS — created in range, currently assigned to this agent
+      // LEADS — assigned to this agent in range
       const agentLeads = allLeads.filter(l => l.assignedToId === agent.id);
       const totalLeads = agentLeads.length;
       const closedDeals = agentLeads.filter(l => l.stage === 'closed').length;
@@ -94,12 +104,8 @@ export const getIncentiveReport = async (req: AuthRequest, res: Response) => {
       const lostLeads = agentLeads.filter(l => l.stage === 'lost').length;
 
       // SITE VISITS — attributed by conductedBy first, fallback to lead.assignedToId
-      // This handles both old data (conductedBy null) and new data correctly.
       const agentVisits = allSiteVisits.filter(v => {
-        if (v.conductedBy) {
-          return v.conductedBy === agent.id;
-        }
-        // Fallback for legacy records where conductedBy wasn't set
+        if (v.conductedBy) return v.conductedBy === agent.id;
         return v.lead?.assignedToId === agent.id;
       });
       const totalVisits = agentVisits.length;
@@ -165,12 +171,69 @@ export const getIncentiveReport = async (req: AuthRequest, res: Response) => {
       };
     });
 
+    // ── Compute per-admin metrics ────────────────────────────────────────────
+    const adminReport = admins.map(admin => {
+      // LEADS ASSIGNED BY THIS ADMIN
+      const adminAssignedLeads = allAdminAssignedLeads.filter(l => l.assignedById === admin.id);
+      const leadsAssigned = adminAssignedLeads.length;
+      const leadsAssignedClosed = adminAssignedLeads.filter(l => l.stage === 'closed').length;
+      const leadsAssignedToken = adminAssignedLeads.filter(l => l.stage === 'token').length;
+
+      // IVR / PHONE CALLS — calls attributed to this admin
+      const adminCalls = allCalls.filter(c => c.agentId === admin.id);
+      const totalCalls = adminCalls.length;
+      // IVR calls = inbound calls that admin answered
+      const ivrCallsPicked = adminCalls.filter(c => {
+        const notes = (c.notes || '').toLowerCase();
+        return notes.includes('inbound');
+      }).length;
+      const connectedCalls = adminCalls.filter(c =>
+        c.callStatus === 'connected_positive' || c.callStatus === 'connected_callback'
+      ).length;
+      const missedCalls = adminCalls.filter(c => c.callStatus === 'not_connected').length;
+      const callConnectRate = totalCalls > 0 ? Math.round((connectedCalls / totalCalls) * 100) : 0;
+
+      // ADMIN SCORE — weighted for admin activities
+      const score = leadsAssigned * 2 + ivrCallsPicked * 3 + leadsAssignedClosed * 20 + leadsAssignedToken * 10;
+      const isActive = score > 0;
+
+      return {
+        agent: {
+          id: admin.id,
+          fullName: admin.fullName,
+          email: admin.email,
+          role: admin.role,
+          avatarUrl: admin.avatarUrl
+        },
+        leadsAssigned,
+        leadsConversion: {
+          closed: leadsAssignedClosed,
+          token: leadsAssignedToken,
+          convRate: leadsAssigned > 0 ? Math.round(((leadsAssignedClosed + leadsAssignedToken) / leadsAssigned) * 100) : 0
+        },
+        calls: {
+          total: totalCalls,
+          ivrPicked: ivrCallsPicked,
+          connected: connectedCalls,
+          missed: missedCalls,
+          connectRate: callConnectRate
+        },
+        score,
+        isActive,
+        rank: 0
+      };
+    });
+
     // Sort by score descending and assign ranks
     report.sort((a, b) => b.score - a.score);
     report.forEach((r, i) => { r.rank = i + 1; });
 
+    adminReport.sort((a, b) => b.score - a.score);
+    adminReport.forEach((r, i) => { r.rank = i + 1; });
+
     return res.json({
       agents: report,
+      adminReport,
       summary: {
         totalAgents: report.length,
         activeAgents: report.filter(r => r.isActive).length,
@@ -179,6 +242,8 @@ export const getIncentiveReport = async (req: AuthRequest, res: Response) => {
         totalCalls: report.reduce((s, r) => s + r.calls.total, 0),
         totalClosed: report.reduce((s, r) => s + r.leads.closed, 0),
         totalScore: report.reduce((s, r) => s + r.score, 0),
+        totalLeadsAssignedByAdmin: adminReport.reduce((s, r) => s + r.leadsAssigned, 0),
+        totalIvrPickedByAdmin: adminReport.reduce((s, r) => s + r.calls.ivrPicked, 0),
       },
       dateRange: {
         from: dateFrom || null,

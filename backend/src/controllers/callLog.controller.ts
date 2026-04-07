@@ -284,6 +284,16 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
     // If lead doesn't exist, create it Unassigned
     if (!lead) {
       const callerName = agentname ? `New Lead - ${agentname}` : `Unverified MCUBE Caller - ${cleanLeadPhone}`;
+      
+      // 👈 Grant Incentive Credit to the Admin answering the IVR call
+      let assignerId = null;
+      if (targetAgentId) {
+          const assigner = await prisma.user.findUnique({ where: { id: targetAgentId } });
+          if (assigner?.role === 'admin') {
+              assignerId = targetAgentId;
+          }
+      }
+
       lead = await prisma.lead.create({
         data: {
           name: callerName,
@@ -291,6 +301,7 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
           stage: 'unverified' as any,
           source: 'inbound_call',
           assignedToId: targetAgentId,
+          assignedById: assignerId, // Credits the admin for the lead creation
         },
         include: { assignedTo: true }
       });
@@ -685,13 +696,7 @@ export const completeFollowUpTask = async (req: AuthRequest, res: Response) => {
 
 export const getCallStats = async (req: AuthRequest, res: Response) => {
   try {
-    // sales_agent is always scoped to their own data
-    // admin, superadmin, sales_manager can see all (or filter by agentId)
-    const agentId =
-      req.user!.role === 'sales_agent'
-        ? req.user!.userId
-        : (req.query.agentId as string);
-
+    const agentId = req.user!.role === 'sales_agent' ? req.user!.userId : (req.query.agentId as string);
     const dateQuery = req.query.date as string;
     const dateFrom = req.query.dateFrom as string;
     const dateTo = req.query.dateTo as string;
@@ -703,7 +708,6 @@ export const getCallStats = async (req: AuthRequest, res: Response) => {
       whereClause.agentId = agentId;
     }
 
-    // ── Direction filter (for main stats) ──
     if (direction && direction !== 'all') {
       whereClause.notes = {
         contains: direction === 'inbound' ? 'Inbound' : 'Outbound',
@@ -711,16 +715,13 @@ export const getCallStats = async (req: AuthRequest, res: Response) => {
       };
     }
 
-    // ── Date filter ──
     if (dateFrom || dateTo) {
       whereClause.callDate = {};
-
       if (dateFrom) {
         const start = new Date(dateFrom);
         start.setHours(0, 0, 0, 0);
         whereClause.callDate.gte = start;
       }
-
       if (dateTo) {
         const end = new Date(dateTo);
         end.setHours(23, 59, 59, 999);
@@ -729,111 +730,68 @@ export const getCallStats = async (req: AuthRequest, res: Response) => {
     } else if (dateQuery) {
       const start = new Date(dateQuery);
       start.setHours(0, 0, 0, 0);
-
       const end = new Date(start);
       end.setHours(23, 59, 59, 999);
-
       whereClause.callDate = { gte: start, lte: end };
     }
 
-    // ── Main grouped stats ──
     const callsByStatus = await prisma.callLog.groupBy({
       by: ['callStatus'],
       where: whereClause,
       _count: true
     });
 
-    const totalCalls = callsByStatus.reduce(
-      (sum, item) => sum + item._count,
-      0
-    );
+    const totalCalls = callsByStatus.reduce((sum, item) => sum + item._count, 0);
+    const connectedCalls = callsByStatus.filter(item => item.callStatus.startsWith('connected')).reduce((sum, item) => sum + item._count, 0);
 
-    const connectedCalls = callsByStatus
-      .filter(item => item.callStatus.startsWith('connected'))
-      .reduce((sum, item) => sum + item._count, 0);
-
-    // ── Inbound / Outbound stats ──
-    const inboundWhere = {
-      ...whereClause,
-      notes: { contains: 'Inbound', mode: 'insensitive' as const }
-    };
-
-    const outboundWhere = {
-      ...whereClause,
-      notes: { contains: 'Outbound', mode: 'insensitive' as const }
-    };
+    const inboundWhere = { ...whereClause, notes: { contains: 'Inbound', mode: 'insensitive' as const } };
+    const outboundWhere = { ...whereClause, notes: { contains: 'Outbound', mode: 'insensitive' as const } };
 
     const [inboundStats, outboundStats] = await Promise.all([
-      prisma.callLog.groupBy({
-        by: ['callStatus'],
-        where: inboundWhere,
-        _count: true
-      }),
-      prisma.callLog.groupBy({
-        by: ['callStatus'],
-        where: outboundWhere,
-        _count: true
-      })
+      prisma.callLog.groupBy({ by: ['callStatus'], where: inboundWhere, _count: true }),
+      prisma.callLog.groupBy({ by: ['callStatus'], where: outboundWhere, _count: true })
     ]);
 
-    const inboundTotal = inboundStats.reduce(
-      (s, i) => s + i._count,
-      0
-    );
+    const inboundTotal = inboundStats.reduce((s, i) => s + i._count, 0);
+    const outboundTotal = outboundStats.reduce((s, i) => s + i._count, 0);
+    const inboundConnected = inboundStats.filter(i => i.callStatus.startsWith('connected')).reduce((s, i) => s + i._count, 0);
+    const outboundConnected = outboundStats.filter(i => i.callStatus.startsWith('connected')).reduce((s, i) => s + i._count, 0);
+    const inboundMissed = inboundStats.find(i => i.callStatus === 'not_connected')?._count || 0;
+    const outboundMissed = outboundStats.find(i => i.callStatus === 'not_connected')?._count || 0;
 
-    const outboundTotal = outboundStats.reduce(
-      (s, i) => s + i._count,
-      0
-    );
+    const newLeadsCount = await prisma.lead.count({ where: { stage: 'new' } });
 
-    const inboundConnected = inboundStats
-      .filter(i => i.callStatus.startsWith('connected'))
-      .reduce((s, i) => s + i._count, 0);
-
-    const outboundConnected = outboundStats
-      .filter(i => i.callStatus.startsWith('connected'))
-      .reduce((s, i) => s + i._count, 0);
-
-    const inboundMissed =
-      inboundStats.find(i => i.callStatus === 'not_connected')?._count || 0;
-
-    const outboundMissed =
-      outboundStats.find(i => i.callStatus === 'not_connected')?._count || 0;
-
-    const newLeadsCount = await prisma.lead.count({
-      where: { stage: 'new' }
-    });
+    // 👈 Expose Admin Assignment stats for the Telecalling UI
+    let adminAssignedLeads = 0;
+    if (agentId && agentId !== 'all') {
+      adminAssignedLeads = await prisma.lead.count({
+        where: { assignedById: agentId } // How many leads did this specific admin assign?
+      });
+    } else {
+      adminAssignedLeads = await prisma.lead.count({
+        where: { assignedById: { not: null } } // Total assigned across all admins
+      });
+    }
 
     return res.json({
       totalCalls,
       connectedCalls,
-      notAnswered:
-        callsByStatus.find(i => i.callStatus === 'not_connected')?._count || 0,
-      positive:
-        callsByStatus.find(i => i.callStatus === 'connected_positive')?._count || 0,
-      negative:
-        callsByStatus.find(i => i.callStatus === 'not_interested')?._count || 0,
-      callback:
-        callsByStatus.find(i => i.callStatus === 'connected_callback')?._count || 0,
-      connectRate:
-        totalCalls > 0
-          ? Math.round((connectedCalls / totalCalls) * 100)
-          : 0,
-
-      // ── NEW FIELDS ──
+      notAnswered: callsByStatus.find(i => i.callStatus === 'not_connected')?._count || 0,
+      positive: callsByStatus.find(i => i.callStatus === 'connected_positive')?._count || 0,
+      negative: callsByStatus.find(i => i.callStatus === 'not_interested')?._count || 0,
+      callback: callsByStatus.find(i => i.callStatus === 'connected_callback')?._count || 0,
+      connectRate: totalCalls > 0 ? Math.round((connectedCalls / totalCalls) * 100) : 0,
       inboundTotal,
       outboundTotal,
       inboundConnected,
       outboundConnected,
       inboundMissed,
       outboundMissed,
-
-      newLeads: newLeadsCount
+      newLeads: newLeadsCount,
+      adminAssignedLeads // Passed down to the UI
     });
   } catch (error) {
-    return res.status(500).json({
-      error: 'Failed to fetch call stats'
-    });
+    return res.status(500).json({ error: 'Failed to fetch call stats' });
   }
 };
 

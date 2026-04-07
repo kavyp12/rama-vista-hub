@@ -70,19 +70,18 @@ const bulkImportSchema = z.object({
 // --- CONTROLLERS ---
 
 export const getLeads = async (req: AuthRequest, res: Response) => {
-  // 1. Log the incoming request and start a timer
   console.log(`\n[Backend] 📥 Incoming request to /leads from User: ${req.user!.userId}`);
-  console.log(`[Backend] 🔍 Query Params:`, req.query);
   const startTime = Date.now();
 
   try {
-    const { stage, temperature, source, assignedTo, needsFollowup, phone } = req.query;
+    const { stage, temperature, source, assignedTo, assignedBy, needsFollowup, phone } = req.query;
     const where: any = {};
 
     if (stage) where.stage = stage;
     if (temperature) where.temperature = temperature;
     if (source) where.source = source;
     if (assignedTo) where.assignedToId = assignedTo;
+    if (assignedBy) where.assignedById = assignedBy; // 👈 Server-side Admin assignment filtering
     if (phone) where.phone = { contains: String(phone) };
 
     if (needsFollowup === 'true') {
@@ -95,52 +94,135 @@ export const getLeads = async (req: AuthRequest, res: Response) => {
       where.assignedToId = req.user!.userId;
     }
 
-    console.log(`[Backend] ⚙️  Executing Prisma query...`);
-
+    // ⚠️ User requested NO LIMIT. Fetching all matching leads.
     const leads = await prisma.lead.findMany({
       where,
-      // NO take limit here - we want all leads for frontend caching
       include: {
-        assignedTo: {
-          select: { id: true, fullName: true, email: true, avatarUrl: true }
-        },
-        deals: {
-          select: { id: true, dealValue: true, stage: true, createdAt: true },
-          orderBy: { createdAt: 'desc' }
-        },
-        project: {
-          select: { id: true, name: true, location: true }
-        },
+        assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+        assignedBy: { select: { id: true, fullName: true, role: true } },
+        deals: { select: { id: true, dealValue: true, stage: true, createdAt: true }, orderBy: { createdAt: 'desc' } },
+        project: { select: { id: true, name: true, location: true } },
         siteVisits: {
           select: {
-            id: true, scheduledAt: true, status: true, rating: true, feedback: true,
-            conductedBy: true,
+            id: true, scheduledAt: true, status: true, rating: true, feedback: true, conductedBy: true,
             property: { select: { title: true, location: true } },
             project: { select: { name: true, location: true } }
           },
           orderBy: { scheduledAt: 'desc' }
         },
-        callLogs: {
-          select: { id: true, callStatus: true, callDate: true, notes: true, type: true },
-          orderBy: { callDate: 'desc' },
-          take: 1 // CRITICAL: Keeps payload small by only sending the last call
-        },
-        propertyRecommendations: {
-          select: { propertyId: true }
-        }
+        callLogs: { select: { id: true, callStatus: true, callDate: true, notes: true, type: true }, orderBy: { callDate: 'desc' }, take: 1 },
+        propertyRecommendations: { select: { propertyId: true } }
       },
       orderBy: { createdAt: 'desc' }
     });
 
-    // 2. Calculate how long it took and log the success
     const duration = Date.now() - startTime;
     console.log(`[Backend] ✅ Success! Sent ${leads.length} leads in ${duration}ms`);
 
     return res.json(leads);
   } catch (error) {
-    // 3. Log any errors that occur
     console.error('[Backend] 🚨 ERROR in getLeads:', error);
     return res.status(500).json({ error: 'Failed to fetch leads' });
+  }
+};
+
+export const updateLead = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const data = updateLeadSchema.parse(req.body);
+
+    const existingLead = await prisma.lead.findUnique({ where: { id } });
+    if (!existingLead) return res.status(404).json({ error: 'Lead not found' });
+
+    const isAgent = req.user!.role === 'sales_agent';
+    const isOwner = existingLead.assignedToId === req.user!.userId;
+
+    if (isAgent) {
+      if (!isOwner) {
+        return res.status(403).json({ error: 'You can only update your own leads.' });
+      }
+      const agentAllowed = ['notes', 'stage', 'temperature', 'budgetMin', 'budgetMax',
+        'preferredLocation', 'nextFollowupAt', 'lostReason', 'agentNotes', 'interestLevel', 'preferredPropertyType'] as const;
+      const updates = Object.keys(data) as string[];
+      if (updates.some(k => !agentAllowed.includes(k as any))) {
+        return res.status(403).json({ error: 'Agents can only update basic lead properties.' });
+      }
+    }
+
+    const updateData: any = { ...data };
+    
+    // 👈 Prevent destructive updates on Admin Incentives
+    if (data.assignedToId && !isAgent) {
+      // Only grant assignment credit if it was previously unassigned
+      if (!existingLead.assignedById) {
+         updateData.assignedById = req.user!.userId;
+      }
+      
+      // Log the reassignment so you have a paper trail for disputes
+      if (data.assignedToId !== existingLead.assignedToId) {
+        await prisma.activityLog.create({
+          data: {
+            userId: req.user!.userId,
+            action: 'lead_reassigned',
+            entityType: 'lead',
+            entityId: existingLead.id,
+            details: { from: existingLead.assignedToId, to: data.assignedToId }
+          }
+        });
+      }
+    }
+
+    const lead = await prisma.lead.update({
+      where: { id },
+      data: updateData,
+      include: {
+        assignedTo: true,
+        assignedBy: { select: { id: true, fullName: true, role: true } }
+      }
+    });
+
+    const nextDateStr = data.nextFollowupAt ? new Date(data.nextFollowupAt).toISOString() : null;
+    const oldDateStr = existingLead.nextFollowupAt ? new Date(existingLead.nextFollowupAt).toISOString() : null;
+
+    if (data.nextFollowupAt && nextDateStr !== oldDateStr && req.user!.role !== 'sales_agent') {
+      const agentIdToAssign = existingLead.assignedToId || req.user!.userId;
+
+      await prisma.callLog.updateMany({
+        where: { leadId: id, callStatus: 'connected_callback' },
+        data: { callStatus: 'connected_positive' }
+      });
+      await prisma.followUpTask.updateMany({
+        where: { leadId: id, status: 'pending' },
+        data: { status: 'completed', completedAt: new Date() }
+      });
+
+      await prisma.callLog.create({
+        data: {
+          leadId: id,
+          agentId: agentIdToAssign,
+          callStatus: 'connected_callback',
+          callDate: new Date(),
+          callbackScheduledAt: new Date(data.nextFollowupAt),
+          notes: data.agentNotes || 'Follow-up scheduled from Lead Workspace'
+        }
+      });
+
+      await prisma.followUpTask.create({
+        data: {
+          leadId: id,
+          agentId: agentIdToAssign,
+          taskType: 'callback',
+          scheduledAt: new Date(data.nextFollowupAt),
+          notes: data.agentNotes || 'Follow-up scheduled from Lead Workspace'
+        }
+      });
+    }
+
+    return res.json(lead);
+  } catch (error) {
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
+    console.error('Update Lead Error:', error);
+    return res.status(500).json({ error: 'Failed to update lead' });
   }
 };
 
@@ -194,16 +276,25 @@ export const getLead = async (req: AuthRequest, res: Response) => {
 export const createLead = async (req: AuthRequest, res: Response) => {
   try {
     const data = createLeadSchema.parse(req.body);
-    const assignedToId = data.assignedToId || req.user!.userId;
+    const currentUserId = req.user!.userId;
+    const assignedToId = data.assignedToId || currentUserId;
+
+    // Track who assigned this lead (only relevant if assigning to someone else)
+    const assignedById = (data.assignedToId && data.assignedToId !== currentUserId)
+      ? currentUserId
+      : null;
 
     const lead = await prisma.lead.create({
-      data: { ...data, assignedToId },
-      include: { assignedTo: true }
+      data: { ...data, assignedToId, assignedById },
+      include: {
+        assignedTo: true,
+        assignedBy: { select: { id: true, fullName: true, role: true } }
+      }
     });
 
     await prisma.activityLog.create({
       data: {
-        userId: req.user!.userId,
+        userId: currentUserId,
         action: 'lead_created',
         entityType: 'lead',
         entityId: lead.id,
@@ -218,85 +309,6 @@ export const createLead = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const updateLead = async (req: AuthRequest, res: Response) => {
-  try {
-    const { id } = req.params;
-    const data = updateLeadSchema.parse(req.body);
-
-    const existingLead = await prisma.lead.findUnique({ where: { id } });
-    if (!existingLead) return res.status(404).json({ error: 'Lead not found' });
-
-    const isAgent = req.user!.role === 'sales_agent';
-    const isOwner = existingLead.assignedToId === req.user!.userId;
-
-    if (isAgent) {
-      if (!isOwner) {
-        return res.status(403).json({ error: 'You can only update your own leads.' });
-      }
-      // Agents are additionally restricted to only safe fields
-      const agentAllowed = ['notes', 'stage', 'temperature', 'budgetMin', 'budgetMax',
-        'preferredLocation', 'nextFollowupAt', 'lostReason', 'agentNotes', 'interestLevel', 'preferredPropertyType'] as const;
-      const updates = Object.keys(data) as string[];
-      if (updates.some(k => !agentAllowed.includes(k as any))) {
-        return res.status(403).json({ error: 'Agents can only update basic lead properties.' });
-      }
-    }
-
-    const lead = await prisma.lead.update({
-      where: { id },
-      data: data as any,
-      include: { assignedTo: true }
-    });
-
-    // 👇 NEW: Sync "Follow-up Scheduler" with Telecalling tab!
-    const nextDateStr = data.nextFollowupAt ? new Date(data.nextFollowupAt).toISOString() : null;
-    const oldDateStr = existingLead.nextFollowupAt ? new Date(existingLead.nextFollowupAt).toISOString() : null;
-
-    // Only trigger if the user actually changed/added a Follow-up date
-    if (data.nextFollowupAt && nextDateStr !== oldDateStr && req.user!.role !== 'sales_agent') {
-      const agentIdToAssign = existingLead.assignedToId || req.user!.userId;
-
-      // 1. Clear old pending callbacks to prevent duplicates
-      await prisma.callLog.updateMany({
-        where: { leadId: id, callStatus: 'connected_callback' },
-        data: { callStatus: 'connected_positive' }
-      });
-      await prisma.followUpTask.updateMany({
-        where: { leadId: id, status: 'pending' },
-        data: { status: 'completed', completedAt: new Date() }
-      });
-
-      // 2. Create new active callback so it appears in Telecalling Follow Ups
-      await prisma.callLog.create({
-        data: {
-          leadId: id,
-          agentId: agentIdToAssign,
-          callStatus: 'connected_callback',
-          callDate: new Date(),
-          callbackScheduledAt: new Date(data.nextFollowupAt),
-          notes: data.agentNotes || 'Follow-up scheduled from Lead Workspace'
-        }
-      });
-
-      // 3. Keep a follow-up task active too
-      await prisma.followUpTask.create({
-        data: {
-          leadId: id,
-          agentId: agentIdToAssign,
-          taskType: 'callback',
-          scheduledAt: new Date(data.nextFollowupAt),
-          notes: data.agentNotes || 'Follow-up scheduled from Lead Workspace'
-        }
-      });
-    }
-
-    return res.json(lead);
-  } catch (error) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
-    console.error('Update Lead Error:', error);
-    return res.status(500).json({ error: 'Failed to update lead' });
-  }
-};
 
 export const deleteLead = async (req: AuthRequest, res: Response) => {
   try {
@@ -426,7 +438,7 @@ export const bulkAssign = async (req: AuthRequest, res: Response) => {
 
     await prisma.lead.updateMany({
       where: { id: { in: leadIds } },
-      data: { assignedToId: agentId }
+      data: { assignedToId: agentId, assignedById: req.user!.userId }
     });
 
     return res.json({ success: true, count: leadIds.length });

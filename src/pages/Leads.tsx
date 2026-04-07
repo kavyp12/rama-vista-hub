@@ -49,6 +49,11 @@ export interface Lead {
     email: string;
     avatarUrl?: string | null;
   } | null;
+  assignedBy?: {
+    id: string;
+    fullName: string;
+    role: string;
+  } | null;
   siteVisits?: any[];
   callLogs?: any[];
 }
@@ -62,6 +67,7 @@ export default function Leads() {
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [admins, setAdmins] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Search & Filter State
@@ -70,6 +76,7 @@ export default function Leads() {
   const [sourceFilter, setSourceFilter] = useState('all');
   const [temperatureFilter, setTemperatureFilter] = useState('all');
   const [assignedAgentFilter, setAssignedAgentFilter] = useState('all');
+  const [assignedAdminFilter, setAssignedAdminFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -108,6 +115,7 @@ export default function Leads() {
     sourceFilter !== 'all',
     temperatureFilter !== 'all',
     assignedAgentFilter !== 'all',
+    assignedAdminFilter !== 'all',
     dateFilter !== 'all',
     followUpFilter !== 'all'
   ].filter(Boolean).length;
@@ -122,46 +130,39 @@ export default function Leads() {
 
   // 👇 1. Wrap the entire function in useCallback
   const fetchData = useCallback(async () => {
-    console.log('[Leads Manager] 🔍 Checking local cache...');
-    
-    // 1. INSTANT LOAD FROM CACHE
-    const cachedData = localStorage.getItem(CACHE_KEY);
-    const cacheTimestamp = localStorage.getItem(CACHE_TIME_KEY);
-    
-    if (cachedData && cacheTimestamp) {
-      const isCacheValid = (Date.now() - parseInt(cacheTimestamp)) < CACHE_DURATION_MS;
-      if (isCacheValid) {
-        setLeads(JSON.parse(cachedData));
-        setLoading(false); 
-      } else {
-        setLoading(true);
-      }
-    } else {
-      setLoading(true); 
-    }
+    console.log('[Leads Manager] 🔍 Fetching from server...');
+    setLoading(true);
 
-    // 2. BACKGROUND REVALIDATION
     try {
-      const res = await fetch(`${API_URL}/leads`, {
+      // 👈 Utilize server-side params without limits
+      const params = new URLSearchParams();
+      if (assignedAdminFilter !== 'all') {
+         params.append('assignedBy', assignedAdminFilter);
+      }
+
+      const res = await fetch(`${API_URL}/leads?${params.toString()}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
       
       if (Array.isArray(data)) {
         setLeads(data); 
-        localStorage.setItem(CACHE_KEY, JSON.stringify(data));
-        localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
-        console.log('[Leads Manager] 💾 Cache updated successfully.');
+        
+        // Note: Without a limit, this may eventually hit localStorage quotas for high-volume accounts.
+        try {
+          localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+          localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
+        } catch (e) {
+          console.warn("Local storage cache full, skipping cache update.");
+        }
       }
     } catch (error) {
-      console.error('[Leads Manager] 🚨 Background sync failed:', error);
-      if (!cachedData) {
-        toast({ title: 'Error', description: 'Failed to fetch leads', variant: 'destructive' });
-      }
+      console.error('[Leads Manager] 🚨 Fetch failed:', error);
+      toast({ title: 'Error', description: 'Failed to fetch leads', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
-  }, [token]); // 👇 2. Add token here to the dependency array
+  }, [token, assignedAdminFilter]); // 👈 Re-fetch when admin filter changes
 
 
   // 3. NOW, use the effect to call it (PASTE IT HERE!)
@@ -180,6 +181,18 @@ export default function Leads() {
       const data = await res.json();
       if (Array.isArray(data)) setAgents(data);
     } catch (error) { console.error("Failed to load agents"); }
+    
+    // Also fetch admins for the 'Assigned By' filter
+    try {
+      const res = await fetch(`${API_URL}/users?role=admin`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        // Optionally append superadmins if applicable, but role=admin usually includes superadmins per user app or they can be fetched too
+        setAdmins(data);
+      }
+    } catch (error) { console.error("Failed to load admins"); }
   }
 
   async function handleSync() {
@@ -336,6 +349,9 @@ export default function Leads() {
       if (assignedAgentFilter === 'unassigned') matchesAgent = !lead.assignedToId;
       else if (assignedAgentFilter !== 'all') matchesAgent = lead.assignedToId === assignedAgentFilter;
 
+      let matchesAdmin = true;
+      if (assignedAdminFilter !== 'all') matchesAdmin = lead.assignedBy?.id === assignedAdminFilter;
+
       let matchesDate = true;
       if (dateFilter !== 'all') {
         const leadDate = new Date(lead.createdAt);
@@ -394,7 +410,7 @@ export default function Leads() {
         }
       }
 
-      return matchesSearch && matchesStage && matchesSource && matchesTemperature && matchesAgent && matchesDate && matchesFollowUp;
+      return matchesSearch && matchesStage && matchesSource && matchesTemperature && matchesAgent && matchesAdmin && matchesDate && matchesFollowUp;
     })
     .sort((a, b) => {
       // If filtering by follow-ups, sort by follow up date
@@ -411,7 +427,7 @@ export default function Leads() {
     // 1. Reset visible count back to 50 whenever you type a search or change a filter
   useEffect(() => {
     setVisibleCount(50);
-  }, [searchQuery, stageFilter, sourceFilter, temperatureFilter, assignedAgentFilter, dateFilter, startDate, endDate, followUpFilter, followUpDate]);
+  }, [searchQuery, stageFilter, sourceFilter, temperatureFilter, assignedAgentFilter, assignedAdminFilter, dateFilter, startDate, endDate, followUpFilter, followUpDate]);
 
   // 2. Intersection Observer to load 50 more when scrolling to the bottom
   useEffect(() => {
@@ -477,6 +493,7 @@ export default function Leads() {
                             setDateFilter('all');
                             setTemperatureFilter('all');
                             setAssignedAgentFilter('all');
+                            setAssignedAdminFilter('all');
                             setFollowUpFilter('all');
                             setFollowUpDate('');
                             setStartDate('');
@@ -540,16 +557,29 @@ export default function Leads() {
                       </div>
 
                       {canAssignLeads && (
-                        <div className="space-y-1.5">
-                          <Label className="text-xs text-muted-foreground">Assigned Agent</Label>
-                          <Select value={assignedAgentFilter} onValueChange={setAssignedAgentFilter}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All Agents</SelectItem>
-                              <SelectItem value="unassigned">Unassigned</SelectItem>
-                              {agents.map(a => <SelectItem key={a.id} value={a.id}>{a.fullName}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs text-muted-foreground">Assigned Agent</Label>
+                            <Select value={assignedAgentFilter} onValueChange={setAssignedAgentFilter}>
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All Agents</SelectItem>
+                                <SelectItem value="unassigned">Unassigned</SelectItem>
+                                {agents.map(a => <SelectItem key={a.id} value={a.id}>{a.fullName}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          
+                          <div className="space-y-1.5">
+                            <Label className="text-xs text-muted-foreground">Assigned By (Admin)</Label>
+                            <Select value={assignedAdminFilter} onValueChange={setAssignedAdminFilter}>
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All Admins</SelectItem>
+                                {admins.map(a => <SelectItem key={a.id} value={a.id}>{a.fullName}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </div>
                         </div>
                       )}
 

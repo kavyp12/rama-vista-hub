@@ -29,6 +29,16 @@ interface AgentReport {
   rank: number;
 }
 
+interface AdminReport {
+  agent: { id: string; fullName: string; email: string; role: string; avatarUrl?: string | null };
+  leadsAssigned: number;
+  leadsConversion: { closed: number; token: number; convRate: number };
+  calls: { total: number; ivrPicked: number; connected: number; missed: number; connectRate: number };
+  score: number;
+  isActive: boolean;
+  rank: number;
+}
+
 interface ReportSummary {
   totalAgents: number;
   activeAgents: number;
@@ -37,10 +47,13 @@ interface ReportSummary {
   totalCalls: number;
   totalClosed: number;
   totalScore: number;
+  totalLeadsAssignedByAdmin: number;
+  totalIvrPickedByAdmin: number;
 }
 
 interface Report {
   agents: AgentReport[];
+  adminReport: AdminReport[];
   summary: ReportSummary;
   dateRange: { from: string | null; to: string | null };
 }
@@ -658,6 +671,65 @@ export default function Incentives() {
               )}
             </CardContent>
           </Card>
+        </div>
+
+        {/* ── ADMIN PERFORMANCE SECTION ────────────────────────────── */}
+        <div className="mt-8 pt-6 border-t">
+          <div className="flex items-center gap-2 mb-4">
+            <Trophy className="h-5 w-5 text-indigo-600" />
+            <h3 className="font-bold text-lg text-slate-800">Admin Leadership & Assignment</h3>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {loading ? (
+              [...Array(2)].map((_, i) => (
+                <div key={i} className="h-32 bg-slate-100 rounded-xl animate-pulse" />
+              ))
+            ) : report?.adminReport?.length === 0 ? (
+              <div className="col-span-full py-8 text-center text-muted-foreground">
+                No admin data available for this period.
+              </div>
+            ) : (
+              report?.adminReport.map(admin => (
+                <Card key={admin.agent.id} className="border transition-all hover:shadow-md">
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-3 mb-3">
+                      <Avatar className="h-10 w-10 border shadow-sm shrink-0">
+                        <AvatarFallback className="text-xs font-bold bg-indigo-50 text-indigo-700">
+                          {getInitials(admin.agent.fullName)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex justify-between items-center">
+                          <p className="font-semibold text-sm truncate">{admin.agent.fullName}</p>
+                          <Badge className="bg-indigo-100 text-indigo-700 hover:bg-indigo-100 ml-2">
+                            {admin.score} pts
+                          </Badge>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{admin.agent.role}</p>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-slate-100">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Leads Assigned</p>
+                        <p className="font-bold text-slate-800">{admin.leadsAssigned}</p>
+                        <p className="text-[10px] text-green-600 mt-0.5">{admin.leadsConversion.closed} closed ({admin.leadsConversion.convRate}%)</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">IVR Calls Picked</p>
+                        <p className="font-bold text-slate-800 flex items-center gap-1">
+                          <Phone className="h-3 w-3 text-blue-500" />
+                          {admin.calls.ivrPicked}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">out of {admin.calls.total} total calls</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
         </div>
 
       </div>

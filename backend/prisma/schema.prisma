@@ -56,6 +56,7 @@ model User {
   documentsCreated    Document[]               @relation("CreatedBy")
   followUpTasks       FollowUpTask[]
   assignedLeads       Lead[]                   @relation("AssignedTo")
+  leadAssignments     Lead[]                   @relation("AssignedBy")
   campaignsCreated    MarketingCampaign[]      @relation("CreatedBy")
   sentReminders         PaymentReminder[]        @relation("SentReminders")
   recommendationsSent   PropertyRecommendation[] @relation("RecommendedBy")
@@ -79,6 +80,7 @@ model Lead {
   notes                   String?
   nextFollowupAt          DateTime?                @map("next_followup_at")
   assignedToId            String?                  @map("assigned_to")
+  assignedById            String?                  @map("assigned_by")
   createdAt               DateTime                 @default(now()) @map("created_at")
   updatedAt               DateTime                 @updatedAt @map("updated_at")
   projectId               String?                  @map("project_id")
@@ -95,6 +97,7 @@ model Lead {
   documents               Document[]
   followUpTasks           FollowUpTask[]
   assignedTo              User?                    @relation("AssignedTo", fields: [assignedToId], references: [id])
+  assignedBy              User?                    @relation("AssignedBy", fields: [assignedById], references: [id])
   broker                  Broker?                  @relation(fields: [brokerId], references: [id])
   project                 Project?                 @relation(fields: [projectId], references: [id])
   payments                Payment[]

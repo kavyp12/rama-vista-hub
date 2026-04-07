@@ -11,7 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import { 
   Phone, Flame, Thermometer, Snowflake, 
   Home, CalendarPlus, UserCheck, MapPin, Calendar, Building2, Pencil, Wallet, FileText,
-  CheckCircle2, MessageCircle, Pin, PinOff, Trash2
+  CheckCircle2, MessageCircle, Pin, PinOff, Trash2, UserPlus
 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { PropertyMatchModal } from './PropertyMatchModal';
@@ -192,9 +192,15 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
                   <h3 className="font-semibold text-sm truncate text-slate-900" title={lead.name}>{lead.name}</h3>
                   {getTemperatureIcon(lead.temperature)}
                 </div>
-                <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5 truncate">
+                <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5 truncate flex-wrap">
                    <Badge variant="outline" className="text-[9px] h-4 px-1">{daysOld}d old</Badge>
                    <span className="truncate">• {lead.source}</span>
+                   {lead.assignedBy && (
+                     <span className="inline-flex items-center gap-1 text-[9px] font-medium bg-violet-50 text-violet-700 border border-violet-200 px-1.5 py-0.5 rounded-full ml-1 truncate max-w-[120px]">
+                       <UserPlus className="h-2.5 w-2.5 shrink-0" />
+                       <span className="truncate">By {lead.assignedBy.fullName}</span>
+                     </span>
+                   )}
                 </div>
               </div>
             </div>

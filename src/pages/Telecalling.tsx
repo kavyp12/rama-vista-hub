@@ -120,6 +120,7 @@ interface CallStats {
   inboundConnected?: number;
   outboundConnected?: number;
   inboundMissed?: number;
+  adminAssignedLeads?: number; // 👈 Add this line
   outboundMissed?: number;
 }
 
@@ -1509,17 +1510,27 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
             </Button>
           </div>
         </div>
-
-        {/* ─── KPI STAT CARDS ─── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+{/* ─── KPI STAT CARDS ─── */}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           <KpiCard title="Total Calls" value={stats.totalCalls} icon={Phone} color="blue" subtitle={`${stats.connectRate}% connect rate`} />
           <KpiCard title="Qualified" value={stats.positive} icon={ThumbsUp} color="green"
             subtitle={stats.totalCalls > 0 ? `${Math.round((stats.positive / stats.totalCalls) * 100)}% of all calls` : '—'} trend="up" />
           <KpiCard title="Missed Calls" value={stats.notAnswered} icon={PhoneMissed} color="red"
             subtitle={stats.totalCalls > 0 ? `${Math.round((stats.notAnswered / stats.totalCalls) * 100)}% miss rate` : '—'} trend="down" />
-          <KpiCard title="Callbacks Pending" value={stats.callback || 0} icon={Clock} color="amber" subtitle="Awaiting follow-up" />
+          <KpiCard title="Callbacks" value={stats.callback || 0} icon={Clock} color="amber" subtitle="Awaiting follow-up" />
+          
+          {/* 👈 Added Admin Report Card */}
+          <Card className="bg-purple-50 border-purple-200 text-purple-700 shadow-sm col-span-2 lg:col-span-1">
+            <CardContent className="p-5">
+              <div className="flex items-start justify-between mb-3">
+                <div className="p-2.5 rounded-xl bg-purple-100 text-purple-600"><Users className="h-5 w-5" /></div>
+              </div>
+              <p className="text-2xl font-bold tracking-tight">{stats.adminAssignedLeads || 0}</p>
+              <p className="text-xs font-semibold mt-0.5 opacity-90">Leads Assigned</p>
+              <p className="text-xs opacity-70 mt-1">Admin assignment tracking</p>
+            </CardContent>
+          </Card>
         </div>
-
         {/* ─── INBOUND vs OUTBOUND BREAKDOWN ─── */}
         <div>
           <div className="flex items-center gap-2 mb-3">
@@ -1865,6 +1876,7 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
                   { label: 'Not Interested', value: stats.negative, pct: stats.totalCalls > 0 ? Math.round((stats.negative / stats.totalCalls) * 100) : 0, good: false },
                   { label: 'Overall Connect Rate', value: `${stats.connectRate}%`, pct: null, good: stats.connectRate >= 50 },
                   { label: 'New Leads in Pipeline', value: stats.newLeads, pct: null, good: null },
+                  { label: 'Leads Assigned (Admin Report)', value: stats.adminAssignedLeads || 0, pct: null, good: null },
                 ].map(row => (
                   <TableRow key={row.label} className="hover:bg-muted/30">
                     <TableCell className="font-medium text-sm">{row.label}</TableCell>
