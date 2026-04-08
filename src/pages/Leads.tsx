@@ -13,7 +13,8 @@ import { LeadCard } from '@/components/leads/LeadCard';
 import { EditLeadDialog } from '@/components/leads/EditLeadDialog';
 import { Plus, Search, Users, RefreshCw, MapPin, Filter, X, Upload, CheckSquare, UserCheck, CheckCircle2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-
+import { COUNTRY_CODES, getPhoneInfo } from '@/lib/utils';
+import { CountryCodeSelect } from '@/components/ui/CountryCodeSelect';
 // Add this import near your other @/components/ui imports:
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
@@ -664,7 +665,31 @@ export default function Leads() {
                   <form onSubmit={handleCreateLead} className="space-y-4 py-4">
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2"><Label>Full Name *</Label><Input required value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} /></div>
-                      <div className="space-y-2"><Label>Phone Number *</Label><Input required value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} /></div>
+                      <div className="space-y-2">
+  <Label htmlFor="phone">Phone *</Label>
+  <div className="flex">
+    <CountryCodeSelect
+      value={getPhoneInfo(formData.phone).code}
+      onChange={(newCode) => {
+        const currentNationalInfo = getPhoneInfo(formData.phone).nationalNumber;
+        setFormData({ ...formData, phone: newCode + currentNationalInfo });
+      }}
+    />
+    <Input
+      id="phone"
+      type="tel"
+      className="rounded-l-none"
+      placeholder="9876543210"
+      required
+      value={getPhoneInfo(formData.phone).nationalNumber}
+      onChange={(e) => {
+        const currentCode = getPhoneInfo(formData.phone).code;
+        const cleanNumber = e.target.value.replace(/\D/g, '');
+        setFormData({ ...formData, phone: currentCode + cleanNumber });
+      }}
+    />
+  </div>
+</div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2"><Label>Email</Label><Input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} /></div>

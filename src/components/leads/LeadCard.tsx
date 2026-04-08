@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { getPhoneInfo } from '@/lib/utils';
 import { useAuth, usePermissions } from '@/lib/auth-context';
 import { Card, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { WhatsAppShareDialog } from './WhatsAppShareDialog'; // <-- ADD THIS IMPORT
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
@@ -47,6 +49,7 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
 
   const [agentSearch, setAgentSearch] = useState('');
   const [isAssignOpen, setIsAssignOpen] = useState(false);
+  const [showWhatsAppDialog, setShowWhatsAppDialog] = useState(false); // <-- ADD THIS
 
   const assignedId = lead.assignedTo?.id || lead.assignedToId;
   
@@ -153,11 +156,9 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
       setIsReassigning(false);
     }
   };
-
-  const openWhatsApp = (e: React.MouseEvent) => {
+const openWhatsApp = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const cleanPhone = lead.phone.replace(/\D/g, ''); 
-    window.open(`https://wa.me/${cleanPhone}?text=Hello ${lead.name}, I am contacting you regarding your property inquiry.`, '_blank');
+    setShowWhatsAppDialog(true);
   };
 
   const createdDate = lead.createdAt ? new Date(lead.createdAt) : new Date();
@@ -193,15 +194,17 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
                   {getTemperatureIcon(lead.temperature)}
                 </div>
                 <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5 truncate flex-wrap">
-                   <Badge variant="outline" className="text-[9px] h-4 px-1">{daysOld}d old</Badge>
-                   <span className="truncate">• {lead.source}</span>
-                   {lead.assignedBy && (
-                     <span className="inline-flex items-center gap-1 text-[9px] font-medium bg-violet-50 text-violet-700 border border-violet-200 px-1.5 py-0.5 rounded-full ml-1 truncate max-w-[120px]">
-                       <UserPlus className="h-2.5 w-2.5 shrink-0" />
-                       <span className="truncate">By {lead.assignedBy.fullName}</span>
-                     </span>
-                   )}
-                </div>
+   <Badge variant="outline" className="text-[10px] h-4 px-1.5">
+     {format(new Date(lead.createdAt), 'dd MMM yyyy')}
+   </Badge>
+   <span className="truncate">• {lead.source}</span>
+   {lead.assignedBy && (
+     <span className="inline-flex items-center gap-1 text-[9px] font-medium bg-violet-50 text-violet-700 border border-violet-200 px-1.5 py-0.5 rounded-full ml-1 truncate max-w-[120px]">
+       <UserPlus className="h-2.5 w-2.5 shrink-0" />
+       <span className="truncate">By {lead.assignedBy.fullName}</span>
+     </span>
+   )}
+</div>
               </div>
             </div>
 
@@ -269,8 +272,16 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
              </div>
           )}
           
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <Phone className="h-3 w-3 shrink-0" />{lead.phone}
+          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+            <Phone className="h-3 w-3 shrink-0" />
+            {getPhoneInfo(lead.phone).iso ? (
+              <img
+                src={`https://flagcdn.com/w20/${getPhoneInfo(lead.phone).iso.toLowerCase()}.png`}
+                alt=""
+                className="w-5 h-3.5 object-cover rounded-sm shrink-0"
+              />
+            ) : null}
+            <span>{lead.phone}</span>
           </div>
           
           {/* Site Visit Block */}
@@ -398,25 +409,28 @@ export function LeadCard({ lead, profiles = [], onUpdate, onEdit }: any) {
         </CardContent>
 
         {/* 4-Grid Action Footer */}
-        <CardFooter className="p-0 border-t bg-slate-50/50 grid grid-cols-4 divide-x divide-slate-200 shrink-0">
-           <Button variant="ghost" className="h-10 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowQuickCall(true)} title="Quick Call">
-             <Phone className="h-4 w-4" />
-           </Button>
-           <Button variant="ghost" className="h-10 rounded-none text-slate-500 hover:text-green-600 hover:bg-green-50" onClick={openWhatsApp} title="WhatsApp">
-             <MessageCircle className="h-4 w-4" />
-           </Button>
-           <Button variant="ghost" className="h-10 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowPropertyMatch(true)} title="Property Match">
-             <Home className="h-4 w-4" />
-           </Button>
-           <Button variant="ghost" className="h-10 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowScheduleVisit(true)} title="Schedule Visit">
-             <CalendarPlus className="h-4 w-4" />
-           </Button>
-        </CardFooter>
+<CardFooter className={`p-0 border-t bg-slate-50/50 grid ${canAssignLeads ? 'grid-cols-4' : 'grid-cols-3'} divide-x divide-slate-200 shrink-0`}>
+   {canAssignLeads && (
+     <Button variant="ghost" className="h-10 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowQuickCall(true)} title="Quick Call">
+       <Phone className="h-4 w-4" />
+     </Button>
+   )}
+   <Button variant="ghost" className="h-10 rounded-none text-slate-500 hover:text-green-600 hover:bg-green-50" onClick={openWhatsApp} title="WhatsApp">
+     <MessageCircle className="h-4 w-4" />
+   </Button>
+   <Button variant="ghost" className="h-10 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowPropertyMatch(true)} title="Property Match">
+     <Home className="h-4 w-4" />
+   </Button>
+   <Button variant="ghost" className="h-10 rounded-none text-slate-500 hover:text-blue-600 hover:bg-blue-50" onClick={() => setShowScheduleVisit(true)} title="Schedule Visit">
+     <CalendarPlus className="h-4 w-4" />
+   </Button>
+</CardFooter>
       </Card>
 
       <PropertyMatchModal lead={lead} open={showPropertyMatch} onOpenChange={setShowPropertyMatch} onSuccess={onUpdate} />
       <ScheduleVisitDialog lead={lead} open={showScheduleVisit} onOpenChange={setShowScheduleVisit} onSuccess={onUpdate} />
       <QuickCallDialog lead={lead} open={showQuickCall} onOpenChange={setShowQuickCall} onSuccess={onUpdate} />
+      <WhatsAppShareDialog lead={lead} open={showWhatsAppDialog} onOpenChange={setShowWhatsAppDialog} />
     </>
   );
 }

@@ -128,11 +128,20 @@ export function PropertyMatchModal({ lead, open, onOpenChange, onSuccess }: any)
       });
   }
 
-  const handleShareWA = (prop: any) => {
-      const msg = `Hi ${lead.name}, check out this property: ${prop.title} in ${prop.location}. It perfectly matches your requirements! Price: ${formatPrice(prop.price)}. Let me know if you want to visit.`;
-      const cleanPhone = lead.phone.replace(/\D/g, '');
-      window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
-  };
+ const handleShareWA = (prop: any) => {
+    // Build a detail string without the property title/name
+    const details = [];
+    if (prop.bedrooms) details.push(`${prop.bedrooms} BHK`);
+    if (prop.propertyType) details.push(prop.propertyType);
+    if (prop.areaSqft) details.push(`(${prop.areaSqft} sqft)`);
+    
+    const specsString = details.length > 0 ? details.join(' ') : 'property';
+
+    const msg = `Hi ${lead.name}, check out this ${specsString} in ${prop.location}. It perfectly matches your requirements! Price is ${formatPrice(prop.price)}. Let me know if you would like to schedule a visit.`;
+    
+    const cleanPhone = lead.phone.replace(/\D/g, '');
+    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+};
 
   // Compare View Render
   if (isComparing && compareIds.length > 0) {

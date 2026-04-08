@@ -8,7 +8,8 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 const createLeadSchema = z.object({
   name: z.string().min(2),
   email: z.string().email().optional().nullable(),
-  phone: z.string(),
+  // Replace the old phone line with this:
+phone: z.string().min(7, "Phone number is too short").max(20, "Phone number is too long").regex(/^\+?[0-9\s\-]+$/, "Invalid phone format"),
   source: z.string(),
   temperature: z.enum(['hot', 'warm', 'cold']).default('warm'),
   budgetMin: z.number().optional().nullable(),
@@ -22,7 +23,8 @@ const createLeadSchema = z.object({
 const updateLeadSchema = z.object({
   name: z.string().min(2).optional(),
   email: z.string().email().optional().nullable(),
-  phone: z.string().optional(),
+  // Replace the old phone line with this:
+phone: z.string().min(7, "Phone number is too short").max(20, "Phone number is too long").regex(/^\+?[0-9\s\-]+$/, "Invalid phone format"),
   source: z.string().optional(),
   stage: z.string().optional(),
   temperature: z.enum(['hot', 'warm', 'cold']).optional(),

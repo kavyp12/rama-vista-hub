@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { getPhoneInfo } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
@@ -948,7 +949,20 @@ export default function Telecalling() {
                                   </div>
                                 </div>
                               </TableCell>
-                                <TableCell className="text-sm font-mono">{row.lead?.phone || '—'}</TableCell>
+                                <TableCell>
+  <div className="flex items-center gap-1.5">
+    {getPhoneInfo(row.lead?.phone).iso ? (
+      <img
+        src={`https://flagcdn.com/w20/${getPhoneInfo(row.lead?.phone).iso.toLowerCase()}.png`}
+        alt=""
+        className="w-5 h-3.5 object-cover rounded-sm shrink-0"
+      />
+    ) : (
+      <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+    )}
+    <span className="text-sm font-mono tracking-wide">{getPhoneInfo(row.lead?.phone).number || '—'}</span>
+  </div>
+</TableCell>
                                 <TableCell className="text-sm text-muted-foreground">{row.agent?.fullName || '—'}</TableCell>
                                 <TableCell>
                                   {row.isLeadRow ? (
@@ -1107,9 +1121,20 @@ export default function Telecalling() {
                   <Input defaultValue={selectedItem.lead?.name} readOnly className="bg-muted" />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Phone</label>
-                  <Input defaultValue={selectedItem.lead?.phone} readOnly className="bg-muted" />
-                </div>
+  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Phone</label>
+  <div className="flex items-center h-10 w-full rounded-md border border-input bg-muted px-3 py-2 text-sm opacity-100">
+    {getPhoneInfo(selectedItem.lead?.phone).iso ? (
+      <img
+        src={`https://flagcdn.com/w20/${getPhoneInfo(selectedItem.lead?.phone).iso.toLowerCase()}.png`}
+        alt=""
+        className="w-5 h-3.5 object-cover rounded-sm shrink-0 mr-2"
+      />
+    ) : (
+      <Phone className="h-4 w-4 text-muted-foreground shrink-0 mr-2" />
+    )}
+    <span className="font-medium text-foreground">{getPhoneInfo(selectedItem.lead?.phone).number || '—'}</span>
+  </div>
+</div>
               </div>
               {!selectedItem.isLeadRow && (
                 <>

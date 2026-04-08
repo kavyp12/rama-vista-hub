@@ -105,6 +105,8 @@ export function ScheduleVisitDialog({ lead, open, onOpenChange, onSuccess }: any
   const [visitTime, setVisitTime] = useState('');
   const [notes, setNotes] = useState('');
   const [conflictWarning, setConflictWarning] = useState('');
+  const [manualProperty, setManualProperty] = useState('');
+  const [isManualEntry, setIsManualEntry] = useState(false);
 
   const [propertyOptions, setPropertyOptions] = useState<{ value: string; label: string }[]>([]);
 
@@ -196,18 +198,29 @@ export function ScheduleVisitDialog({ lead, open, onOpenChange, onSuccess }: any
   }
 
   async function handleSubmit() {
-    if (!visitDate || !visitTime || !selectedAgent || !user) return;
-    setSubmitting(true);
-    try {
-      const scheduledAt = new Date(`${visitDate}T${visitTime}`).toISOString();
-      const visitRes = await fetch(`${API_URL}/site-visits`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({
-          leadId: lead.id, propertyId: selectedProperty || null, projectId: selectedProject || null,
-          scheduledAt: scheduledAt, conductedBy: selectedAgent, status: 'scheduled', feedback: notes || null,
-        })
-      });
+  if (!visitDate || !visitTime || !selectedAgent || !user) return;
+  setSubmitting(true);
+  try {
+    const scheduledAt = new Date(`${visitDate}T${visitTime}`).toISOString();
+    
+    // Append manual property to notes if they typed one
+    const finalFeedback = manualProperty 
+      ? `Manual Property Info: ${manualProperty}\n${notes}` 
+      : (notes || null);
+
+    const visitRes = await fetch(`${API_URL}/site-visits`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({
+        leadId: lead.id, 
+        propertyId: selectedProperty || null, 
+        projectId: selectedProject || null,
+        scheduledAt: scheduledAt, 
+        conductedBy: selectedAgent, 
+        status: 'scheduled', 
+        feedback: finalFeedback,
+      })
+    });
       if (!visitRes.ok) throw new Error('Failed to schedule visit');
 
       await fetch(`${API_URL}/leads/${lead.id}`, {
@@ -305,16 +318,50 @@ export function ScheduleVisitDialog({ lead, open, onOpenChange, onSuccess }: any
             )}
           </div>
 
-          <div className="space-y-2">
-            <Label>Project (Search among {projects.length})</Label>
-            <SearchableSelect options={projects} value={selectedProject} onChange={setSelectedProject} placeholder="Type to search projects..." disabled={loading} />
+         {/* Manual Toggle */}
+          <div className="flex items-center gap-2 py-2">
+            <input 
+              type="checkbox" 
+              id="manual-mode" 
+              checked={isManualEntry} 
+              onChange={(e) => setIsManualEntry(e.target.checked)} 
+              className="h-4 w-4 rounded border-gray-300 text-blue-600"
+            />
+            <Label htmlFor="manual-mode" className="cursor-pointer text-blue-700 font-medium">
+              Project/Property not in list? Enter manually
+            </Label>
           </div>
 
-          <div className="space-y-2">
-            <Label>Property ({propertyOptions.length} available)</Label>
-            <SearchableSelect options={propertyOptions} value={selectedProperty} onChange={setSelectedProperty} placeholder={selectedProject ? "Select a unit..." : "Select project first"} disabled={loading} />
-          </div>
+          {!isManualEntry ? (
+            <>
+              <div className="space-y-2">
+                <Label>Project (Search among {projects.length})</Label>
+                <SearchableSelect options={projects} value={selectedProject} onChange={setSelectedProject} placeholder="Type to search projects..." disabled={loading} />
+              </div>
 
+              <div className="space-y-2">
+                <Label>Property ({propertyOptions.length} available)</Label>
+                <SearchableSelect 
+                  options={propertyOptions} 
+                  value={selectedProperty} 
+                  onChange={setSelectedProperty} 
+                  placeholder={selectedProject ? "Select a unit..." : "Select project first"} 
+                  disabled={loading} 
+                />
+              </div>
+            </>
+          ) : (
+            <div className="space-y-2 bg-blue-50/50 p-3 rounded-md border border-blue-100">
+              <Label>Manual Project/Property Details</Label>
+              <Textarea 
+                placeholder="Type the project name, BHK, and location manually..." 
+                value={manualProperty} 
+                onChange={(e) => setManualProperty(e.target.value)} 
+                disabled={loading}
+                rows={3}
+              />
+            </div>
+          )}
           <div className="space-y-2">
             <Label>Notes</Label>
             <Textarea placeholder="Instructions..." value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />

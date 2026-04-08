@@ -11,6 +11,8 @@ import { useToast } from '@/hooks/use-toast';
 import { Loader2, MapPin, Lock, FileText, Calendar } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { format } from 'date-fns';
+import { COUNTRY_CODES, getPhoneInfo } from '@/lib/utils';
+import { CountryCodeSelect } from '@/components/ui/CountryCodeSelect';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 const UNITS = { 'L': 100000, 'Cr': 10000000, 'K': 1000 };
@@ -117,7 +119,31 @@ export function EditLeadDialog({ lead, open, onOpenChange, onSuccess }: any) {
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-100">
             <div className="space-y-2"><Label>Name {isLocked && <Lock className="h-3 w-3 inline text-muted-foreground ml-1"/>}</Label><Input required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} disabled={isLocked} className={isLocked ? "bg-muted" : "bg-white"} /></div>
-            <div className="space-y-2"><Label>Phone {isLocked && <Lock className="h-3 w-3 inline text-muted-foreground ml-1"/>}</Label><Input required value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} disabled={isLocked} className={isLocked ? "bg-muted" : "bg-white"} /></div>
+            <div className="space-y-2">
+              <Label>Phone {isLocked && <Lock className="h-3 w-3 inline text-muted-foreground ml-1"/>}</Label>
+              <div className="flex">
+                <CountryCodeSelect
+                  value={getPhoneInfo(formData.phone).code}
+                  onChange={(newCode) => {
+                    const currentNationalInfo = getPhoneInfo(formData.phone).nationalNumber;
+                    setFormData({ ...formData, phone: newCode + currentNationalInfo });
+                  }}
+                  disabled={isLocked}
+                />
+                <Input
+                  required
+                  type="tel"
+                  className={`rounded-l-none ${isLocked ? "bg-muted" : "bg-white"}`}
+                  value={getPhoneInfo(formData.phone).nationalNumber}
+                  onChange={(e) => {
+                    const currentCode = getPhoneInfo(formData.phone).code;
+                    const cleanNumber = e.target.value.replace(/\D/g, '');
+                    setFormData({ ...formData, phone: currentCode + cleanNumber });
+                  }}
+                  disabled={isLocked}
+                />
+              </div>
+            </div>
             <div className="space-y-2"><Label>Email {isLocked && <Lock className="h-3 w-3 inline text-muted-foreground ml-1"/>}</Label><Input type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} disabled={isLocked} className={isLocked ? "bg-muted" : "bg-white"} /></div>
             
             <div className="space-y-2">

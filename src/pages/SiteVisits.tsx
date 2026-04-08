@@ -340,10 +340,18 @@ export default function SiteVisits() {
     setExpandedDates(newExpanded);
   }
 
-  function openActionDialog(visit: SiteVisit) {
+ function openActionDialog(visit: SiteVisit) {
     setSelectedVisit(visit);
     setRating(visit.rating || 0);
-    setFeedbackNotes(visit.feedback || '');
+    
+    // Hide the manual property tag from the text area when editing
+    let cleanFeedbackForEdit = visit.feedback || '';
+    if (cleanFeedbackForEdit.includes('Manual Property Info:')) {
+        const lines = cleanFeedbackForEdit.split('\n');
+        cleanFeedbackForEdit = lines.filter(l => !l.startsWith('Manual Property Info:')).join('\n').trim();
+    }
+    setFeedbackNotes(cleanFeedbackForEdit);
+
     setNextStage(visit.lead?.stage || '');
     setActionTab(visit.status === 'completed' ? 'complete' : 'complete');
     setShowActionDialog(true);
@@ -416,18 +424,22 @@ export default function SiteVisits() {
     try {
       const payload: any = {};
 
+      // Preserve manual info if it exists
+      let originalManualInfo = '';
+      if (selectedVisit.feedback?.includes('Manual Property Info:')) {
+          const manualLine = selectedVisit.feedback.split('\n').find(l => l.startsWith('Manual Property Info:'));
+          if (manualLine) originalManualInfo = manualLine + '\n';
+      }
+
       if (action === 'complete') {
         payload.status = 'completed';
         payload.rating = rating;
-        payload.feedback = feedbackNotes || null;
+        payload.feedback = feedbackNotes ? originalManualInfo + feedbackNotes : (originalManualInfo.trim() || null);
 
         if (nextStage && nextStage !== selectedVisit.lead?.stage) {
           await fetch(`${API_URL}/leads/${selectedVisit.leadId}`, {
             method: 'PATCH',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({
               stage: nextStage,
               temperature: nextStage === 'token' || nextStage === 'negotiation' ? 'hot' :
@@ -443,11 +455,10 @@ export default function SiteVisits() {
 
         payload.status = 'rescheduled';
         payload.scheduledAt = new Date(rescheduleDate).toISOString();
-        payload.feedback = feedbackNotes ?
-          `${selectedVisit.feedback || ''}\n[Rescheduled]: ${feedbackNotes}` :
-          selectedVisit.feedback;
+        const newFeedbackNote = feedbackNotes ? `[Rescheduled]: ${feedbackNotes}` : '';
+        payload.feedback = originalManualInfo + (cleanFeedbackForEdit(selectedVisit.feedback) + '\n' + newFeedbackNote).trim();
+        
       }
-
       const res = await fetch(`${API_URL}/site-visits/${selectedVisit.id}`, {
         method: 'PATCH',
         headers: {
@@ -474,6 +485,11 @@ export default function SiteVisits() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function cleanFeedbackForEdit(feedback: string | null) {
+      if (!feedback) return '';
+      return feedback.split('\n').filter(l => !l.startsWith('Manual Property Info:')).join('\n').trim();
   }
 
   function resetForm() {
@@ -905,6 +921,22 @@ export default function SiteVisits() {
                             const visitDate = parseISO(visit.scheduledAt);
                             const isMissed = visit.status === 'scheduled' && isPast(visitDate) && !isToday(visitDate);
 
+                            // Extract manual info for display
+                            let manualPropText = '';
+                            let cleanFeedback = visit.feedback || '';
+                            if (visit.feedback?.includes('Manual Property Info:')) {
+                                const lines = visit.feedback.split('\n');
+                                const manualLine = lines.find(l => l.startsWith('Manual Property Info:'));
+                                if (manualLine) {
+                                   manualPropText = manualLine.replace('Manual Property Info:', '').trim();
+                                   cleanFeedback = lines.filter(l => !l.startsWith('Manual Property Info:')).join('\n').trim();
+                                }
+                            }
+
+                            const displayTitle = visit.property?.title || visit.project?.name || (manualPropText ? "Manual Entry" : "No Location");
+                            const displayLocation = manualPropText || visit.property?.location || visit.project?.location || "Unknown";
+                            const showCity = !manualPropText && ((visit.property as any)?.city || (visit.project as any)?.city);
+
                             return (
                               <div
                                 key={visit.id}
@@ -940,17 +972,19 @@ export default function SiteVisits() {
                                       <div className="flex items-start gap-2 text-sm">
                                         {visit.property ? (
                                           <Home className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+                                        ) : manualPropText ? (
+                                          <Building2 className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
                                         ) : (
                                           <Building2 className="h-4 w-4 text-purple-600 mt-0.5 shrink-0" />
                                         )}
                                         <div className="min-w-0">
-                                          <p className="font-medium truncate">
-                                            {visit.property?.title || visit.project?.name || 'No Location'}
+                                          <p className="font-medium truncate" title={displayTitle}>
+                                            {displayTitle}
                                           </p>
-                                          <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
-                                            <MapPin className="h-3 w-3" />
-                                            {visit.property?.location || visit.project?.location || 'Unknown'}
-                                            {(visit.property?.city || visit.project) && `, ${visit.property?.city || ''}`}
+                                          <p className="text-xs text-muted-foreground flex items-center gap-1 truncate" title={displayLocation}>
+                                            <MapPin className="h-3 w-3 shrink-0" />
+                                            <span className="truncate">{displayLocation}</span>
+                                            {showCity && `, ${(visit.property as any)?.city || (visit.project as any)?.city || ''}`}
                                           </p>
                                         </div>
                                       </div>
