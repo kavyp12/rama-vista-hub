@@ -104,6 +104,13 @@ model Lead {
   propertyRecommendations PropertyRecommendation[]
   siteVisits              SiteVisit[]
 
+  @@index([stage])
+  @@index([assignedToId])
+  @@index([assignedById])
+  @@index([nextFollowupAt])
+  @@index([createdAt])
+  @@index([temperature])
+  @@index([source])
   @@map("leads")
 }
 
@@ -306,6 +313,10 @@ model SiteVisit {
   project     Project?        @relation(fields: [projectId], references: [id])
   property    Property?       @relation(fields: [propertyId], references: [id])
 
+  @@index([scheduledAt])
+  @@index([status])
+  @@index([conductedBy])
+  @@index([leadId])
   @@map("site_visits")
 }
 
@@ -327,6 +338,11 @@ model CallLog {
   agent               User       @relation(fields: [agentId], references: [id])
   lead                Lead       @relation(fields: [leadId], references: [id])
 
+  @@index([agentId])
+  @@index([callStatus])
+  @@index([callDate])
+  @@index([leadId])
+  @@index([deletedAt])
   @@map("call_logs")
 }
 
@@ -344,6 +360,10 @@ model FollowUpTask {
   agent       User       @relation(fields: [agentId], references: [id])
   lead        Lead       @relation(fields: [leadId], references: [id])
 
+  @@index([agentId])
+  @@index([leadId])
+  @@index([status])
+  @@index([scheduledAt])
   @@map("follow_up_tasks")
 }
 

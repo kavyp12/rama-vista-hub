@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useSearchParams } from 'react-router-dom';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
@@ -164,6 +164,19 @@ export default function Telecalling() {
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Debounced filters — API calls fire 300ms after the last filter change.
+  // This prevents a burst of requests when the user clicks multiple filters quickly.
+  const [debouncedFilters, setDebouncedFilters] = useState<FilterState>(EMPTY_FILTERS);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const setFiltersWithDebounce = useCallback((updater: FilterState | ((prev: FilterState) => FilterState)) => {
+    setFilters(updater);
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      setDebouncedFilters(prev => typeof updater === 'function' ? updater(prev) : updater);
+    }, 300);
+  }, []);
+
   // Modals
   const [selectedItem, setSelectedItem] = useState<TableRowData | null>(null);
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -289,14 +302,14 @@ export default function Telecalling() {
   }, [filters]);
 
   // ─── FETCH DATA ───
- const fetchData = useCallback(async () => {
+   const fetchData = useCallback(async () => {
     if (activeView === 'reports') return;
     setIsLoading(true);
     setTableData([]);
     try {
       if (activeView === 'new_leads') {
         const query = new URLSearchParams({ stage: 'new' });
-        if (filters.search) query.append('phone', filters.search);
+        if (debouncedFilters.search) query.append('phone', debouncedFilters.search);
         const res = await fetch(`${API_URL}/leads?${query}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -313,19 +326,15 @@ export default function Telecalling() {
         })));
       } else {
         const query = new URLSearchParams({ view: activeView });
-        if (filters.search) query.append('search', filters.search);
-        if (filters.dateFrom) query.append('dateFrom', filters.dateFrom);
-        if (filters.dateTo) query.append('dateTo', filters.dateTo);
-        if (filters.status !== 'all') query.append('callStatus', filters.status);
-        if (filters.agentId !== 'all') query.append('agentId', filters.agentId);
-        if (filters.minDuration !== 'all') query.append('minDuration', filters.minDuration);
-        if (filters.source !== 'all') query.append('source', filters.source);
-        // For missed tab: always show ALL directions (inbound + outbound missed calls)
-        // For other tabs: respect the direction filter
-        if (activeView !== 'missed' && filters.direction !== 'all') query.append('direction', filters.direction);
-        // Always include admin/IVR calls in the data
+        if (debouncedFilters.search) query.append('search', debouncedFilters.search);
+        if (debouncedFilters.dateFrom) query.append('dateFrom', debouncedFilters.dateFrom);
+        if (debouncedFilters.dateTo) query.append('dateTo', debouncedFilters.dateTo);
+        if (debouncedFilters.status !== 'all') query.append('callStatus', debouncedFilters.status);
+        if (debouncedFilters.agentId !== 'all') query.append('agentId', debouncedFilters.agentId);
+        if (debouncedFilters.minDuration !== 'all') query.append('minDuration', debouncedFilters.minDuration);
+        if (debouncedFilters.source !== 'all') query.append('source', debouncedFilters.source);
+        if (activeView !== 'missed' && debouncedFilters.direction !== 'all') query.append('direction', debouncedFilters.direction);
         query.append('includeAdmin', 'true');
-        // Always sort by date descending — newest call first
         query.append('sortBy', 'callDate');
         query.append('sortOrder', 'desc');
 
@@ -341,7 +350,6 @@ export default function Telecalling() {
           leadId: log.leadId,
           agentId: log.agentId,
           callStatus: log.callStatus,
-          // 👇 CHANGED: Show the scheduled Follow-Up Date instead of the old call date!
           displayDate: activeView === 'follow_ups' && log.callbackScheduledAt ? log.callbackScheduledAt : log.callDate,
           duration: log.callDuration,
           notes: log.notes,
@@ -351,12 +359,11 @@ export default function Telecalling() {
           deletedAt: log.deletedAt,
         }));
 
-        // 👇 CHANGED: Sort follow-ups so the most urgent/upcoming ones are at the top!
         mapped.sort((a, b) => {
           if (activeView === 'follow_ups') {
-            return new Date(a.displayDate).getTime() - new Date(b.displayDate).getTime(); // Ascending (Urgent first)
+            return new Date(a.displayDate).getTime() - new Date(b.displayDate).getTime();
           }
-          return new Date(b.displayDate).getTime() - new Date(a.displayDate).getTime(); // Descending (Newest calls first)
+          return new Date(b.displayDate).getTime() - new Date(a.displayDate).getTime();
         });
 
         setTableData(mapped);
@@ -366,16 +373,15 @@ export default function Telecalling() {
     } finally {
       setIsLoading(false);
     }
-  }, [activeView, filters, token, toast]);
+  }, [activeView, debouncedFilters, token, toast]);
 
   const fetchStats = useCallback(async () => {
     try {
       const query = new URLSearchParams();
-      if (filters.dateFrom) query.append('dateFrom', filters.dateFrom);
-      if (filters.dateTo) query.append('dateTo', filters.dateTo);
-      if (filters.agentId !== 'all') query.append('agentId', filters.agentId);
-      if (filters.direction !== 'all') query.append('direction', filters.direction);
-      // Always include admin/IVR calls in stats
+      if (debouncedFilters.dateFrom) query.append('dateFrom', debouncedFilters.dateFrom);
+      if (debouncedFilters.dateTo) query.append('dateTo', debouncedFilters.dateTo);
+      if (debouncedFilters.agentId !== 'all') query.append('agentId', debouncedFilters.agentId);
+      if (debouncedFilters.direction !== 'all') query.append('direction', debouncedFilters.direction);
       query.append('includeAdmin', 'true');
 
       if (activeView === 'inbound' || activeView === 'outbound') {
@@ -388,7 +394,7 @@ export default function Telecalling() {
       const data = await res.json();
       setStats(data);
     } catch { }
-  }, [token, filters, activeView]);
+  }, [token, debouncedFilters, activeView]);
 
   useEffect(() => { fetchStats(); }, [fetchStats]);
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -399,7 +405,10 @@ export default function Telecalling() {
     setIsRefreshing(false);
   };
 
-  const clearFilters = () => setFilters(EMPTY_FILTERS);
+  const clearFilters = () => {
+    setFilters(EMPTY_FILTERS);
+    setDebouncedFilters(EMPTY_FILTERS);
+  };
 
   // ─── MENU CONFIG ───
   const menuItems = [
@@ -683,10 +692,10 @@ export default function Telecalling() {
                                   placeholder="Name or phone..."
                                   className="pl-8 h-9 text-sm"
                                   value={filters.search}
-                                  onChange={e => setFilters(p => ({ ...p, search: e.target.value }))}
+                                  onChange={e => setFiltersWithDebounce(p => ({ ...p, search: e.target.value }))}
                                 />
                                 {filters.search && (
-                                  <button onClick={() => setFilters(p => ({ ...p, search: '' }))} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                                  <button onClick={() => setFiltersWithDebounce(p => ({ ...p, search: '' }))} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                                     <X className="h-3.5 w-3.5" />
                                   </button>
                                 )}
