@@ -433,7 +433,7 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
         }
       },
       orderBy: { callDate: 'desc' },
-      take: 100, // ⚡ Limit to most recent 100 missed calls — badge count comes from stats endpoint
+      // ── NO hard cap here — we return ALL missed calls so badge count matches Telecalling page ──
     });
 
     // ── STEP 2: Pending callback follow-up tasks to know which calls have a taskId ──
@@ -670,9 +670,9 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
         lead: { select: { id: true, name: true, phone: true, temperature: true, stage: true } },
         agent: { select: { id: true, fullName: true } }
       },
-      // ⇓ Sort by Follow-up date if in Follow Ups view
+      // 👇 CHANGED: Sort by Follow-up date if in Follow Ups view
       orderBy: view === 'follow_ups' ? { callbackScheduledAt: 'asc' } : { callDate: 'desc' },
-      take: take ? Math.min(parseInt(take as string, 10), 1000) : 100 // ⚡ Reduced default from 500 → 100
+      take: take ? Math.min(parseInt(take as string, 10), 2000) : 500
     });
 
     return res.json(callLogs);

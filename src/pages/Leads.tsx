@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAuth, usePermissions } from '@/lib/auth-context';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
@@ -122,11 +122,20 @@ export default function Leads() {
   ].filter(Boolean).length;
 
 
+  // CACHE CONSTANTS
+ // CACHE CONSTANTS
+ // CACHE CONSTANTS
+  const CACHE_KEY = 'crm_leads_data';
+  const CACHE_TIME_KEY = 'crm_leads_timestamp';
+  const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+  // 👇 1. Wrap the entire function in useCallback
   const fetchData = useCallback(async () => {
     console.log('[Leads Manager] 🔍 Fetching from server...');
     setLoading(true);
 
     try {
+      // 👈 Utilize server-side params without limits
       const params = new URLSearchParams();
       if (assignedAdminFilter !== 'all') {
          params.append('assignedBy', assignedAdminFilter);
@@ -139,6 +148,14 @@ export default function Leads() {
       
       if (Array.isArray(data)) {
         setLeads(data); 
+        
+        // Note: Without a limit, this may eventually hit localStorage quotas for high-volume accounts.
+        try {
+          localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+          localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
+        } catch (e) {
+          console.warn("Local storage cache full, skipping cache update.");
+        }
       }
     } catch (error) {
       console.error('[Leads Manager] 🚨 Fetch failed:', error);
@@ -146,7 +163,7 @@ export default function Leads() {
     } finally {
       setLoading(false);
     }
-  }, [token, assignedAdminFilter]);
+  }, [token, assignedAdminFilter]); // 👈 Re-fetch when admin filter changes
 
 
   // 3. NOW, use the effect to call it (PASTE IT HERE!)
@@ -308,7 +325,7 @@ export default function Leads() {
     }
   }
 
-  const filteredLeads = useMemo(() => leads
+  const filteredLeads = leads
     .filter(lead => {
       // 👇 Hide unverified leads from the main leads dashboard
       if (lead.stage === 'unverified') return false;
@@ -317,7 +334,7 @@ export default function Leads() {
   lead.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
   lead.phone.includes(searchQuery) || 
   (lead.email && lead.email.toLowerCase().includes(searchQuery.toLowerCase())) ||
-  lead.id.toUpperCase().includes(searchQuery.toUpperCase());
+  lead.id.toUpperCase().includes(searchQuery.toUpperCase()); // 👈 Added Unique ID Search      
       let matchesStage = true;
       // 👇 Updated to explicitly exclude 'unverified' when viewing active_open
       if (stageFilter === 'active_open') {
@@ -406,9 +423,7 @@ export default function Leads() {
       if (a.isPriority && !b.isPriority) return -1;
       if (!a.isPriority && b.isPriority) return 1;
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    }),
-  [leads, searchQuery, stageFilter, sourceFilter, temperatureFilter, assignedAgentFilter, assignedAdminFilter, dateFilter, startDate, endDate, followUpFilter, followUpDate]
-  );
+    });
 
     // 1. Reset visible count back to 50 whenever you type a search or change a filter
   useEffect(() => {

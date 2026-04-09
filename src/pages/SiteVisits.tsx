@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth, usePermissions } from '@/lib/auth-context';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
@@ -204,7 +204,121 @@ export default function SiteVisits() {
     });
   }
 
+  function getFilteredVisits() {
+    const now = new Date();
+    const weekStart = startOfWeek(now);
+    const weekEnd = endOfWeek(now);
 
+    let filtered = visits.filter(visit => {
+      const visitDate = parseISO(visit.scheduledAt);
+
+      // Tab filter
+      switch (activeTab) {
+        case 'missed':
+          if (!(visit.status === 'scheduled' && isPast(visitDate) && !isToday(visitDate))) return false;
+          break;
+        case 'today':
+          if (!isToday(visitDate)) return false;
+          break;
+        case 'tomorrow':
+          if (!isTomorrow(visitDate)) return false;
+          break;
+        case 'week':
+          if (!isWithinInterval(visitDate, { start: weekStart, end: weekEnd })) return false;
+          break;
+        case 'completed':
+          if (visit.status !== 'completed') return false;
+          break;
+        case 'all':
+        default:
+          break;
+      }
+
+      // Advanced filters
+      if (advancedFilters.status !== 'all') {
+        if (advancedFilters.status === 'missed') {
+          if (!(visit.status === 'scheduled' && isPast(visitDate) && !isToday(visitDate))) return false;
+        } else if (visit.status !== advancedFilters.status) {
+          return false;
+        }
+      }
+
+      if (advancedFilters.temperature !== 'all' && visit.lead?.temperature !== advancedFilters.temperature) {
+        return false;
+      }
+
+      if (advancedFilters.stage !== 'all' && visit.lead?.stage !== advancedFilters.stage) {
+        return false;
+      }
+
+      if (advancedFilters.rating !== 'all') {
+        const ratingFilter = parseInt(advancedFilters.rating);
+        if (!visit.rating || visit.rating < ratingFilter) return false;
+      }
+
+      if (advancedFilters.dateFrom) {
+        const fromDate = startOfDay(parseISO(advancedFilters.dateFrom));
+        if (visitDate < fromDate) return false;
+      }
+
+      if (advancedFilters.dateTo) {
+        const toDate = endOfDay(parseISO(advancedFilters.dateTo));
+        if (visitDate > toDate) return false;
+      }
+
+      if (advancedFilters.propertyType !== 'all') {
+        if (advancedFilters.propertyType === 'property' && !visit.property) return false;
+        if (advancedFilters.propertyType === 'project' && !visit.project) return false;
+      }
+
+      if (advancedFilters.city !== 'all') {
+        const visitCity = visit.property?.city || visit.project?.location || '';
+        if (!visitCity.toLowerCase().includes(advancedFilters.city.toLowerCase())) return false;
+      }
+
+      return true;
+    });
+
+    // Agent filter
+    if (canAssignLeads && selectedAgent !== 'all') {
+      filtered = filtered.filter(v => v.conductedBy === selectedAgent);
+    }
+
+    // Search filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(v =>
+        v.lead?.name.toLowerCase().includes(query) ||
+        v.lead?.phone.includes(query) ||
+        v.property?.title.toLowerCase().includes(query) ||
+        v.project?.name.toLowerCase().includes(query) ||
+        v.conductor?.fullName.toLowerCase().includes(query) ||
+        v.property?.location.toLowerCase().includes(query) ||
+        v.project?.location.toLowerCase().includes(query)
+      );
+    }
+
+    // Sorting
+    filtered.sort((a, b) => {
+      let comparison = 0;
+
+      switch (sortBy) {
+        case 'date':
+          comparison = new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime();
+          break;
+        case 'rating':
+          comparison = (b.rating || 0) - (a.rating || 0);
+          break;
+        case 'created':
+          comparison = new Date(b.createdAt || b.scheduledAt).getTime() - new Date(a.createdAt || a.scheduledAt).getTime();
+          break;
+      }
+
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
+
+    return filtered;
+  }
 
   function groupVisitsByDate(visits: SiteVisit[]) {
     const grouped: Record<string, SiteVisit[]> = {};
@@ -407,121 +521,7 @@ export default function SiteVisits() {
     }
   }
 
-  const filteredVisits = useMemo(() => {
-    const now = new Date();
-    const weekStart = startOfWeek(now);
-    const weekEnd = endOfWeek(now);
-
-    let filtered = visits.filter(visit => {
-      const visitDate = parseISO(visit.scheduledAt);
-
-      // Tab filter
-      switch (activeTab) {
-        case 'missed':
-          if (!(visit.status === 'scheduled' && isPast(visitDate) && !isToday(visitDate))) return false;
-          break;
-        case 'today':
-          if (!isToday(visitDate)) return false;
-          break;
-        case 'tomorrow':
-          if (!isTomorrow(visitDate)) return false;
-          break;
-        case 'week':
-          if (!isWithinInterval(visitDate, { start: weekStart, end: weekEnd })) return false;
-          break;
-        case 'completed':
-          if (visit.status !== 'completed') return false;
-          break;
-        case 'all':
-        default:
-          break;
-      }
-
-      // Advanced filters
-      if (advancedFilters.status !== 'all') {
-        if (advancedFilters.status === 'missed') {
-          if (!(visit.status === 'scheduled' && isPast(visitDate) && !isToday(visitDate))) return false;
-        } else if (visit.status !== advancedFilters.status) {
-          return false;
-        }
-      }
-
-      if (advancedFilters.temperature !== 'all' && visit.lead?.temperature !== advancedFilters.temperature) {
-        return false;
-      }
-
-      if (advancedFilters.stage !== 'all' && visit.lead?.stage !== advancedFilters.stage) {
-        return false;
-      }
-
-      if (advancedFilters.rating !== 'all') {
-        const ratingFilter = parseInt(advancedFilters.rating);
-        if (!visit.rating || visit.rating < ratingFilter) return false;
-      }
-
-      if (advancedFilters.dateFrom) {
-        const fromDate = startOfDay(parseISO(advancedFilters.dateFrom));
-        if (visitDate < fromDate) return false;
-      }
-
-      if (advancedFilters.dateTo) {
-        const toDate = endOfDay(parseISO(advancedFilters.dateTo));
-        if (visitDate > toDate) return false;
-      }
-
-      if (advancedFilters.propertyType !== 'all') {
-        if (advancedFilters.propertyType === 'property' && !visit.property) return false;
-        if (advancedFilters.propertyType === 'project' && !visit.project) return false;
-      }
-
-      if (advancedFilters.city !== 'all') {
-        const visitCity = visit.property?.city || visit.project?.location || '';
-        if (!visitCity.toLowerCase().includes(advancedFilters.city.toLowerCase())) return false;
-      }
-
-      return true;
-    });
-
-    // Agent filter
-    if (canAssignLeads && selectedAgent !== 'all') {
-      filtered = filtered.filter(v => v.conductedBy === selectedAgent);
-    }
-
-    // Search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(v =>
-        v.lead?.name.toLowerCase().includes(query) ||
-        v.lead?.phone.includes(query) ||
-        v.property?.title.toLowerCase().includes(query) ||
-        v.project?.name.toLowerCase().includes(query) ||
-        v.conductor?.fullName.toLowerCase().includes(query) ||
-        v.property?.location.toLowerCase().includes(query) ||
-        v.project?.location.toLowerCase().includes(query)
-      );
-    }
-
-    // Sorting
-    filtered.sort((a, b) => {
-      let comparison = 0;
-
-      switch (sortBy) {
-        case 'date':
-          comparison = new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime();
-          break;
-        case 'rating':
-          comparison = (b.rating || 0) - (a.rating || 0);
-          break;
-        case 'created':
-          comparison = new Date(b.createdAt || b.scheduledAt).getTime() - new Date(a.createdAt || a.scheduledAt).getTime();
-          break;
-      }
-
-      return sortOrder === 'asc' ? comparison : -comparison;
-    });
-
-    return filtered;
-  }, [visits, activeTab, advancedFilters, canAssignLeads, selectedAgent, searchQuery, sortBy, sortOrder]);
+  const filteredVisits = getFilteredVisits();
   const groupedVisits = groupVisitsByDate(filteredVisits);
   const activeFilterCount = getActiveFilterCount();
 

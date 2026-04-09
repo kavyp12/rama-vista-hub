@@ -96,14 +96,24 @@ export const getLeads = async (req: AuthRequest, res: Response) => {
       where.assignedToId = req.user!.userId;
     }
 
-    // ⚠️ List view: only include what LeadCard actually renders.
-    // siteVisits, deals, and propertyRecommendations are loaded on-demand in detail views.
+    // ⚠️ User requested NO LIMIT. Fetching all matching leads.
     const leads = await prisma.lead.findMany({
       where,
       include: {
         assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
         assignedBy: { select: { id: true, fullName: true, role: true } },
+        deals: { select: { id: true, dealValue: true, stage: true, createdAt: true }, orderBy: { createdAt: 'desc' } },
+        project: { select: { id: true, name: true, location: true } },
+        siteVisits: {
+          select: {
+            id: true, scheduledAt: true, status: true, rating: true, feedback: true, conductedBy: true,
+            property: { select: { title: true, location: true } },
+            project: { select: { name: true, location: true } }
+          },
+          orderBy: { scheduledAt: 'desc' }
+        },
         callLogs: { select: { id: true, callStatus: true, callDate: true, notes: true, type: true }, orderBy: { callDate: 'desc' }, take: 1 },
+        propertyRecommendations: { select: { propertyId: true } }
       },
       orderBy: { createdAt: 'desc' }
     });
