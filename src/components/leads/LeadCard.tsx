@@ -373,6 +373,19 @@ const openWhatsApp = (e: React.MouseEvent) => {
                       />
                     </div>
                     <div className="max-h-[200px] overflow-y-auto p-1">
+                      {assignedId && (
+                        <div
+                          className="px-2 py-1.5 text-xs cursor-pointer rounded-sm hover:bg-red-50 text-red-600 font-medium flex items-center mb-1"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleReassign(null as any);
+                            setIsAssignOpen(false);
+                            setAgentSearch('');
+                          }}
+                        >
+                          Unassign User
+                        </div>
+                      )}
                       {filteredProfiles.length === 0 ? (
                         <div className="text-xs text-center py-4 text-muted-foreground">No agents found</div>
                       ) : (

@@ -175,12 +175,15 @@ export default function Leads() {
   }, [token, canAssignLeads, fetchData]);
   
   async function fetchAgents() {
+    let salesAgents: Agent[] = [];
+    let adminUsers: Agent[] = [];
+    
     try {
       const res = await fetch(`${API_URL}/users?role=sales_agent`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      if (Array.isArray(data)) setAgents(data);
+      if (Array.isArray(data)) salesAgents = data;
     } catch (error) { console.error("Failed to load agents"); }
     
     // Also fetch admins for the 'Assigned By' filter
@@ -190,10 +193,12 @@ export default function Leads() {
       });
       const data = await res.json();
       if (Array.isArray(data)) {
-        // Optionally append superadmins if applicable, but role=admin usually includes superadmins per user app or they can be fetched too
+        adminUsers = data;
         setAdmins(data);
       }
     } catch (error) { console.error("Failed to load admins"); }
+    
+    setAgents([...salesAgents, ...adminUsers]);
   }
 
   async function handleSync() {
@@ -751,6 +756,18 @@ export default function Leads() {
         />
       </div>
       <div className="max-h-[200px] overflow-y-auto p-1">
+        {formData.assignedToId && (
+          <div
+            className="px-2 py-2 text-sm cursor-pointer rounded-sm hover:bg-red-50 flex items-center text-red-600 font-medium mb-1"
+            onClick={() => {
+              setFormData({ ...formData, assignedToId: '' });
+              setIsAddAgentOpen(false);
+              setAddAgentSearch('');
+            }}
+          >
+            Unassign User
+          </div>
+        )}
         {agents.filter(a => a.fullName.toLowerCase().includes(addAgentSearch.toLowerCase())).length === 0 ? (
           <div className="text-sm text-center py-4 text-muted-foreground">No agents found</div>
         ) : (
