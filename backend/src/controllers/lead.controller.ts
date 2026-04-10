@@ -35,6 +35,7 @@ const updateLeadSchema = z.object({
   agentNotes: z.string().optional().nullable(),
   assignedToId: z.string().optional().nullable(),
   nextFollowupAt: z.string().optional().nullable(),
+  agentNextFollowupAt: z.string().optional().nullable(), // <-- ADD THIS LINE
   lostReason: z.string().optional().nullable(),
   interestLevel: z.number().optional().nullable(),
   preferredPropertyType: z.string().optional().nullable()
@@ -128,6 +129,7 @@ export const getLeads = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// Replace your entire updateLead function with this:
 export const updateLead = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
@@ -140,11 +142,9 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
     const isOwner = existingLead.assignedToId === req.user!.userId;
 
     if (isAgent) {
-      if (!isOwner) {
-        return res.status(403).json({ error: 'You can only update your own leads.' });
-      }
+      if (!isOwner) return res.status(403).json({ error: 'You can only update your own leads.' });
       const agentAllowed = ['notes', 'stage', 'temperature', 'budgetMin', 'budgetMax',
-        'preferredLocation', 'nextFollowupAt', 'lostReason', 'agentNotes', 'interestLevel', 'preferredPropertyType'] as const;
+        'preferredLocation', 'nextFollowupAt', 'agentNextFollowupAt', 'lostReason', 'agentNotes', 'interestLevel', 'preferredPropertyType'] as const;
       const updates = Object.keys(data) as string[];
       if (updates.some(k => !agentAllowed.includes(k as any))) {
         return res.status(403).json({ error: 'Agents can only update basic lead properties.' });
@@ -153,22 +153,13 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
 
     const updateData: any = { ...data };
     
-    // 👈 Prevent destructive updates on Admin Incentives
     if (data.assignedToId && !isAgent) {
-      // Only grant assignment credit if it was previously unassigned
-      if (!existingLead.assignedById) {
-         updateData.assignedById = req.user!.userId;
-      }
-      
-      // Log the reassignment so you have a paper trail for disputes
+      if (!existingLead.assignedById) updateData.assignedById = req.user!.userId;
       if (data.assignedToId !== existingLead.assignedToId) {
         await prisma.activityLog.create({
           data: {
-            userId: req.user!.userId,
-            action: 'lead_reassigned',
-            entityType: 'lead',
-            entityId: existingLead.id,
-            details: { from: existingLead.assignedToId, to: data.assignedToId }
+            userId: req.user!.userId, action: 'lead_reassigned', entityType: 'lead',
+            entityId: existingLead.id, details: { from: existingLead.assignedToId, to: data.assignedToId }
           }
         });
       }
@@ -177,53 +168,100 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
     const lead = await prisma.lead.update({
       where: { id },
       data: updateData,
-      include: {
-        assignedTo: true,
-        assignedBy: { select: { id: true, fullName: true, role: true } }
-      }
+      include: { assignedTo: true, assignedBy: { select: { id: true, fullName: true, role: true } } }
     });
 
-    const nextDateStr = data.nextFollowupAt ? new Date(data.nextFollowupAt).toISOString() : null;
-    const oldDateStr = existingLead.nextFollowupAt ? new Date(existingLead.nextFollowupAt).toISOString() : null;
+    // ── 1. ADMIN HISTORY SAVING (Visible to Admin Only) ──
+    const newAdminDate = data.nextFollowupAt ? new Date(data.nextFollowupAt).getTime() : null;
+    const oldAdminDate = existingLead.nextFollowupAt ? existingLead.nextFollowupAt.getTime() : null;
+    const adminDateChanged = newAdminDate !== oldAdminDate && newAdminDate !== null;
+    
+    // 👇 FIXED: Now tracks the "Private Notes" field instead of "Admin Requirements"
+    const adminPrivateNotesChanged = data.agentNotes && data.agentNotes !== existingLead.agentNotes;
 
-    if (data.nextFollowupAt && nextDateStr !== oldDateStr && req.user!.role !== 'sales_agent') {
+    if (!isAgent && (adminDateChanged || adminPrivateNotesChanged)) {
       const agentIdToAssign = existingLead.assignedToId || req.user!.userId;
+      let callStatusToLog = 'connected_positive';
+      
+      // 👇 FIXED: Uses the private notes for the history message
+      let msg = data.agentNotes || 'Admin updated lead details';
 
-      await prisma.callLog.updateMany({
-        where: { leadId: id, callStatus: 'connected_callback' },
-        data: { callStatus: 'connected_positive' }
-      });
-      await prisma.followUpTask.updateMany({
-        where: { leadId: id, status: 'pending' },
-        data: { status: 'completed', completedAt: new Date() }
-      });
+      if (adminDateChanged) {
+        callStatusToLog = 'connected_callback';
+        // 👇 FIXED: Uses the private notes for the follow-up message
+        msg = data.agentNotes ? `Admin Follow-up set: ${data.agentNotes}` : 'Admin scheduled follow-up';
+
+        await prisma.callLog.updateMany({
+          where: { leadId: id, callStatus: 'connected_callback' },
+          data: { callStatus: 'connected_positive' } 
+        });
+        await prisma.followUpTask.updateMany({
+          where: { leadId: id, status: 'pending' },
+          data: { status: 'completed', completedAt: new Date() }
+        });
+
+        await prisma.followUpTask.create({
+          data: {
+            leadId: id, agentId: agentIdToAssign, taskType: 'callback',
+            scheduledAt: new Date(data.nextFollowupAt!), notes: msg
+          }
+        });
+      }
 
       await prisma.callLog.create({
         data: {
-          leadId: id,
-          agentId: agentIdToAssign,
-          callStatus: 'connected_callback',
+          leadId: id, 
+          agentId: req.user!.userId, 
+          callStatus: callStatusToLog as any, 
           callDate: new Date(),
-          callbackScheduledAt: new Date(data.nextFollowupAt),
-          notes: data.agentNotes || 'Follow-up scheduled from Lead Workspace'
+          ...(adminDateChanged ? { callbackScheduledAt: new Date(data.nextFollowupAt!) } : {}),
+          notes: msg // 👈 Uses the private note
         }
       });
+    }
 
-      await prisma.followUpTask.create({
+    // ── 2. AGENT HISTORY SAVING (Visible to Agent and Admin) ──
+    const newAgentDate = data.agentNextFollowupAt ? new Date(data.agentNextFollowupAt).getTime() : null;
+    const oldAgentDate = existingLead.agentNextFollowupAt ? existingLead.agentNextFollowupAt.getTime() : null;
+    const agentDateChanged = newAgentDate !== oldAgentDate && newAgentDate !== null;
+    const agentNotesChanged = data.agentNotes && data.agentNotes !== existingLead.agentNotes;
+
+    if (isAgent && (agentDateChanged || agentNotesChanged)) {
+      let callStatusToLog = 'connected_positive';
+      let msg = data.agentNotes || 'Agent updated lead details';
+
+      if (agentDateChanged) {
+        callStatusToLog = 'connected_callback';
+        msg = data.agentNotes ? `Agent Follow-up set: ${data.agentNotes}` : 'Agent scheduled personal follow-up';
+
+        await prisma.callLog.updateMany({
+          where: { leadId: id, agentId: req.user!.userId, callStatus: 'connected_callback' },
+          data: { callStatus: 'connected_positive' }
+        });
+        await prisma.followUpTask.updateMany({
+          where: { leadId: id, agentId: req.user!.userId, status: 'pending' },
+          data: { status: 'completed', completedAt: new Date() }
+        });
+
+        await prisma.followUpTask.create({
+          data: {
+            leadId: id, agentId: req.user!.userId, taskType: 'callback',
+            scheduledAt: new Date(data.agentNextFollowupAt!), notes: msg
+          }
+        });
+      }
+
+      await prisma.callLog.create({
         data: {
-          leadId: id,
-          agentId: agentIdToAssign,
-          taskType: 'callback',
-          scheduledAt: new Date(data.nextFollowupAt),
-          notes: data.agentNotes || 'Follow-up scheduled from Lead Workspace'
+          leadId: id, agentId: req.user!.userId, callStatus: callStatusToLog as any, callDate: new Date(),
+          ...(agentDateChanged ? { callbackScheduledAt: new Date(data.agentNextFollowupAt!) } : {}),
+          notes: msg
         }
       });
     }
 
     return res.json(lead);
   } catch (error) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors });
-    console.error('Update Lead Error:', error);
     return res.status(500).json({ error: 'Failed to update lead' });
   }
 };

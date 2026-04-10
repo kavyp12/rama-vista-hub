@@ -560,6 +560,7 @@ export default function Leads() {
                             <SelectItem value="closed" className="text-red-600">Closed</SelectItem>
                             <SelectItem value="lost" className="text-slate-500">Lost</SelectItem>
                             <SelectItem value="completed" className="text-green-600">Completed</SelectItem>
+                            <SelectItem value="disconnected">Disconnected</SelectItem> {/* <-- ADD THIS */}
                           </SelectContent>
                         </Select>
                       </div>

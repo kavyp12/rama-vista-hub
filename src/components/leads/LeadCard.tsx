@@ -249,16 +249,23 @@ const openWhatsApp = (e: React.MouseEvent) => {
                 </div>
              )}
           </div>
-
-          {/* Follow up Block */}
-          {lead.nextFollowupAt && (
-             <div className={`rounded-md p-2 border flex items-center gap-2 mt-1 ${new Date(lead.nextFollowupAt) < new Date() ? 'bg-red-50 border-red-100' : 'bg-purple-50 border-purple-100'}`}>
-                 <Calendar className={`h-3 w-3 shrink-0 ${new Date(lead.nextFollowupAt) < new Date() ? 'text-red-600' : 'text-purple-600'}`} />
-                 <span className={`text-xs font-medium truncate ${new Date(lead.nextFollowupAt) < new Date() ? 'text-red-700' : 'text-purple-700'}`}>
-                    Follow-up: {format(new Date(lead.nextFollowupAt), 'MMM d, h:mm a')}
+{/* Follow up Block */}
+          {(() => {
+            // Determine which follow-up to show based on user role
+            const activeFollowUp = !canAssignLeads ? lead.agentNextFollowupAt : lead.nextFollowupAt;
+            
+            if (!activeFollowUp) return null;
+            
+            const isPast = new Date(activeFollowUp) < new Date();
+            return (
+             <div className={`rounded-md p-2 border flex items-center gap-2 mt-1 ${isPast ? 'bg-red-50 border-red-100' : 'bg-purple-50 border-purple-100'}`}>
+                 <Calendar className={`h-3 w-3 shrink-0 ${isPast ? 'text-red-600' : 'text-purple-600'}`} />
+                 <span className={`text-xs font-medium truncate ${isPast ? 'text-red-700' : 'text-purple-700'}`}>
+                    Follow-up: {format(new Date(activeFollowUp), 'MMM d, h:mm a')}
                  </span>
              </div>
-          )}
+            );
+          })()}
 
           {/* Notes Section */}
           {lead.notes && (
@@ -318,6 +325,7 @@ const openWhatsApp = (e: React.MouseEvent) => {
                           <SelectItem value="negotiation">Negotiation</SelectItem>
                           <SelectItem value="token">Token</SelectItem>
                           <SelectItem value="completed">Completed</SelectItem>
+                          <SelectItem value="disconnected">Disconnected</SelectItem> {/* <-- ADD THIS */}
                           <SelectItem value="closed" className="text-green-600">Closed</SelectItem>
                           <SelectItem value="lost" className="text-red-600">Lost</SelectItem>
                       </SelectContent>

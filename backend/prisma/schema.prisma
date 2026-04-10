@@ -79,6 +79,7 @@ model Lead {
   preferredLocation       String?                  @map("preferred_location")
   notes                   String?
   nextFollowupAt          DateTime?                @map("next_followup_at")
+  agentNextFollowupAt     DateTime? @map("agent_next_followup_at") // <-- ADD THIS LINE
   assignedToId            String?                  @map("assigned_to")
   assignedById            String?                  @map("assigned_by")
   createdAt               DateTime                 @default(now()) @map("created_at")
@@ -405,6 +406,7 @@ enum LeadStage {
   closed
   lost
   completed
+  disconnected // <-- ADD THIS
 }
 
 enum Temperature {
