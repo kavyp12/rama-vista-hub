@@ -122,56 +122,80 @@ export default function Leads() {
   ].filter(Boolean).length;
 
 
-  // CACHE CONSTANTS
- // CACHE CONSTANTS
- // CACHE CONSTANTS
+  // --- STALE-WHILE-REVALIDATE ---
+  // 1. Show cached data INSTANTLY (zero loading spinner) so the page feels fast.
+  // 2. Simultaneously fetch fresh data from the server in the background.
+  // 3. When fresh data arrives, silently update. Cache is only 5 minutes max.
+  // This gives you BOTH speed AND accuracy — no stale 24h data problem.
   const CACHE_KEY = 'crm_leads_data';
   const CACHE_TIME_KEY = 'crm_leads_timestamp';
-  const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
+  const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes — fresh enough, fast enough
 
-  // 👇 1. Wrap the entire function in useCallback
-  const fetchData = useCallback(async () => {
-    console.log('[Leads Manager] 🔍 Fetching from server...');
-    setLoading(true);
+  const fetchData = useCallback(async (isBackgroundRefresh = false) => {
+    console.log(`[Leads Manager] 🔍 Fetching from server... (background: ${isBackgroundRefresh})`);
+
+    // Only show spinner on full loads, NOT on background silent refreshes
+    if (!isBackgroundRefresh) setLoading(true);
 
     try {
-      // 👈 Utilize server-side params without limits
       const params = new URLSearchParams();
       if (assignedAdminFilter !== 'all') {
-         params.append('assignedBy', assignedAdminFilter);
+        params.append('assignedBy', assignedAdminFilter);
       }
 
       const res = await fetch(`${API_URL}/leads?${params.toString()}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      
+
       if (Array.isArray(data)) {
-        setLeads(data); 
-        
-        // Note: Without a limit, this may eventually hit localStorage quotas for high-volume accounts.
+        setLeads(data);
+        // Save fresh data into cache with current timestamp
         try {
           localStorage.setItem(CACHE_KEY, JSON.stringify(data));
           localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
         } catch (e) {
-          console.warn("Local storage cache full, skipping cache update.");
+          console.warn('[Leads] Cache save failed (storage full), skipping.');
         }
       }
     } catch (error) {
       console.error('[Leads Manager] 🚨 Fetch failed:', error);
-      toast({ title: 'Error', description: 'Failed to fetch leads', variant: 'destructive' });
+      if (!isBackgroundRefresh) {
+        toast({ title: 'Error', description: 'Failed to fetch leads', variant: 'destructive' });
+      }
     } finally {
-      setLoading(false);
+      if (!isBackgroundRefresh) setLoading(false);
     }
-  }, [token, assignedAdminFilter]); // 👈 Re-fetch when admin filter changes
+  }, [token, assignedAdminFilter]);
 
-
-  // 3. NOW, use the effect to call it (PASTE IT HERE!)
   useEffect(() => {
-    if (token) {
-      fetchData();
-      if (canAssignLeads) fetchAgents();
+    if (!token) return;
+
+    // Step 1: Check if we have fresh cached data (< 5 min old)
+    const cachedRaw = localStorage.getItem(CACHE_KEY);
+    const cachedTime = localStorage.getItem(CACHE_TIME_KEY);
+    const isCacheFresh = cachedTime && (Date.now() - Number(cachedTime)) < CACHE_DURATION_MS;
+
+    if (cachedRaw && isCacheFresh) {
+      // ⚡ Cache is fresh — show instantly, NO spinner
+      try {
+        const cached = JSON.parse(cachedRaw);
+        if (Array.isArray(cached)) {
+          setLeads(cached);
+          setLoading(false);
+          console.log('[Leads] ⚡ Showing fresh cached data instantly');
+        }
+      } catch (e) { /* corrupt cache — ignore, will fetch below */ }
+
+      // Still silently refresh in background to keep data current
+      fetchData(true);
+    } else {
+      // Cache is stale or missing — fetch normally with spinner
+      console.log('[Leads] 🔄 Cache stale/missing — full fetch with spinner');
+      fetchData(false);
     }
+
+    if (canAssignLeads) fetchAgents();
   }, [token, canAssignLeads, fetchData]);
   
   async function fetchAgents() {
@@ -332,16 +356,25 @@ export default function Leads() {
 
   const filteredLeads = leads
     .filter(lead => {
-      // 👇 Hide unverified leads from the main leads dashboard
+      // Always hide unverified leads
       if (lead.stage === 'unverified') return false;
 
-     const matchesSearch = 
-  lead.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-  lead.phone.includes(searchQuery) || 
-  (lead.email && lead.email.toLowerCase().includes(searchQuery.toLowerCase())) ||
-  lead.id.toUpperCase().includes(searchQuery.toUpperCase()); // 👈 Added Unique ID Search      
+      const trimmedSearch = searchQuery.trim();
+      const matchesSearch = !trimmedSearch
+        ? true
+        : lead.name.toLowerCase().includes(trimmedSearch.toLowerCase()) ||
+          lead.phone.includes(trimmedSearch) ||
+          (lead.email && lead.email.toLowerCase().includes(trimmedSearch.toLowerCase())) ||
+          lead.id.toUpperCase().includes(trimmedSearch.toUpperCase());
+
+      // 🔑 KEY FIX: When actively searching, bypass ALL other filters
+      // so ANY matching lead (any stage, any agent, any date) is shown.
+      if (trimmedSearch) {
+        return matchesSearch;
+      }
+
+      // ---- Normal filter logic (only applies when NOT searching) ----
       let matchesStage = true;
-      // 👇 Updated to explicitly exclude 'unverified' when viewing active_open
       if (stageFilter === 'active_open') {
         matchesStage = !['closed', 'lost', 'completed', 'unverified'].includes(lead.stage);
       } else if (stageFilter !== 'all') {
@@ -390,7 +423,6 @@ export default function Leads() {
         }
       }
 
-      // Add a follow-up match condition
       let matchesFollowUp = true;
       if (followUpFilter === 'needs_followup') {
         if (!lead.nextFollowupAt) {
@@ -416,7 +448,7 @@ export default function Leads() {
         }
       }
 
-      return matchesSearch && matchesStage && matchesSource && matchesTemperature && matchesAgent && matchesAdmin && matchesDate && matchesFollowUp;
+      return matchesStage && matchesSource && matchesTemperature && matchesAgent && matchesAdmin && matchesDate && matchesFollowUp;
     })
     .sort((a, b) => {
       // If filtering by follow-ups, sort by follow up date
@@ -841,6 +873,18 @@ export default function Leads() {
         )}
 
       <div className="flex-1 overflow-y-auto pb-6 relative">
+
+          {/* Search mode banner: shows when a search query bypasses all active filters */}
+          {searchQuery.trim() && (
+            <div className="mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800 flex items-center gap-2">
+              <Search className="h-4 w-4 shrink-0" />
+              <span>
+                Showing <strong>{filteredLeads.length}</strong> result{filteredLeads.length !== 1 ? 's' : ''} across <strong>all stages &amp; agents</strong> for &quot;{searchQuery.trim()}&quot;.
+                Active filters are paused during search.
+              </span>
+            </div>
+          )}
+
           {loading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {[...Array(8)].map((_, i) => <Card key={i} className="animate-pulse h-48 bg-muted/20" />)}
