@@ -65,7 +65,7 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
   const [missedCallDetails, setMissedCallDetails] = useState<MissedCallDetail[]>([]);
   const [missedCallsExpanded, setMissedCallsExpanded] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  
+
   const isInitialLoad = useRef(true);
   const previousOverdueCount = useRef(0);
 
@@ -123,139 +123,79 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
       const headers = { 'Authorization': `Bearer ${token}` };
       const items: NotificationItem[] = [];
 
+      // Fetch common data for both
+      const [leadsRes, visitsRes, overdueRes, statsRes, missedCallsRes] = await Promise.all([
+        fetch(`${API_URL}/leads`, { headers }),
+        fetch(`${API_URL}/site-visits?status=scheduled`, { headers }),
+        fetch(`${API_URL}/payments/overdue`, { headers }),
+        isAgent ? fetch(`${API_URL}/leads/dashboard/stats`, { headers }) : Promise.resolve(null),
+        isAgent ? fetch(`${API_URL}/call-logs/missed-calls`, { headers }) : Promise.resolve(null)
+      ]);
+
+      const leads = leadsRes.ok ? await leadsRes.json() : [];
+      const visits = visitsRes.ok ? await visitsRes.json() : [];
+
+      const now = new Date();
+      const today = now.toISOString().split('T')[0];
+      const activeStages = ['new', 'contacted', 'site_visit', 'negotiation', 'token'];
+
       if (isAgent) {
-        // ---- AGENT: use dedicated stats endpoint ----
-        const [statsRes, visitsRes, missedCallsRes, overdueRes] = await Promise.all([
-          fetch(`${API_URL}/leads/dashboard/stats`, { headers }),
-          fetch(`${API_URL}/site-visits?status=scheduled`, { headers }),
-          fetch(`${API_URL}/call-logs/missed-calls`, { headers }),
-          fetch(`${API_URL}/payments/overdue`, { headers }),
-        ]);
-
-        if (statsRes.ok) {
+        // ---- AGENT NOTIFICATIONS ----
+        if (statsRes && statsRes.ok) {
           const data: AgentStats = await statsRes.json();
-
           if (data.missedCalls && data.missedCalls > 0) {
             items.push({
-              id: 'missed_calls',
-              title: 'Missed Calls',
-              subtitle: 'Customers called you but you were busy',
-              count: data.missedCalls,
-              color: 'text-rose-600',
-              bg: 'bg-rose-50',
-              icon: PhoneMissed,
-              href: '/missed-calls',
-            });
-          }
-          if (data.missedFollowups > 0) {
-            items.push({
-              id: 'overdue_followup',
-              title: 'Overdue Follow-ups',
-              subtitle: 'Leads past their follow-up date',
-              count: data.missedFollowups,
-              color: 'text-red-600',
-              bg: 'bg-red-50',
-              icon: AlertTriangle,
-              href: '/missed-calls',
-            });
-          }
-          if (data.missedVisits > 0) {
-            items.push({
-              id: 'missed_visit',
-              title: 'Missed Site Visits',
-              subtitle: 'Scheduled visits that already passed',
-              count: data.missedVisits,
-              color: 'text-orange-600',
-              bg: 'bg-orange-50',
-              icon: Calendar,
-              href: '/site-visits',
+              id: 'missed_calls', title: 'Missed Calls', subtitle: 'Customers called you but you were busy',
+              count: data.missedCalls, color: 'text-rose-600', bg: 'bg-rose-50', icon: PhoneMissed, href: '/missed-calls',
             });
           }
           if (data.stagnantLeads > 0) {
             items.push({
-              id: 'stagnant_lead',
-              title: 'Inactive Leads',
-              subtitle: 'No activity in 7+ days',
-              count: data.stagnantLeads,
-              color: 'text-amber-600',
-              bg: 'bg-amber-50',
-              icon: TrendingDown,
-              href: '/missed-calls',
+              id: 'stagnant_lead', title: 'Inactive Leads', subtitle: 'No activity in 7+ days',
+              count: data.stagnantLeads, color: 'text-amber-600', bg: 'bg-amber-50', icon: TrendingDown, href: '/leads',
             });
           }
         }
 
         // Fetch and store missed call details for expandable view
-        if (missedCallsRes.ok) {
+        if (missedCallsRes && missedCallsRes.ok) {
           const details: MissedCallDetail[] = await missedCallsRes.json();
           setMissedCallDetails(Array.isArray(details) ? details : []);
         }
 
-        if (visitsRes.ok) {
-          const visits = await visitsRes.json();
-          if (Array.isArray(visits)) {
-            const today = new Date().toISOString().split('T')[0];
-            const todayCount = visits.filter((v: any) => v.scheduledAt?.startsWith(today)).length;
-            if (todayCount > 0) {
-              items.push({
-                id: 'today_visit',
-                title: "Today's Site Visits",
-                subtitle: 'Visits scheduled for today',
-                count: todayCount,
-                color: 'text-indigo-600',
-                bg: 'bg-indigo-50',
-                icon: Clock,
-                href: '/site-visits',
-              });
-            }
-          }
-        }
-
-        if (overdueRes.ok) {
-          const overdueData = await overdueRes.json();
-          if (overdueData.summary && overdueData.summary.totalOverdueCount > 0) {
+        if (Array.isArray(leads)) {
+          // New Leads assigned today
+          const newlyAssigned = leads.filter((l: any) => l.createdAt?.startsWith(today) || (l.assignedById && new Date(l.updatedAt) >= new Date(new Date().setHours(0, 0, 0, 0))));
+          if (newlyAssigned.length > 0) {
             items.push({
-              id: 'overdue_payments',
-              title: 'Overdue Payments',
-              subtitle: `₹${overdueData.summary.totalOverdueAmount.toLocaleString('en-IN')} pending collection`,
-              count: overdueData.summary.totalOverdueCount,
-              color: 'text-red-700',
-              bg: 'bg-red-100',
-              icon: IndianRupee,
-              href: '/payments',
+              id: 'new_assigned_leads', title: 'New Leads Assigned', subtitle: 'Check your leads dashboard',
+              count: newlyAssigned.length, color: 'text-blue-600', bg: 'bg-blue-50', icon: Users, href: '/leads',
+            });
+          }
+
+          // Due/Overdue Follow-ups
+          const dueFollowups = leads.filter((l: any) => {
+            if (!l.nextFollowupAt) return false;
+            return new Date(l.nextFollowupAt) <= now && activeStages.includes(l.stage);
+          });
+          if (dueFollowups.length > 0) {
+            items.push({
+              id: 'overdue_followup', title: 'Action Required: Follow-ups', subtitle: 'Leads due for follow-up or overdue',
+              count: dueFollowups.length, color: 'text-red-600', bg: 'bg-red-50', icon: AlertTriangle, href: '/leads',
             });
           }
         }
-
       } else {
-        // ---- ADMIN / MANAGER: fetch leads + visits ----
-        const [leadsRes, visitsRes, overdueRes] = await Promise.all([
-          fetch(`${API_URL}/leads`, { headers }),
-          fetch(`${API_URL}/site-visits?status=scheduled`, { headers }),
-          fetch(`${API_URL}/payments/overdue`, { headers }),
-        ]);
-
-        const leads = leadsRes.ok ? await leadsRes.json() : [];
-        const visits = visitsRes.ok ? await visitsRes.json() : [];
-
+        // ---- ADMIN / MANAGER NOTIFICATIONS ----
         if (Array.isArray(leads)) {
-          const now = new Date();
           const sevenDaysAgo = new Date();
           sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-          const today = now.toISOString().split('T')[0];
-          const activeStages = ['new', 'contacted', 'site_visit', 'negotiation', 'token'];
 
           const unassigned = leads.filter((l: any) => !l.assignedToId);
           if (unassigned.length > 0) {
             items.push({
-              id: 'unassigned_lead',
-              title: 'Unassigned Leads',
-              subtitle: 'Leads with no agent assigned',
-              count: unassigned.length,
-              color: 'text-rose-600',
-              bg: 'bg-rose-50',
-              icon: UserX,
-              href: '/leads',
+              id: 'unassigned_lead', title: 'Unassigned Leads', subtitle: 'Leads with no agent assigned',
+              count: unassigned.length, color: 'text-rose-600', bg: 'bg-rose-50', icon: UserX, href: '/leads',
             });
           }
 
@@ -265,14 +205,8 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
           });
           if (overdueFollowups.length > 0) {
             items.push({
-              id: 'overdue_followup',
-              title: 'Overdue Follow-ups',
-              subtitle: 'Across all agents',
-              count: overdueFollowups.length,
-              color: 'text-red-600',
-              bg: 'bg-red-50',
-              icon: AlertTriangle,
-              href: '/leads',
+              id: 'overdue_followup', title: 'Overdue Follow-ups', subtitle: 'Across all agents',
+              count: overdueFollowups.length, color: 'text-red-600', bg: 'bg-red-50', icon: AlertTriangle, href: '/leads',
             });
           }
 
@@ -282,79 +216,47 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
           });
           if (stagnant.length > 0) {
             items.push({
-              id: 'stagnant_lead',
-              title: 'Stagnant Leads',
-              subtitle: 'No activity in 7+ days',
-              count: stagnant.length,
-              color: 'text-amber-600',
-              bg: 'bg-amber-50',
-              icon: TrendingDown,
-              href: '/leads',
+              id: 'stagnant_lead', title: 'Stagnant Leads', subtitle: 'No activity in 7+ days',
+              count: stagnant.length, color: 'text-amber-600', bg: 'bg-amber-50', icon: TrendingDown, href: '/leads',
             });
           }
 
           const newToday = leads.filter((l: any) => l.createdAt?.startsWith(today));
           if (newToday.length > 0) {
             items.push({
-              id: 'new_leads_today',
-              title: 'New Leads Today',
-              subtitle: 'Leads added today',
-              count: newToday.length,
-              color: 'text-blue-600',
-              bg: 'bg-blue-50',
-              icon: Users,
-              href: '/missed-calls',
+              id: 'new_leads_today', title: 'New Leads Today', subtitle: 'Leads added today',
+              count: newToday.length, color: 'text-blue-600', bg: 'bg-blue-50', icon: Users, href: '/leads',
             });
           }
         }
+      }
 
-        if (Array.isArray(visits)) {
-          const now = new Date();
-          const today = now.toISOString().split('T')[0];
-
-          const todayCount = visits.filter((v: any) => v.scheduledAt?.startsWith(today)).length;
-          if (todayCount > 0) {
-            items.push({
-              id: 'today_visit',
-              title: "Today's Site Visits",
-              subtitle: 'Across all agents',
-              count: todayCount,
-              color: 'text-indigo-600',
-              bg: 'bg-indigo-50',
-              icon: Clock,
-              href: '/site-visits',
-            });
-          }
-
-          const missedVisits = visits.filter((v: any) => new Date(v.scheduledAt) < now);
-          if (missedVisits.length > 0) {
-            items.push({
-              id: 'missed_visit',
-              title: 'Uncompleted Visits',
-              subtitle: 'Past visits still marked as scheduled',
-              count: missedVisits.length,
-              color: 'text-orange-600',
-              bg: 'bg-orange-50',
-              icon: Calendar,
-              href: '/site-visits',
-            });
-          }
+      // ---- COMMON NOTIFICATIONS (Site Visits & Overdue Payments) ----
+      if (Array.isArray(visits)) {
+        const todayVisits = visits.filter((v: any) => v.scheduledAt?.startsWith(today));
+        if (todayVisits.length > 0) {
+          items.push({
+            id: 'today_visit', title: "Today's Site Visits", subtitle: isAgent ? 'Your scheduled visits for today' : 'Across all agents',
+            count: todayVisits.length, color: 'text-indigo-600', bg: 'bg-indigo-50', icon: Clock, href: '/site-visits',
+          });
         }
 
-        if (overdueRes.ok) {
-          const overdueData = await overdueRes.json();
-          if (overdueData.summary && overdueData.summary.totalOverdueCount > 0) {
-            items.push({
-              id: 'overdue_payments',
-              title: 'Overdue Payments',
-              subtitle: `₹${overdueData.summary.totalOverdueAmount.toLocaleString('en-IN')} total overdue`,
-              count: overdueData.summary.totalOverdueCount,
-              color: 'text-red-700',
-              bg: 'bg-red-100',
-              icon: IndianRupee,
-              href: '/payments',
-            });
-          }
+        const missedVisits = visits.filter((v: any) => new Date(v.scheduledAt) < now);
+        if (missedVisits.length > 0) {
+          items.push({
+            id: 'missed_visit', title: 'Pending/Missed Visits', subtitle: 'Past visits still marked as scheduled',
+            count: missedVisits.length, color: 'text-orange-600', bg: 'bg-orange-50', icon: Calendar, href: '/site-visits',
+          });
+        }
+      }
+
+      if (overdueRes.ok) {
+        const overdueData = await overdueRes.json();
+        if (overdueData.summary && overdueData.summary.totalOverdueCount > 0) {
+          items.push({
+            id: 'overdue_payments', title: 'Overdue Payments', subtitle: `₹${overdueData.summary.totalOverdueAmount.toLocaleString('en-IN')} pending collection`,
+            count: overdueData.summary.totalOverdueCount, color: 'text-red-700', bg: 'bg-red-100', icon: IndianRupee, href: '/payments',
+          });
         }
       }
 
@@ -365,9 +267,10 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
         unassigned_lead: 2,
         overdue_followup: 3,
         missed_visit: 4,
-        stagnant_lead: 5,
+        new_assigned_leads: 5,
+        new_leads_today: 5,
         today_visit: 6,
-        new_leads_today: 7,
+        stagnant_lead: 7,
       };
       items.sort((a, b) => (priority[a.id] ?? 9) - (priority[b.id] ?? 9));
 
@@ -379,11 +282,11 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
       // and prevent it from trying to play on initial page load.
       const overdueItem = items.find(i => i.id === 'overdue_payments');
       const currentOverdueCount = overdueItem ? overdueItem.count : 0;
-      
+
       if (!isInitialLoad.current && currentOverdueCount > previousOverdueCount.current) {
         playNotificationSound();
       }
-      
+
       previousOverdueCount.current = currentOverdueCount;
       isInitialLoad.current = false;
 
