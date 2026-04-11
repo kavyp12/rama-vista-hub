@@ -33,13 +33,15 @@ export function EditLeadDialog({ lead, open, onOpenChange, onSuccess }: any) {
   const [formData, setFormData] = useState({
     name: '', email: '', phone: '',
     budgetMin: '', budgetMax: '',
-    preferredLocation: '', notes: '',
-    temperature: 'warm', stage: 'new',
+    preferredLocation: '', 
+    notes: '',
     agentNotes: '',
+    adminNotes: '', // 👈 ADD THIS HERE
+    temperature: 'warm', stage: 'new',
     interestLevel: 5,
     preferredPropertyType: 'apartment',
     nextFollowupAt: '',
-    agentNextFollowupAt: '' // New separate agent follow-up
+    agentNextFollowupAt: ''
   });
 
   const [budgetUnit, setBudgetUnit] = useState<'L' | 'Cr' | 'K'>('L');
@@ -60,14 +62,14 @@ export function EditLeadDialog({ lead, open, onOpenChange, onSuccess }: any) {
         budgetMax: lead.budgetMax ? (lead.budgetMax / multiplier).toString() : '',
         preferredLocation: lead.preferredLocation || '',
         notes: lead.notes || '',
-        temperature: lead.temperature, stage: lead.stage,
         agentNotes: lead.agentNotes || '',
+        adminNotes: lead.adminNotes || '', // 👈 ADD THIS HERE
+        temperature: lead.temperature, stage: lead.stage,
         interestLevel: lead.interestLevel || 5,
         preferredPropertyType: lead.preferredPropertyType || 'apartment',
         nextFollowupAt: lead.nextFollowupAt ? new Date(lead.nextFollowupAt).toISOString().slice(0, 16) : '',
         agentNextFollowupAt: lead.agentNextFollowupAt ? new Date(lead.agentNextFollowupAt).toISOString().slice(0, 16) : ''
       });
-
       // Fetch history when dialog opens
       fetchHistory();
     }
@@ -100,12 +102,11 @@ export function EditLeadDialog({ lead, open, onOpenChange, onSuccess }: any) {
         budgetMax: formData.budgetMax ? Number(formData.budgetMax) * multiplier : null,
         preferredLocation: formData.preferredLocation || null,
         notes: formData.notes || null,
-        temperature: formData.temperature, stage: formData.stage,
         agentNotes: formData.agentNotes || null,
+        temperature: formData.temperature, stage: formData.stage,
         interestLevel: formData.interestLevel,
         preferredPropertyType: formData.preferredPropertyType || null
       };
-
       if (!isLocked) {
         payload.name = formData.name;
         payload.email = formData.email || null;
@@ -288,26 +289,56 @@ export function EditLeadDialog({ lead, open, onOpenChange, onSuccess }: any) {
                   </div>
                 </div>
 
+                {/* ─── ROW 1: PRIVATE NOTES ─── */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                  <div className="space-y-2">
-                    <Label className="text-blue-800">Your Private Notes</Label>
-                    <Textarea className="bg-white border-blue-200" placeholder="These notes are for you to track context..." value={formData.agentNotes} onChange={e => setFormData({...formData, agentNotes: e.target.value})} />
-                  </div>
+                  
+                  {/* 1. AGENT'S PRIVATE NOTE (Admin can read, Agent can write) */}
                   <div className="space-y-2">
                     <Label className="flex items-center justify-between">
-                        <span>Admin Requirements</span>
+                       <span className="text-blue-800">Agent's Private Notes</span>
+                       {canAssignLeads && <Badge variant="secondary" className="text-[10px] px-1 h-5"><Lock className="h-3 w-3 mr-1"/> Read Only</Badge>}
+                    </Label>
+                    <Textarea 
+                      className={`border-blue-200 ${canAssignLeads ? 'bg-slate-50 text-slate-500 cursor-not-allowed resize-none' : 'bg-white'}`} 
+                      placeholder={canAssignLeads ? "Agent hasn't added notes..." : "These notes are for you to track context..."} 
+                      value={formData.agentNotes} 
+                      onChange={e => setFormData({...formData, agentNotes: e.target.value})} 
+                      disabled={canAssignLeads} 
+                    />
+                  </div>
+
+                  {/* 2. ADMIN'S PRIVATE NOTE (Agent can read, Admin can write) */}
+                  <div className="space-y-2">
+                    <Label className="flex items-center justify-between">
+                        <span className="text-purple-800">Admin's Private Notes</span>
                         {isLocked && <Badge variant="secondary" className="text-[10px] px-1 h-5"><Lock className="h-3 w-3 mr-1"/> Read Only</Badge>}
                     </Label>
                     <Textarea 
-                        value={formData.notes} 
-                        onChange={e => setFormData({...formData, notes: e.target.value})} 
-                        disabled={isLocked}
-                        className={isLocked ? "bg-amber-50 text-amber-900 border-amber-200 resize-none cursor-not-allowed" : "bg-white"}
-                        placeholder="Admin instructions..."
+                        value={formData.adminNotes} 
+                        onChange={e => setFormData({...formData, adminNotes: e.target.value})} 
+                        disabled={isLocked} 
+                        className={`border-purple-200 ${isLocked ? "bg-slate-50 text-slate-500 cursor-not-allowed resize-none" : "bg-white"}`}
+                        placeholder={isLocked ? "Admin hasn't added private notes..." : "Your private admin notes..."}
                     />
                   </div>
+                  
                 </div>
 
+                {/* ─── ROW 2: ADMIN REQUIREMENTS ─── */}
+                <div className="space-y-2 pt-2">
+                  <Label className="flex items-center justify-between">
+                      <span>Admin Requirements & Instructions</span>
+                      {isLocked && <Badge variant="secondary" className="text-[10px] px-1 h-5"><Lock className="h-3 w-3 mr-1"/> Read Only</Badge>}
+                  </Label>
+                  <Textarea 
+                      value={formData.notes} 
+                      onChange={e => setFormData({...formData, notes: e.target.value})} 
+                      disabled={isLocked} 
+                      className={isLocked ? "bg-amber-50 text-amber-900 border-amber-200 resize-none cursor-not-allowed" : "bg-white"}
+                      placeholder={canAssignLeads ? "Add instructions or requirements for the agent here..." : "No instructions from admin yet..."}
+                      rows={2}
+                  />
+                </div>
               </form>
             </TabsContent>
 

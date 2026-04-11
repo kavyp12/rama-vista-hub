@@ -91,6 +91,7 @@ model Lead {
   leadScore               Int                      @default(0) @map("lead_score")
   lostReason              String?                  @map("lost_reason")
   agentNotes              String?                  @map("agent_notes")
+  adminNotes              String?   @map("admin_notes") // 👈 ADD THIS NEW LINE
   interestLevel           Int?                     @default(5) @map("interest_level")
   preferredPropertyType   String?                  @map("preferred_property_type")
   callLogs                CallLog[]

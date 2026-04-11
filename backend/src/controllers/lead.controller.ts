@@ -19,11 +19,9 @@ phone: z.string().min(7, "Phone number is too short").max(20, "Phone number is t
   assignedToId: z.string().optional().nullable()
 });
 
-// ✅ FIX H3: Define explicit update schema — no raw body passthrough to Prisma
 const updateLeadSchema = z.object({
   name: z.string().min(2).optional(),
   email: z.string().email().optional().nullable(),
-  // Replace the old phone line with this:
   phone: z.string().min(7, "Phone number is too short").max(20, "Phone number is too long").regex(/^\+?[0-9\s\-]+$/, "Invalid phone format").optional(),
   source: z.string().optional(),
   stage: z.string().optional(),
@@ -33,14 +31,14 @@ const updateLeadSchema = z.object({
   preferredLocation: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
   agentNotes: z.string().optional().nullable(),
+  adminNotes: z.string().optional().nullable(), // 👈 ADD THIS NEW LINE
   assignedToId: z.string().optional().nullable(),
   nextFollowupAt: z.string().optional().nullable(),
-  agentNextFollowupAt: z.string().optional().nullable(), // <-- ADD THIS LINE
+  agentNextFollowupAt: z.string().optional().nullable(),
   lostReason: z.string().optional().nullable(),
   interestLevel: z.number().optional().nullable(),
   preferredPropertyType: z.string().optional().nullable()
 });
-
 const logCallSchema = z.object({
   callStatus: z.enum(['connected_positive', 'connected_callback', 'not_connected', 'not_interested']),
   type: z.enum(['call', 'whatsapp']).default('call'),
@@ -176,20 +174,25 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
     const oldAdminDate = existingLead.nextFollowupAt ? existingLead.nextFollowupAt.getTime() : null;
     const adminDateChanged = newAdminDate !== oldAdminDate && newAdminDate !== null;
     
-    // 👇 FIXED: Now tracks the "Private Notes" field instead of "Admin Requirements"
-    const adminPrivateNotesChanged = data.agentNotes && data.agentNotes !== existingLead.agentNotes;
+    // 👇 FIX: Admin now uses `data.notes` independently, never touching the Agent's note
+    const adminNotesChanged = data.notes && data.notes !== existingLead.notes;
 
-    if (!isAgent && (adminDateChanged || adminPrivateNotesChanged)) {
+    if (!isAgent && (adminDateChanged || adminNotesChanged)) {
       const agentIdToAssign = existingLead.assignedToId || req.user!.userId;
       let callStatusToLog = 'connected_positive';
       
-      // 👇 FIXED: Uses the private notes for the history message
-      let msg = data.agentNotes || 'Admin updated lead details';
+      // 👇 FIX: Uses the Admin's box for the history message
+      let msg = data.notes || 'Admin updated lead details';
 
       if (adminDateChanged) {
         callStatusToLog = 'connected_callback';
-        // 👇 FIXED: Uses the private notes for the follow-up message
-        msg = data.agentNotes ? `Admin Follow-up set: ${data.agentNotes}` : 'Admin scheduled follow-up';
+        
+        const formattedDate = new Date(data.nextFollowupAt!).toLocaleString('en-IN', { 
+          day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' 
+        });
+        
+        const baseLabel = `Admin Follow-up set for ${formattedDate}`;
+        msg = data.notes ? `${baseLabel}: ${data.notes}` : baseLabel;
 
         await prisma.callLog.updateMany({
           where: { leadId: id, callStatus: 'connected_callback' },
@@ -232,7 +235,14 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
 
       if (agentDateChanged) {
         callStatusToLog = 'connected_callback';
-        msg = data.agentNotes ? `Agent Follow-up set: ${data.agentNotes}` : 'Agent scheduled personal follow-up';
+
+        // 👈 NEW: Format the date to show in the history log
+        const formattedDate = new Date(data.agentNextFollowupAt!).toLocaleString('en-IN', { 
+          day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' 
+        });
+
+        const baseLabel = `Agent Follow-up set for ${formattedDate}`;
+        msg = data.agentNotes ? `${baseLabel}: ${data.agentNotes}` : baseLabel;
 
         await prisma.callLog.updateMany({
           where: { leadId: id, agentId: req.user!.userId, callStatus: 'connected_callback' },
@@ -317,12 +327,10 @@ export const createLead = async (req: AuthRequest, res: Response) => {
   try {
     const data = createLeadSchema.parse(req.body);
     const currentUserId = req.user!.userId;
-    const assignedToId = data.assignedToId || currentUserId;
+    const assignedToId = data.assignedToId || null;
 
-    // Track who assigned this lead (only relevant if assigning to someone else)
-    const assignedById = (data.assignedToId && data.assignedToId !== currentUserId)
-      ? currentUserId
-      : null;
+    // Track who assigned this lead
+    const assignedById = data.assignedToId ? currentUserId : null;
 
     const lead = await prisma.lead.create({
       data: { ...data, assignedToId, assignedById },
@@ -490,12 +498,11 @@ export const bulkAssign = async (req: AuthRequest, res: Response) => {
 export const importLeads = async (req: AuthRequest, res: Response) => {
   try {
     const { leads } = bulkImportSchema.parse(req.body);
-    const userId = req.user!.userId;
 
     const created = await prisma.lead.createMany({
       data: leads.map(l => ({
         ...l,
-        assignedToId: userId,
+        assignedToId: null,
         source: l.source || 'Imported',
         stage: 'new',
         temperature: 'warm'

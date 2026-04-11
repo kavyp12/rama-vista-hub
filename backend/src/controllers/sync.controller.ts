@@ -191,7 +191,7 @@ export const syncLeads = async (req: AuthRequest, res: Response) => {
           siteLead.leadType ? `Type: ${siteLead.leadType}` : null,
           projectNameFromSite && !projectId ? `Interested in: ${projectNameFromSite} (Not found in CRM)` : null
         ].filter(Boolean).join(' | '),
-        assignedToId: req.user?.userId ?? null
+        assignedToId: null // Website leads should remain unassigned by default
       };
 
       // ✅ NO DUPLICATE LOGIC: Check by Phone Number

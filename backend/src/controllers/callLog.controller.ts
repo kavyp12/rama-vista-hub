@@ -284,15 +284,6 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
     // If lead doesn't exist, create it Unassigned
     if (!lead) {
       const callerName = agentname ? `New Lead - ${agentname}` : `Unverified MCUBE Caller - ${cleanLeadPhone}`;
-      
-      // 👈 Grant Incentive Credit to the Admin answering the IVR call
-      let assignerId = null;
-      if (targetAgentId) {
-          const assigner = await prisma.user.findUnique({ where: { id: targetAgentId } });
-          if (assigner?.role === 'admin') {
-              assignerId = targetAgentId;
-          }
-      }
 
       lead = await prisma.lead.create({
         data: {
@@ -300,8 +291,8 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
           phone: cleanLeadPhone,
           stage: 'unverified' as any,
           source: 'inbound_call',
-          assignedToId: targetAgentId,
-          assignedById: assignerId, // Credits the admin for the lead creation
+          assignedToId: null, // As requested: inbound leads stay unassigned until admin assigns
+          assignedById: null,
         },
         include: { assignedTo: true }
       });
@@ -408,12 +399,11 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
 // GET /api/call-logs/missed-calls
 // Returns recent missed inbound calls with full lead info for the agent
 // ─────────────────────────────────────────────────────────────────────────────
+
 export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
   try {
     const agentId = req.user!.userId;
 
-    // ── STEP 1: All not_connected call logs for this agent (the TRUE source of missed calls) ──
-    // This is the same data source that getCallLogs?view=missed uses, so the count will always match.
     const missedCallLogs = await prisma.callLog.findMany({
       where: {
         agentId,
@@ -429,15 +419,13 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
             temperature: true,
             stage: true,
             nextFollowupAt: true,
+            notes: true, // 👈 ADDED: Fetch the lead's global notes history
           }
         }
       },
       orderBy: { callDate: 'desc' },
-      // ── NO hard cap here — we return ALL missed calls so badge count matches Telecalling page ──
     });
 
-    // ── STEP 2: Pending callback follow-up tasks to know which calls have a taskId ──
-    // (used so the frontend can mark a task as "done" after the agent calls back)
     const pendingTasks = await prisma.followUpTask.findMany({
       where: {
         agentId,
@@ -447,14 +435,11 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
       select: { id: true, leadId: true, status: true },
     });
 
-    // Build a fast leadId → taskId lookup
     const leadTaskMap = new Map<string, string>();
     for (const t of pendingTasks) {
       if (t.leadId) leadTaskMap.set(t.leadId, t.id);
     }
 
-    // ── STEP 3: Build the final result list ──
-    // One entry per call log — no deduplication — so count matches 1:1 with Telecalling's missed view.
     const results = missedCallLogs
       .filter(log => log.lead != null)
       .map(log => {
@@ -473,17 +458,15 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
           calledAt: log.callDate.toISOString(),
           notes: log.notes,
           type: callType,
-          // followUpStatus: whether there is still a pending task for this lead
           followUpStatus: taskId ? 'pending' : 'done',
           nextFollowupAt: (log.lead as any).nextFollowupAt?.toISOString?.() ?? null,
           taskId: taskId ?? null,
+          leadNotes: (log.lead as any).notes ?? null, // 👈 ADDED: Pass history to the frontend
         };
       });
 
-    // Sort by calledAt descending — newest first
     results.sort((a, b) => new Date(b.calledAt).getTime() - new Date(a.calledAt).getTime());
 
-    // ── NO .slice() cap — return all so sidebar badge and this page always show the same number ──
     return res.json(results);
   } catch (error) {
     console.error('Missed Calls Detail Error:', error);
@@ -517,10 +500,43 @@ export const createCallLog = async (req: AuthRequest, res: Response) => {
         rejectionReason: data.rejectionReason
       },
       include: {
-        lead: { select: { id: true, name: true, phone: true, stage: true, assignedToId: true } }
+        lead: { select: { id: true, name: true, phone: true, stage: true, assignedToId: true, notes: true } }
       }
     });
 
+    // 👇 FIX: Automatically append these notes to the Lead's global history
+  // 👇 FIX: Automatically append these notes to the Lead's global history
+    if (data.notes) {
+      const timestamp = new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+      let statusLabel = 'Called';
+      
+      if (data.callStatus === 'connected_positive') {
+        statusLabel = 'Connected';
+      } else if (data.callStatus === 'connected_callback') {
+        // 👈 NEW: Add the scheduled date into the label
+        if (data.callbackScheduledAt) {
+          const scheduledDate = new Date(data.callbackScheduledAt).toLocaleString('en-IN', { 
+            day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' 
+          });
+          statusLabel = `Callback Scheduled for ${scheduledDate}`;
+        } else {
+          statusLabel = 'Callback Scheduled';
+        }
+      } else if (data.callStatus === 'not_connected') {
+        statusLabel = 'No Answer';
+      } else if (data.callStatus === 'not_interested') {
+        statusLabel = 'Not Interested';
+      }
+
+      const newHistoryLine = `[${timestamp} | ${statusLabel}]: ${data.notes}`;
+      const existingNotes = callLog.lead.notes || '';
+      const updatedNotes = existingNotes ? `${existingNotes}\n${newHistoryLine}` : newHistoryLine;
+
+      await prisma.lead.update({
+        where: { id: data.leadId },
+        data: { notes: updatedNotes }
+      });
+    }
     if (data.callStatus === 'connected_positive') {
       const stageProgression: Record<string, string> = {
         'new': 'contacted',
@@ -560,14 +576,15 @@ export const createCallLog = async (req: AuthRequest, res: Response) => {
     } else if (data.callStatus === 'not_interested') {
       await prisma.lead.update({
         where: { id: data.leadId },
-        data: { stage: 'closed', notes: `Closed - Reason: ${data.rejectionReason || 'Not interested'}` }
+        data: { stage: 'closed' } // Note history handled securely above
       });
     }
 
+    // Include the actual notes inside the activity log too
     await prisma.activityLog.create({
       data: {
         userId: req.user!.userId, action: 'call_logged', entityType: 'call_log', entityId: callLog.id,
-        details: { leadName: callLog.lead.name, callStatus: data.callStatus }
+        details: { leadName: callLog.lead.name, callStatus: data.callStatus, notes: data.notes }
       }
     });
 

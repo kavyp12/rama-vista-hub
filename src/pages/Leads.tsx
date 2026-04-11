@@ -318,7 +318,7 @@ export default function Leads() {
     e.preventDefault();
     try {
       const multiplier = UNITS[budgetUnit];
-      const finalAssignedId = formData.assignedToId && formData.assignedToId.trim() !== '' ? formData.assignedToId : user?.id;
+      const finalAssignedId = formData.assignedToId && formData.assignedToId.trim() !== '' ? formData.assignedToId : null;
 
       const payload = {
         name: formData.name,

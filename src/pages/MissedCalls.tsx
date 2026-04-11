@@ -36,6 +36,7 @@ interface MissedCallDetail {
   followUpStatus?: 'pending' | 'done' | 'scheduled';
   nextFollowupAt?: string | null;
   taskId?: string;
+  leadNotes?: string | null; // 👈 ADD THIS LINE
 }
 
 interface FilterState {
@@ -129,7 +130,7 @@ export default function MissedCalls() {
     setLogDialog(true);
   }
 
-  async function handleLogCall() {
+ async function handleLogCall() {
     if (!activeCall || !callStatus) return;
     setLogging(true);
     try {
@@ -164,6 +165,10 @@ export default function MissedCalls() {
 
       toast({ title: 'Call Logged ✓', description: `Call with ${activeCall.leadName} saved.` });
       setLogDialog(false);
+      
+      // 👇 FIX: Immediately hide ALL duplicate missed calls for this lead so it doesn't "stay there"
+      setCalls(prev => prev.map(c => c.leadId === activeCall.leadId ? { ...c, followUpStatus: 'done' } : c));
+      
       fetchMissedCalls(true);
     } catch {
       toast({ title: 'Error', description: 'Failed to log call', variant: 'destructive' });
@@ -175,17 +180,24 @@ export default function MissedCalls() {
   async function handleMarkDone(call: MissedCallDetail) {
     try {
       if (call.taskId) {
-        await fetch(`${API_URL}/call-logs/tasks/${call.taskId}/complete`, {
+        const res = await fetch(`${API_URL}/call-logs/tasks/${call.taskId}/complete`, {
           method: 'PATCH',
           headers: { Authorization: `Bearer ${token}` },
         });
+        if (!res.ok) throw new Error('Failed to complete task');
       }
-      setCalls(prev => prev.map(c => c.id === call.id ? { ...c, followUpStatus: 'done' } : c));
+      
+      // 👇 FIX: Hide ALL duplicate missed calls for this lead instantly
+      setCalls(prev => prev.map(c => c.leadId === call.leadId ? { ...c, followUpStatus: 'done' } : c));
       toast({ title: 'Marked as Done' });
+      
+      // Fetch in background to ensure sync
+      fetchMissedCalls();
     } catch {
-      toast({ title: 'Error', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Could not mark as done.', variant: 'destructive' });
     }
   }
+
 
   // ─── ACTIVE FILTER COUNT ───
   const activeFilterCount = useMemo(() => {
@@ -548,8 +560,7 @@ export default function MissedCalls() {
           </div>
         )}
       </div>
-
-      {/* ─── LOG CALL DIALOG ─── */}
+{/* ─── LOG CALL DIALOG ─── */}
       <Dialog open={logDialog} onOpenChange={setLogDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -557,6 +568,19 @@ export default function MissedCalls() {
             <p className="text-xs text-muted-foreground">{activeCall?.leadPhone}</p>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            
+            {/* 👈 NEW: Previous History Box */}
+            {activeCall?.leadNotes && (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-slate-600 flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5" /> Previous History
+                </Label>
+                <div className="max-h-28 overflow-y-auto w-full rounded-md border bg-slate-50 p-2.5 text-[11px] text-slate-700 whitespace-pre-wrap font-mono leading-relaxed">
+                  {activeCall.leadNotes}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-slate-600">What happened?</Label>
               <div className="grid grid-cols-2 gap-2">
@@ -573,6 +597,7 @@ export default function MissedCalls() {
                 })}
               </div>
             </div>
+            
             {(callStatus === 'connected_callback' || callStatus === 'not_connected') && (
               <div className="space-y-2 bg-blue-50 border border-blue-100 rounded-lg p-3">
                 <Label className="text-xs font-medium text-blue-800 flex items-center gap-1.5">
@@ -591,8 +616,9 @@ export default function MissedCalls() {
                   onChange={e => setCallbackAt(e.target.value)} className="h-8 text-xs bg-white" />
               </div>
             )}
+            
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-slate-600">Notes (optional)</Label>
+              <Label className="text-xs font-medium text-slate-600">New Notes (optional)</Label>
               <Textarea placeholder="What was discussed..." value={callNotes}
                 onChange={e => setCallNotes(e.target.value)} rows={2} className="text-xs resize-none" />
             </div>
