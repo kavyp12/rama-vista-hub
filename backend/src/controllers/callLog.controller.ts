@@ -22,34 +22,34 @@ const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 async function fetchAndUpdateDuration(callLogId: string, audioUrl: string) {
   // Try only 2 times instead of 3, and wait 30 seconds to let MCUBE upload it
-  const waitTimes = [30000, 45000]; 
-  
+  const waitTimes = [30000, 45000];
+
   for (let i = 0; i < waitTimes.length; i++) {
     try {
-      console.log(`⏳ Background (Attempt ${i + 1}/2): Waiting ${waitTimes[i]/1000}s for MCUBE...`);
-      await delay(waitTimes[i]); 
-      
+      console.log(`⏳ Background (Attempt ${i + 1}/2): Waiting ${waitTimes[i] / 1000}s for MCUBE...`);
+      await delay(waitTimes[i]);
+
       // 1. CRITICAL: Use 'stream' to prevent downloading megabytes into RAM
       const response = await axios({
         method: 'get',
         url: audioUrl,
-        responseType: 'stream', 
+        responseType: 'stream',
         timeout: 10000
       });
 
       // 2. CRITICAL: Use `skipPostHeaders: true` so it stops reading the file the exact millisecond it finds the duration
       const metadata = await mm.parseStream(
-        response.data, 
-        { mimeType: 'audio/wav' }, 
-        { duration: true, skipCovers: true, skipPostHeaders: true } 
+        response.data,
+        { mimeType: 'audio/wav' },
+        { duration: true, skipCovers: true, skipPostHeaders: true }
       );
-      
+
       // 3. CRITICAL: Destroy the stream instantly so it stops downloading the audio
       response.data.destroy();
 
       if (metadata.format.duration !== undefined) {
         const durationSecs = Math.round(metadata.format.duration);
-        
+
         const updateData: any = { callDuration: durationSecs };
         if (durationSecs > 0) updateData.callStatus = 'connected_positive';
 
@@ -57,11 +57,11 @@ async function fetchAndUpdateDuration(callLogId: string, audioUrl: string) {
           where: { id: callLogId },
           data: updateData
         });
-        
+
         console.log(`✅ Success! Duration set to ${durationSecs}s for call ${callLogId}`);
         return; // Success! Exit the loop immediately.
       }
-      
+
     } catch (error: any) {
       console.error(`❌ Attempt ${i + 1} failed for ${callLogId} (File not ready yet)`);
     }
@@ -111,37 +111,37 @@ export const initiateMcubeCall = async (req: AuthRequest, res: Response) => {
 
     // ── FIX: Immediately save a pending CallLog so call appears in CRM right away ──
     // The webhook will enrich this later with duration/recording once MCUBE posts back.
-  const cleanLeadPhone = String(leadPhone).replace(/\D/g, '').slice(-10);
-let lead = await prisma.lead.findFirst({
-  where: { phone: { contains: cleanLeadPhone } }
-});
+    const cleanLeadPhone = String(leadPhone).replace(/\D/g, '').slice(-10);
+    let lead = await prisma.lead.findFirst({
+      where: { phone: { contains: cleanLeadPhone } }
+    });
 
-if (!lead) {
-  // Auto-create an unverified lead so the call gets logged in CRM
-  lead = await prisma.lead.create({
-    data: {
-      name: `Unverified - ${cleanLeadPhone}`,
-      phone: cleanLeadPhone,
-      stage: 'unverified' as any,
-      source: 'outbound_call',
-      assignedToId: currentUser.id,   // assign to whoever is calling
-    },
-    include: { assignedTo: true }
-  });
-  console.log(`🆕 Auto-created lead for outbound call: ${cleanLeadPhone}`);
-}
+    if (!lead) {
+      // Auto-create an unverified lead so the call gets logged in CRM
+      lead = await prisma.lead.create({
+        data: {
+          name: `Unverified - ${cleanLeadPhone}`,
+          phone: cleanLeadPhone,
+          stage: 'unverified' as any,
+          source: 'outbound_call',
+          assignedToId: currentUser.id,   // assign to whoever is calling
+        },
+        include: { assignedTo: true }
+      });
+      console.log(`🆕 Auto-created lead for outbound call: ${cleanLeadPhone}`);
+    }
 
-// Stamp last contacted
-await prisma.lead.update({
-  where: { id: lead.id },
-  data: { lastContactedAt: new Date() }
-});
+    // Stamp last contacted
+    await prisma.lead.update({
+      where: { id: lead.id },
+      data: { lastContactedAt: new Date() }
+    });
 
-return res.status(200).json({
-  success: true,
-  message: 'Call initiated via MCUBE',
-  mcubeResponse: response.data
-});
+    return res.status(200).json({
+      success: true,
+      message: 'Call initiated via MCUBE',
+      mcubeResponse: response.data
+    });
 
   } catch (error) {
     console.error('MCUBE Initiate Call Error:', error);
@@ -168,10 +168,10 @@ return res.status(200).json({
 export const mcubeWebhook = async (req: Request, res: Response) => {
   try {
     const callData = req.body;
- 
+
     console.log('\n📞 MCUBE WEBHOOK HIT:', new Date().toISOString());
     console.log('📦 Raw payload:', JSON.stringify(callData, null, 2));
- 
+
     const {
       callfrom,
       callto,
@@ -185,18 +185,18 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
       agentname,
     } = callData;
     // Note: duration/billsec accessed via callData.duration and callData.billsec below
- 
+
     const rawLeadPhone = (customer || callfrom || '') as string;
     const rawAgentPhone = (executive || callto || '') as string;
- 
+
     if (!rawLeadPhone || rawLeadPhone.length < 6) {
       console.warn('⚠️ Webhook rejected: no lead phone in payload');
       return res.status(200).send('Webhook received (no lead phone in payload)');
     }
- 
+
     const cleanLeadPhone = rawLeadPhone.replace(/\D/g, '').slice(-10);
     const cleanAgentPhone = rawAgentPhone.replace(/\D/g, '').slice(-10);
- 
+
     // ─────────────────────────────────────────────────────────────────────
     // 1. EXACT DURATION PARSING (No Dummy Data)
     // ─────────────────────────────────────────────────────────────────────
@@ -226,14 +226,14 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
     // 2. BULLETPROOF CONNECTION STATUS
     // If there is a recording file, OR duration > 0, the call was connected.
     // ─────────────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
     // 2. BULLETPROOF CONNECTION STATUS
     // If duration > 0, the call was connected.
     // ─────────────────────────────────────────────────────────────────────
     const rawDialstatus = String(dialstatus || '').toUpperCase().trim();
     const rawStatus = String(status || '').toLowerCase().trim();
     const hasRecording = filename && filename !== '' && filename.toLowerCase() !== 'none';
- 
+
     const isConnected =
       rawDialstatus === 'ANSWER' ||
       rawDialstatus === 'ANSWERED' ||
@@ -243,15 +243,15 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
       rawStatus.includes('answered') ||
       // ❌ Removed 'hasRecording' check from here!
       (durationInSeconds !== null && durationInSeconds > 0);
- 
+
     const callStatus: 'connected_positive' | 'not_connected' = isConnected ? 'connected_positive' : 'not_connected';
-    
+
     const callTypeLabel = callType || 'Inbound';
     const recordingValue = hasRecording ? filename : 'None';
     // Always include Duration in notes so the frontend can parse it as a fallback
     const durationLabel = durationInSeconds !== null && durationInSeconds > 0 ? `${durationInSeconds}` : '0';
     const baseNotes = `Auto-logged via MCUBE ${callTypeLabel} | Call ID: ${callid || 'N/A'} | Agent: ${agentname || cleanAgentPhone || 'Unknown'} | Duration: ${durationLabel} | Recording: ${recordingValue}`;
- 
+
     // ─────────────────────────────────────────────────────────────────────
     // 3. FIND THE EXACT 1 AGENT & 1 LEAD
     // ─────────────────────────────────────────────────────────────────────
@@ -270,7 +270,7 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
       where: { phone: { contains: cleanLeadPhone } },
       include: { assignedTo: true }
     });
- 
+
     // If we still don't have an agent, fallback to the lead's assigned owner, or finally, a default admin
     if (!targetAgentId) {
       if (lead?.assignedToId) {
@@ -298,13 +298,13 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
       });
       console.log(`🆕 New lead created: ${lead.name}`);
     }
- 
-  // ─────────────────────────────────────────────────────────────────────
+
+    // ─────────────────────────────────────────────────────────────────────
     // 4. UPSERT CALL LOG (Create strictly ONE record per Call ID)
     // ─────────────────────────────────────────────────────────────────────
     const MCUBE_RECORDING_BASE_URL = 'https://recordings.mcube.com';
     let fullAudioUrl: string | null = null;
-    
+
     if (hasRecording) {
       let cleanPath = filename.trim();
       // ✨ BULLETPROOF CHECK: If MCUBE already includes 'http', use it exactly as-is!
@@ -321,7 +321,7 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
       const existingLog = await prisma.callLog.findFirst({
         where: { notes: { contains: `Call ID: ${callid}` } }
       });
- 
+
       if (existingLog) {
         const updatedDuration = durationInSeconds ?? existingLog.callDuration;
         await prisma.callLog.update({
@@ -332,7 +332,7 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
             notes: baseNotes,
           }
         });
-        
+
         // 👇 NEW: Trigger background fetch if duration is still 0/null but audio exists
         if ((!updatedDuration || updatedDuration <= 0) && fullAudioUrl) {
           fetchAndUpdateDuration(existingLog.id, fullAudioUrl);
@@ -342,7 +342,7 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
         return res.status(200).send('OK: Call log updated (upsert by callid)');
       }
     }
- 
+
     // If no existing log exists, create EXACTLY ONE new log
     if (targetAgentId) {
       const newLog = await prisma.callLog.create({
@@ -355,6 +355,14 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
           notes: baseNotes,
         }
       });
+
+      // 👇 NEW: If this new call is connected, auto-resolve all previous missed calls
+      if (callStatus === 'connected_positive') {
+        await prisma.callLog.updateMany({
+          where: { leadId: lead.id, callStatus: 'not_connected', id: { not: newLog.id } },
+          data: { callStatus: 'connected_positive' }
+        });
+      }
 
       // 👇 NEW: Trigger background fetch if duration is 0/null but audio exists
       if ((!durationInSeconds || durationInSeconds <= 0) && fullAudioUrl) {
@@ -382,10 +390,12 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
 
       console.log(`✅ Call logged strictly under ONE user ID: ${targetAgentId}`);
     }
- 
+
+
+
     return res.status(200).send('OK: Call processed successfully');
 
- 
+
   } catch (error) {
     console.error('❌ MCUBE Webhook Error:', error);
     return res.status(200).send('Webhook received with error — check server logs');
@@ -505,18 +515,18 @@ export const createCallLog = async (req: AuthRequest, res: Response) => {
     });
 
     // 👇 FIX: Automatically append these notes to the Lead's global history
-  // 👇 FIX: Automatically append these notes to the Lead's global history
+    // 👇 FIX: Automatically append these notes to the Lead's global history
     if (data.notes) {
       const timestamp = new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
       let statusLabel = 'Called';
-      
+
       if (data.callStatus === 'connected_positive') {
         statusLabel = 'Connected';
       } else if (data.callStatus === 'connected_callback') {
         // 👈 NEW: Add the scheduled date into the label
         if (data.callbackScheduledAt) {
-          const scheduledDate = new Date(data.callbackScheduledAt).toLocaleString('en-IN', { 
-            day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' 
+          const scheduledDate = new Date(data.callbackScheduledAt).toLocaleString('en-IN', {
+            day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
           });
           statusLabel = `Callback Scheduled for ${scheduledDate}`;
         } else {
@@ -612,7 +622,7 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
       ];
     }
 
-   // ── Date filter ──
+    // ── Date filter ──
     const targetDateField = view === 'follow_ups' ? 'callbackScheduledAt' : 'callDate';
 
     if (dateFrom || dateTo) {
@@ -681,7 +691,7 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
       where.notes = { contains: direction === 'inbound' ? 'Inbound' : 'Outbound', mode: 'insensitive' };
     }
 
-   const callLogs = await prisma.callLog.findMany({
+    const callLogs = await prisma.callLog.findMany({
       where,
       include: {
         lead: { select: { id: true, name: true, phone: true, temperature: true, stage: true } },
@@ -851,13 +861,13 @@ export const updateCallLog = async (req: AuthRequest, res: Response) => {
           notes: 'Manual Follow-up scheduled from Telecalling'
         }
       });
-      
+
       const leadOwner = await prisma.lead.findUnique({
         where: { id: existing.leadId },
         include: { assignedTo: true }
       });
       const isManagedBySalesAgent = leadOwner?.assignedTo?.role === 'sales_agent';
-      
+
       // Do not overwrite the sales agent's follow-up schedule if an admin/telecaller does this
       if (!isManagedBySalesAgent || userId === leadOwner?.assignedToId) {
         await prisma.lead.update({
@@ -868,16 +878,26 @@ export const updateCallLog = async (req: AuthRequest, res: Response) => {
     }
 
     // Handle Missed to Connected Conversion
-   if (data.callStatus === 'connected_positive' && (existing.callStatus === 'not_connected' || existing.callStatus === 'connected_callback')) {
+    // Handle Missed to Connected Conversion
+    if (data.callStatus === 'connected_positive' && (existing.callStatus === 'not_connected' || existing.callStatus === 'connected_callback')) {
       await prisma.lead.update({
         where: { id: existing.leadId },
         data: { stage: 'contacted', temperature: 'hot' }
       });
-      
-      // 👈 ADDED: Automatically close any pending follow-up tasks for this lead!
+
+      // Automatically close any pending follow-up tasks for this lead!
       await prisma.followUpTask.updateMany({
         where: { leadId: existing.leadId, status: 'pending' },
         data: { status: 'completed', completedAt: new Date() }
+      });
+
+      // 👈 NEW: Auto-resolve ALL previous missed calls for this number
+      await prisma.callLog.updateMany({
+        where: {
+          leadId: existing.leadId,
+          callStatus: 'not_connected'
+        },
+        data: { callStatus: 'connected_positive' }
       });
     }
 

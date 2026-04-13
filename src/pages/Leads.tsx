@@ -70,20 +70,35 @@ export default function Leads() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [admins, setAdmins] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
+// Load saved filters from memory on initial load
+  const [savedFilters] = useState(() => {
+    try {
+      const item = localStorage.getItem('crm_leads_filters');
+      return item ? JSON.parse(item) : {};
+    } catch { return {}; }
+  });
 
   // Search & Filter State
-  const [searchQuery, setSearchQuery] = useState('');
-  const [stageFilter, setStageFilter] = useState('active_open');
-  const [sourceFilter, setSourceFilter] = useState('all');
-  const [temperatureFilter, setTemperatureFilter] = useState('all');
-  const [assignedAgentFilter, setAssignedAgentFilter] = useState('all');
-  const [assignedAdminFilter, setAssignedAdminFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('all');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [followUpFilter, setFollowUpFilter] = useState('all');
-  const [followUpDate, setFollowUpDate] = useState('');
-  
+  const [searchQuery, setSearchQuery] = useState(savedFilters.searchQuery ?? '');
+  const [stageFilter, setStageFilter] = useState(savedFilters.stageFilter ?? 'active_open');
+  const [sourceFilter, setSourceFilter] = useState(savedFilters.sourceFilter ?? 'all');
+  const [temperatureFilter, setTemperatureFilter] = useState(savedFilters.temperatureFilter ?? 'all');
+  const [assignedAgentFilter, setAssignedAgentFilter] = useState(savedFilters.assignedAgentFilter ?? 'all');
+  const [assignedAdminFilter, setAssignedAdminFilter] = useState(savedFilters.assignedAdminFilter ?? 'all');
+  const [dateFilter, setDateFilter] = useState(savedFilters.dateFilter ?? 'all');
+  const [startDate, setStartDate] = useState(savedFilters.startDate ?? '');
+  const [endDate, setEndDate] = useState(savedFilters.endDate ?? '');
+  const [followUpFilter, setFollowUpFilter] = useState(savedFilters.followUpFilter ?? 'all');
+  const [followUpDate, setFollowUpDate] = useState(savedFilters.followUpDate ?? '');
+
+  // Save to memory automatically whenever any filter is clicked/typed
+  useEffect(() => {
+    localStorage.setItem('crm_leads_filters', JSON.stringify({
+      searchQuery, stageFilter, sourceFilter, temperatureFilter,
+      assignedAgentFilter, assignedAdminFilter, dateFilter,
+      startDate, endDate, followUpFilter, followUpDate
+    }));
+  }, [searchQuery, stageFilter, sourceFilter, temperatureFilter, assignedAgentFilter, assignedAdminFilter, dateFilter, startDate, endDate, followUpFilter, followUpDate]);
   // New UI State for Filter Dropdown
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 

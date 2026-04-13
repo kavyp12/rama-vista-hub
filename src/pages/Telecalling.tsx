@@ -70,6 +70,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import React from 'react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
@@ -155,8 +156,17 @@ export default function Telecalling() {
   const { toast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [activeView, setActiveView] = useState(searchParams.get('view') || 'reports');
-  const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
+const [activeView, setActiveView] = useState(
+    searchParams.get('view') || localStorage.getItem('crm_telecalling_view') || 'reports'
+  );
+  
+  const [filters, setFilters] = useState<FilterState>(() => {
+    try {
+      const saved = localStorage.getItem('crm_telecalling_filters');
+      return saved ? JSON.parse(saved) : EMPTY_FILTERS;
+    } catch { return EMPTY_FILTERS; }
+  });
+
   const [showFilters, setShowFilters] = useState(false);
   const [tableData, setTableData] = useState<TableRowData[]>([]);
   const [stats, setStats] = useState<CallStats | null>(null);
@@ -170,7 +180,7 @@ export default function Telecalling() {
   const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
 
-  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);  
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
 
 
   const [isEditNameOpen, setIsEditNameOpen] = useState(false);
@@ -181,7 +191,30 @@ export default function Telecalling() {
   const [followUpDate, setFollowUpDate] = useState('');
   const [followUpLogId, setFollowUpLogId] = useState('');
 
+  const [expandedLeads, setExpandedLeads] = useState<Set<string>>(new Set());
 
+  const toggleExpandLead = (leadId: string) => {
+    setExpandedLeads(prev => {
+      const next = new Set(prev);
+      if (next.has(leadId)) next.delete(leadId);
+      else next.add(leadId);
+      return next;
+    });
+  };
+
+  const groupedTableData = useMemo(() => {
+    const groups: { [key: string]: TableRowData[] } = {};
+    const order: string[] = [];
+    tableData.forEach(row => {
+      const key = row.leadId || row.id;
+      if (!groups[key]) {
+        groups[key] = [];
+        order.push(key);
+      }
+      groups[key].push(row);
+    });
+    return order.map(key => groups[key]);
+  }, [tableData]);
   const handleSaveName = async () => {
     try {
       const res = await fetch(`${API_URL}/leads/${leadIdToEdit}`, {
@@ -248,10 +281,16 @@ export default function Telecalling() {
   };
 
   // Sync state to URL
+// Sync view state to URL & LocalStorage
   useEffect(() => {
     setSearchParams({ view: activeView });
+    localStorage.setItem('crm_telecalling_view', activeView);
   }, [activeView, setSearchParams]);
 
+  // Sync filters to LocalStorage
+  useEffect(() => {
+    localStorage.setItem('crm_telecalling_filters', JSON.stringify(filters));
+  }, [filters]);
   // Fetch agents list for filter dropdown (admin only)
   // REPLACE THIS:
   // Fetch agents list for filter dropdown (Admins and Sales Agents)
@@ -289,7 +328,7 @@ export default function Telecalling() {
   }, [filters]);
 
   // ─── FETCH DATA ───
- const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     if (activeView === 'reports') return;
     setIsLoading(true);
     setTableData([]);
@@ -544,58 +583,58 @@ export default function Telecalling() {
       <div className="flex flex-col lg:flex-row h-[calc(100vh-110px)] md:h-[calc(100vh-140px)] gap-4 lg:gap-6">
 
         {/* ─── SIDEBAR ─── */}
-<Card className="w-full lg:w-64 flex-shrink-0 h-auto lg:h-full overflow-hidden flex flex-col border-r bg-card lg:rounded-none lg:border-y-0 lg:border-l-0">
-  <CardHeader 
-    className="pb-2 pt-4 px-4 flex flex-row items-center justify-between cursor-pointer lg:cursor-default"
-    onClick={() => setIsMobileNavOpen(!isMobileNavOpen)}
-  >
-    <CardTitle className="text-sm uppercase text-muted-foreground font-bold tracking-wider">Navigation</CardTitle>
-    <Button variant="ghost" size="icon" className="h-6 w-6 lg:hidden">
-      {isMobileNavOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-    </Button>
-  </CardHeader>
-  
-  <div className={`flex-1 overflow-hidden flex-col ${isMobileNavOpen ? 'flex' : 'hidden lg:flex'}`}>
-    <ScrollArea className="flex-1 max-h-[300px] lg:max-h-none">
-      <div className="p-2 space-y-1">
-        {menuItems.map((item, idx) =>
-          item.type === 'separator' ? (
-            <Separator key={idx} className="my-2" />
-          ) : (
-            <Button
-              key={item.id}
-              variant={activeView === item.id ? 'secondary' : 'ghost'}
-              className={`w-full justify-start gap-3 h-10 ${item.className || ''} ${activeView === item.id ? 'bg-primary/10 text-primary font-semibold' : ''}`}
-              onClick={() => {
-                setActiveView(item.id || 'reports');
-                setIsMobileNavOpen(false); // 👈 Auto-close on mobile after selecting
-              }}
-            >
-              {item.icon && <item.icon className="h-4 w-4" />}
-              <span className="truncate">{item.label}</span>
-              {stats ? (() => {
-                let count = 0;
-                let badgeClass = 'bg-primary/10 text-primary';
-                if (item.id === 'all') count = stats.totalCalls;
-                else if (item.id === 'missed') { count = stats.notAnswered; badgeClass = 'bg-red-100 text-red-600'; }
-                else if (item.id === 'follow_ups') { count = stats.callback; badgeClass = 'bg-amber-100 text-amber-700'; }
-                else if (item.id === 'qualified') count = stats.positive;
-                else if (item.id === 'unqualified') count = stats.negative;
-                else if (item.id === 'new_leads') { count = stats.newLeads; badgeClass = 'bg-blue-100 text-blue-600'; }
-                else if (item.id === 'inbound') { count = stats.inboundTotal || 0; badgeClass = 'bg-green-100 text-green-700'; }
-                else if (item.id === 'outbound') { count = stats.outboundTotal || 0; badgeClass = 'bg-indigo-100 text-indigo-700'; }
-                if (count > 0) return (
-                  <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-bold ${badgeClass}`}>{count}</span>
-                );
-                return null;
-              })() : null}
+        <Card className="w-full lg:w-64 flex-shrink-0 h-auto lg:h-full overflow-hidden flex flex-col border-r bg-card lg:rounded-none lg:border-y-0 lg:border-l-0">
+          <CardHeader
+            className="pb-2 pt-4 px-4 flex flex-row items-center justify-between cursor-pointer lg:cursor-default"
+            onClick={() => setIsMobileNavOpen(!isMobileNavOpen)}
+          >
+            <CardTitle className="text-sm uppercase text-muted-foreground font-bold tracking-wider">Navigation</CardTitle>
+            <Button variant="ghost" size="icon" className="h-6 w-6 lg:hidden">
+              {isMobileNavOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </Button>
-          )
-        )}
-      </div>
-    </ScrollArea>
-  </div>
-</Card>
+          </CardHeader>
+
+          <div className={`flex-1 overflow-hidden flex-col ${isMobileNavOpen ? 'flex' : 'hidden lg:flex'}`}>
+            <ScrollArea className="flex-1 max-h-[300px] lg:max-h-none">
+              <div className="p-2 space-y-1">
+                {menuItems.map((item, idx) =>
+                  item.type === 'separator' ? (
+                    <Separator key={idx} className="my-2" />
+                  ) : (
+                    <Button
+                      key={item.id}
+                      variant={activeView === item.id ? 'secondary' : 'ghost'}
+                      className={`w-full justify-start gap-3 h-10 ${item.className || ''} ${activeView === item.id ? 'bg-primary/10 text-primary font-semibold' : ''}`}
+                      onClick={() => {
+                        setActiveView(item.id || 'reports');
+                        setIsMobileNavOpen(false); // 👈 Auto-close on mobile after selecting
+                      }}
+                    >
+                      {item.icon && <item.icon className="h-4 w-4" />}
+                      <span className="truncate">{item.label}</span>
+                      {stats ? (() => {
+                        let count = 0;
+                        let badgeClass = 'bg-primary/10 text-primary';
+                        if (item.id === 'all') count = stats.totalCalls;
+                        else if (item.id === 'missed') { count = stats.notAnswered; badgeClass = 'bg-red-100 text-red-600'; }
+                        else if (item.id === 'follow_ups') { count = stats.callback; badgeClass = 'bg-amber-100 text-amber-700'; }
+                        else if (item.id === 'qualified') count = stats.positive;
+                        else if (item.id === 'unqualified') count = stats.negative;
+                        else if (item.id === 'new_leads') { count = stats.newLeads; badgeClass = 'bg-blue-100 text-blue-600'; }
+                        else if (item.id === 'inbound') { count = stats.inboundTotal || 0; badgeClass = 'bg-green-100 text-green-700'; }
+                        else if (item.id === 'outbound') { count = stats.outboundTotal || 0; badgeClass = 'bg-indigo-100 text-indigo-700'; }
+                        if (count > 0) return (
+                          <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-bold ${badgeClass}`}>{count}</span>
+                        );
+                        return null;
+                      })() : null}
+                    </Button>
+                  )
+                )}
+              </div>
+            </ScrollArea>
+          </div>
+        </Card>
 
         {/* ─── MAIN CONTENT ─── */}
         <div className="flex-1 h-full flex flex-col min-w-0">
@@ -650,10 +689,10 @@ export default function Telecalling() {
 
                     {showFilters && (
                       <>
-                      <div className="fixed inset-0 z-40 bg-background/50 sm:bg-transparent backdrop-blur-sm sm:backdrop-blur-none" onClick={() => setShowFilters(false)} />
-          
-          {/* 👈 CRITICAL FIX: Changed classes here to make it fixed on mobile, absolute on desktop */}
-          <div className="fixed sm:absolute inset-x-4 top-32 sm:inset-auto sm:right-0 sm:top-[calc(100%+8px)] z-50 sm:w-[340px] rounded-xl border bg-background shadow-2xl overflow-hidden">
+                        <div className="fixed inset-0 z-40 bg-background/50 sm:bg-transparent backdrop-blur-sm sm:backdrop-blur-none" onClick={() => setShowFilters(false)} />
+
+                        {/* 👈 CRITICAL FIX: Changed classes here to make it fixed on mobile, absolute on desktop */}
+                        <div className="fixed sm:absolute inset-x-4 top-32 sm:inset-auto sm:right-0 sm:top-[calc(100%+8px)] z-50 sm:w-[340px] rounded-xl border bg-background shadow-2xl overflow-hidden">
 
                           {/* ── HEADER ── */}
                           <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
@@ -755,29 +794,29 @@ export default function Telecalling() {
 
                             {/* Call Direction — hidden for Missed tab (always shows all directions) */}
                             {activeView !== 'missed' && (
-                            <div className="space-y-1.5">
-                              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Call Direction</label>
-                              <div className="grid grid-cols-3 gap-1.5">
-                                {[
-                                  { value: 'all', label: 'All', icon: Phone },
-                                  { value: 'inbound', label: 'Incoming', icon: PhoneIncoming },
-                                  { value: 'outbound', label: 'Outgoing', icon: PhoneOutgoing },
-                                ].map(opt => {
-                                  const Icon = opt.icon;
-                                  const isActive = filters.direction === opt.value;
-                                  return (
-                                    <button
-                                      key={opt.value}
-                                      onClick={() => setFilters(p => ({ ...p, direction: opt.value }))}
-                                      className={`flex flex-col items-center justify-center gap-1 p-2.5 rounded-lg border text-xs font-medium transition-all ${isActive ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'hover:bg-muted border-border'}`}
-                                    >
-                                      <Icon className="h-4 w-4" />
-                                      {opt.label}
-                                    </button>
-                                  );
-                                })}
+                              <div className="space-y-1.5">
+                                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Call Direction</label>
+                                <div className="grid grid-cols-3 gap-1.5">
+                                  {[
+                                    { value: 'all', label: 'All', icon: Phone },
+                                    { value: 'inbound', label: 'Incoming', icon: PhoneIncoming },
+                                    { value: 'outbound', label: 'Outgoing', icon: PhoneOutgoing },
+                                  ].map(opt => {
+                                    const Icon = opt.icon;
+                                    const isActive = filters.direction === opt.value;
+                                    return (
+                                      <button
+                                        key={opt.value}
+                                        onClick={() => setFilters(p => ({ ...p, direction: opt.value }))}
+                                        className={`flex flex-col items-center justify-center gap-1 p-2.5 rounded-lg border text-xs font-medium transition-all ${isActive ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'hover:bg-muted border-border'}`}
+                                      >
+                                        <Icon className="h-4 w-4" />
+                                        {opt.label}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
                               </div>
-                            </div>
                             )}
 
                             {/* Agent (admin only) */}
@@ -900,7 +939,7 @@ export default function Telecalling() {
                               </div>
                             </TableCell>
                           </TableRow>
-                        ) : tableData.length === 0 ? (
+                        ) : groupedTableData.length === 0 ? (
                           <TableRow>
                             <TableCell colSpan={8} className="h-64 text-center">
                               <div className="flex flex-col items-center justify-center text-muted-foreground gap-2">
@@ -915,184 +954,202 @@ export default function Telecalling() {
                             </TableCell>
                           </TableRow>
                         ) : (
-                          tableData.map(row => {
-                            const dir = getCallDirection(row.notes);
-                            return (
-                              <TableRow key={row.id} className="hover:bg-muted/50 transition-colors group">
-                                <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                                    <div className="flex flex-col">
-                                      <span className="text-foreground font-medium">{format(parseISO(row.displayDate), 'MMM dd, yyyy')}</span>
-                                      <span className="text-[10px]">{format(parseISO(row.displayDate), 'hh:mm a')}</span>
-                                      {/* 👈 UNIQUE CALL ID ADDED HERE */}
-                                      {!row.isLeadRow && (
-                                        <span className="text-[10px] text-blue-600 font-mono font-bold tracking-wider mt-1 bg-blue-50 w-fit px-1.5 py-0.5 rounded border border-blue-100">
-                                          #{row.id.slice(-6).toUpperCase()}
-                                        </span>
+                          groupedTableData.map(group => {
+                            const mainRow = group[0];
+                            const hasMultiple = group.length > 1;
+                            const isExpanded = expandedLeads.has(mainRow.leadId);
+
+                            // Helper function to render a row (main or sub-row)
+                            // Helper function to render a row (main or sub-row)
+                            const renderRow = (row: TableRowData, isSubRow: boolean) => {
+                              const dir = getCallDirection(row.notes);
+                              return (
+                                <TableRow
+                                  key={row.id}
+                                  // 👇 CHANGE 1: Distinct background, inner shadow, and primary border for sub-rows
+                                  className={`transition-colors group ${isSubRow
+                                      ? 'bg-muted/60 border-l-4 border-l-primary border-t-0 shadow-[inset_0_4px_6px_-4px_rgba(0,0,0,0.05)]'
+                                      : 'hover:bg-muted/50 border-b'
+                                    }`}
+                                >
+                                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                                    <div className="flex items-start gap-2">
+                                      {!isSubRow && hasMultiple && (
+                                        <Button variant="ghost" size="icon" className="h-5 w-5 mt-0.5 shrink-0" onClick={() => toggleExpandLead(row.leadId)}>
+                                          {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                        </Button>
                                       )}
+
+                                      {/* 👇 CHANGE 2: File-tree style nesting line instead of an invisible spacer */}
+                                      {isSubRow && (
+                                        <div className="w-4 h-5 border-l-2 border-b-2 border-muted-foreground/30 rounded-bl-sm ml-1 shrink-0 -translate-y-2" />
+                                      )}
+
+                                      <div className="flex flex-col">
+                                        <span className="text-foreground font-medium">{format(parseISO(row.displayDate), 'MMM dd, yyyy')}</span>
+                                        <span className="text-[10px]">{format(parseISO(row.displayDate), 'hh:mm a')}</span>
+                                        {!row.isLeadRow && (
+                                          <span className="text-[10px] text-blue-600 font-mono font-bold tracking-wider mt-1 bg-blue-50 w-fit px-1.5 py-0.5 rounded border border-blue-100">
+                                            #{row.id.slice(-6).toUpperCase()}
+                                          </span>
+                                        )}
+                                      </div>
                                     </div>
                                   </TableCell>
-                                <TableCell>
-                                <div className="flex items-center gap-2">
-                                  <Avatar className="h-8 w-8 border bg-background">
-                                    <AvatarFallback className="text-[10px] bg-primary/5 text-primary">
-                                      {row.lead?.name?.substring(0, 2).toUpperCase() || 'NA'}
-                                    </AvatarFallback>
-                                  </Avatar>
-                                  <div>
-                                    <span className="font-semibold text-sm block">
-                                      {row.lead?.name ? row.lead.name.replace('Unverified MCUBE Caller - ', 'New Inquiry: ').replace('New Lead - ', 'New Inquiry: ') : 'Unknown Lead'}
-                                    </span>
-                                    {/* 👈 UNIQUE LEAD ID ADDED HERE */}
-                                    <span className="text-[10px] text-slate-500 font-mono tracking-wide">
-                                      Lead ID: #{row.leadId.slice(-6).toUpperCase()}
-                                    </span>
-                                  </div>
-                                </div>
-                              </TableCell>
-                                <TableCell>
-  <div className="flex items-center gap-1.5">
-    {getPhoneInfo(row.lead?.phone).iso ? (
-      <img
-        src={`https://flagcdn.com/w20/${getPhoneInfo(row.lead?.phone).iso.toLowerCase()}.png`}
-        alt=""
-        className="w-5 h-3.5 object-cover rounded-sm shrink-0"
-      />
-    ) : (
-      <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-    )}
-    <span className="text-sm font-mono tracking-wide">{getPhoneInfo(row.lead?.phone).number || '—'}</span>
-  </div>
-</TableCell>
-                                <TableCell className="text-sm text-muted-foreground">{row.agent?.fullName || '—'}</TableCell>
-                                <TableCell>
-                                  {row.isLeadRow ? (
-                                    <span className="text-xs text-muted-foreground">—</span>
-                                  ) : dir === 'inbound' ? (
-                                    <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">
-                                      <ArrowDownLeft className="h-3 w-3" /> Incoming
-                                    </span>
-                                  ) : dir === 'outbound' ? (
-                                    <span className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
-                                      <ArrowUpRight className="h-3 w-3" /> Outgoing
-                                    </span>
-                                  ) : (
-                                    <span className="text-xs text-muted-foreground">—</span>
-                                  )}
-                                </TableCell>
-                             <TableCell>
-                                  <StatusBadge status={row.isLeadRow ? 'pending' : row.callStatus} />
-                                </TableCell>
 
+                                  {/* 👇 CHANGE 3: Fade out repeated client name & avatar to let the parent row stand out */}
+                                  <TableCell>
+                                    <div className={`flex items-center gap-2 ${isSubRow ? 'opacity-40 grayscale' : ''}`}>
+                                      <Avatar className={`h-8 w-8 border bg-background ${isSubRow ? 'scale-75' : ''}`}>
+                                        <AvatarFallback className="text-[10px] bg-primary/5 text-primary">
+                                          {row.lead?.name?.substring(0, 2).toUpperCase() || 'NA'}
+                                        </AvatarFallback>
+                                      </Avatar>
+                                      <div>
+                                        <span className="font-semibold text-sm block">
+                                          {row.lead?.name ? row.lead.name.replace('Unverified MCUBE Caller - ', 'New Inquiry: ').replace('New Lead - ', 'New Inquiry: ') : 'Unknown Lead'}
+                                        </span>
+                                        <span className="text-[10px] text-slate-500 font-mono tracking-wide">
+                                          Lead ID: #{row.leadId.slice(-6).toUpperCase()}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </TableCell>
 
-                                <TableCell className="text-sm text-muted-foreground">
-                                  <div className="flex flex-col gap-1.5 my-1">
-                                    {(() => {
-                                      const rec = extractRecording(row.notes);
-                                      const hasRecording = !!rec;
+                                  {/* 👇 CHANGE 4: Fade out repeated phone number */}
+                                  <TableCell>
+                                    <div className={`flex items-center gap-1.5 ${isSubRow ? 'opacity-40' : ''}`}>
+                                      {getPhoneInfo(row.lead?.phone).iso ? (
+                                        <img src={`https://flagcdn.com/w20/${getPhoneInfo(row.lead?.phone).iso.toLowerCase()}.png`} alt="" className="w-5 h-3.5 object-cover rounded-sm shrink-0" />
+                                      ) : (
+                                        <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                      )}
+                                      <span className="text-sm font-mono tracking-wide">{getPhoneInfo(row.lead?.phone).number || '—'}</span>
+                                    </div>
+                                  </TableCell>
 
-                                      // Determine display duration:
-                                      // Priority: DB callDuration → notes fallback → show —
-                                      let displayDuration: string = '—';
-                                      const noteDur = extractDurationFromNotes(row.notes);
-                                      const durSecs = (row.duration && row.duration > 0) ? row.duration : noteDur;
-                                      if (durSecs && durSecs > 0) {
-                                        const mins = Math.floor(durSecs / 60);
-                                        const secs = durSecs % 60;
-                                        displayDuration = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-                                      }
+                                  <TableCell className="text-sm text-muted-foreground">{row.agent?.fullName || '—'}</TableCell>
 
-                                      return (
-                                        <>
-                                          <span className="text-xs font-mono font-medium">{displayDuration}</span>
-                                          {hasRecording && (
-                                            <a
-                                              href={rec}
-                                              target="_blank"
-                                              rel="noreferrer"
-                                              className="text-[10px] bg-blue-50 text-blue-600 rounded px-1.5 py-0.5 w-fit border border-blue-100 hover:bg-blue-100 flex items-center gap-1 font-sans shadow-sm transition-colors"
-                                            >
-                                              <Play className="h-2.5 w-2.5 fill-blue-600" />
-                                              Play Audio
-                                            </a>
-                                          )}
-                                        </>
-                                      );
-                                    })()}
-                                  </div>
-                                </TableCell>
+                                  <TableCell>
+                                    {row.isLeadRow ? (
+                                      <span className="text-xs text-muted-foreground">—</span>
+                                    ) : dir === 'inbound' ? (
+                                      <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">
+                                        <ArrowDownLeft className="h-3 w-3" /> Incoming
+                                      </span>
+                                    ) : dir === 'outbound' ? (
+                                      <span className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
+                                        <ArrowUpRight className="h-3 w-3" /> Outgoing
+                                      </span>
+                                    ) : (
+                                      <span className="text-xs text-muted-foreground">—</span>
+                                    )}
+                                  </TableCell>
 
-                                <TableCell className="text-right pr-4">
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <MoreVertical className="h-4 w-4" />
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="w-48">
-  <DropdownMenuItem onClick={() => handleViewDetails(row)}>
-    View Details
-  </DropdownMenuItem>
-  
- {/* 👈 UPDATED: Mark Missed OR Follow-up as Connected */}
-  {!row.isLeadRow && (row.callStatus === 'not_connected' || row.callStatus === 'connected_callback') && (
-    <DropdownMenuItem onClick={() => handleMarkConnected(row.id)} className="text-green-600 focus:text-green-700 font-medium">
-      <CheckCircle2 className="h-3.5 w-3.5 mr-2" /> Mark as Connected
-    </DropdownMenuItem>
-  )}
+                                  <TableCell>
+                                    <StatusBadge status={row.isLeadRow ? 'pending' : row.callStatus} />
+                                  </TableCell>
 
-  {/* 👈 ADDED: Schedule Follow Up */}
-  {!row.isLeadRow && (
-    <DropdownMenuItem onClick={() => { setFollowUpLogId(row.id); setIsFollowUpOpen(true); }}>
-      <Clock className="h-3.5 w-3.5 mr-2 text-amber-600" /> Schedule Follow-up
-    </DropdownMenuItem>
-  )}
+                                  <TableCell className="text-sm text-muted-foreground">
+                                    <div className="flex flex-col gap-1.5 my-1">
+                                      {(() => {
+                                        const rec = extractRecording(row.notes);
+                                        const hasRecording = !!rec;
+                                        let displayDuration: string = '—';
+                                        const noteDur = extractDurationFromNotes(row.notes);
+                                        const durSecs = (row.duration && row.duration > 0) ? row.duration : noteDur;
+                                        if (durSecs && durSecs > 0) {
+                                          const mins = Math.floor(durSecs / 60);
+                                          const secs = durSecs % 60;
+                                          displayDuration = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+                                        }
+                                        return (
+                                          <>
+                                            <span className="text-xs font-mono font-medium">{displayDuration}</span>
+                                            {hasRecording && (
+                                              <a href={rec} target="_blank" rel="noreferrer" className="text-[10px] bg-blue-50 text-blue-600 rounded px-1.5 py-0.5 w-fit border border-blue-100 hover:bg-blue-100 flex items-center gap-1 font-sans shadow-sm transition-colors">
+                                                <Play className="h-2.5 w-2.5 fill-blue-600" /> Play Audio
+                                              </a>
+                                            )}
+                                          </>
+                                        );
+                                      })()}
+                                    </div>
+                                  </TableCell>
 
-  {/* Existing Actions below... */}
-  <DropdownMenuItem onClick={() => {
-    setLeadIdToEdit(row.leadId);
-    setNameToEdit(row.lead?.name || '');
-    setIsEditNameOpen(true);
-  }}>
-    <Edit className="h-3.5 w-3.5 mr-2" /> Edit Caller Name
-  </DropdownMenuItem>
-
-                                      {/* NEW: Push to Leads */}
-                                      {row.lead?.stage === 'unverified' && (
-                                        <DropdownMenuItem
-                                          onClick={() => handlePushToLeads(row.leadId)}
-                                          className="text-green-600 focus:text-green-700 font-medium"
-                                        >
-                                          <ArrowRightCircle className="h-3.5 w-3.5 mr-2" /> Push to Leads
+                                  <TableCell className="text-right pr-4">
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
+                                        <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
+                                          <MoreVertical className="h-4 w-4" />
+                                        </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end" className="w-48">
+                                        <DropdownMenuItem onClick={() => handleViewDetails(row)}>
+                                          View Details
                                         </DropdownMenuItem>
-                                      )}
 
-                                      {!row.isLeadRow && (
-                                        <>
-                                          <DropdownMenuItem onClick={() => handleCallAction(row)}>
-                                            <Phone className="h-3.5 w-3.5 mr-2" /> Call Again
+                                        {!row.isLeadRow && (row.callStatus === 'not_connected' || row.callStatus === 'connected_callback') && (
+                                          <DropdownMenuItem onClick={() => handleMarkConnected(row.id)} className="text-green-600 focus:text-green-700 font-medium">
+                                            <CheckCircle2 className="h-3.5 w-3.5 mr-2" /> Mark as Connected
                                           </DropdownMenuItem>
-                                          <DropdownMenuItem onClick={() => handleArchive(row.id)}>
-                                            <Archive className="h-3.5 w-3.5 mr-2" /> Archive
+                                        )}
+
+                                        {!row.isLeadRow && (
+                                          <DropdownMenuItem onClick={() => { setFollowUpLogId(row.id); setIsFollowUpOpen(true); }}>
+                                            <Clock className="h-3.5 w-3.5 mr-2 text-amber-600" /> Schedule Follow-up
                                           </DropdownMenuItem>
-                                          <DropdownMenuItem onClick={() => confirmDelete(row.id)} className="text-destructive focus:text-destructive">
-                                            <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+                                        )}
+
+                                        <DropdownMenuItem onClick={() => {
+                                          setLeadIdToEdit(row.leadId);
+                                          setNameToEdit(row.lead?.name || '');
+                                          setIsEditNameOpen(true);
+                                        }}>
+                                          <Edit className="h-3.5 w-3.5 mr-2" /> Edit Caller Name
+                                        </DropdownMenuItem>
+
+                                        {row.lead?.stage === 'unverified' && (
+                                          <DropdownMenuItem onClick={() => handlePushToLeads(row.leadId)} className="text-green-600 focus:text-green-700 font-medium">
+                                            <ArrowRightCircle className="h-3.5 w-3.5 mr-2" /> Push to Leads
                                           </DropdownMenuItem>
-                                        </>
-                                      )}
-                                      {row.isLeadRow && (
-                                        <>
-                                          <DropdownMenuItem onClick={() => handleCallAction(row)}>
-                                            <Phone className="h-3.5 w-3.5 mr-2" /> Initiate Call
-                                          </DropdownMenuItem>
-                                          <DropdownMenuItem onClick={() => handleDeleteLead(row.leadId)} className="text-destructive focus:text-destructive">
-                                            <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete Lead
-                                          </DropdownMenuItem>
-                                        </>
-                                      )}
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                </TableCell>
-                              </TableRow>
+                                        )}
+
+                                        {!row.isLeadRow && (
+                                          <>
+                                            <DropdownMenuItem onClick={() => handleCallAction(row)}>
+                                              <Phone className="h-3.5 w-3.5 mr-2" /> Call Again
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleArchive(row.id)}>
+                                              <Archive className="h-3.5 w-3.5 mr-2" /> Archive
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => confirmDelete(row.id)} className="text-destructive focus:text-destructive">
+                                              <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+                                            </DropdownMenuItem>
+                                          </>
+                                        )}
+                                        {row.isLeadRow && (
+                                          <>
+                                            <DropdownMenuItem onClick={() => handleCallAction(row)}>
+                                              <Phone className="h-3.5 w-3.5 mr-2" /> Initiate Call
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleDeleteLead(row.leadId)} className="text-destructive focus:text-destructive">
+                                              <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete Lead
+                                            </DropdownMenuItem>
+                                          </>
+                                        )}
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            };
+
+                            return (
+                              <React.Fragment key={mainRow.id}>
+                                {renderRow(mainRow, false)}
+                                {isExpanded && group.slice(1).map(subRow => renderRow(subRow, true))}
+                              </React.Fragment>
                             );
                           })
                         )}
@@ -1108,9 +1165,9 @@ export default function Telecalling() {
 
       {/* ─── VIEW DETAILS DIALOG ─── */}
       <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-  {/* 👈 CRITICAL FIX: Added max-h-[85vh] and overflow-y-auto */}
-  <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
-    <DialogHeader>
+        {/* 👈 CRITICAL FIX: Added max-h-[85vh] and overflow-y-auto */}
+        <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
             <DialogTitle>Call Details</DialogTitle>
           </DialogHeader>
           {selectedItem && (
@@ -1121,20 +1178,20 @@ export default function Telecalling() {
                   <Input defaultValue={selectedItem.lead?.name} readOnly className="bg-muted" />
                 </div>
                 <div className="space-y-1.5">
-  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Phone</label>
-  <div className="flex items-center h-10 w-full rounded-md border border-input bg-muted px-3 py-2 text-sm opacity-100">
-    {getPhoneInfo(selectedItem.lead?.phone).iso ? (
-      <img
-        src={`https://flagcdn.com/w20/${getPhoneInfo(selectedItem.lead?.phone).iso.toLowerCase()}.png`}
-        alt=""
-        className="w-5 h-3.5 object-cover rounded-sm shrink-0 mr-2"
-      />
-    ) : (
-      <Phone className="h-4 w-4 text-muted-foreground shrink-0 mr-2" />
-    )}
-    <span className="font-medium text-foreground">{getPhoneInfo(selectedItem.lead?.phone).number || '—'}</span>
-  </div>
-</div>
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Phone</label>
+                  <div className="flex items-center h-10 w-full rounded-md border border-input bg-muted px-3 py-2 text-sm opacity-100">
+                    {getPhoneInfo(selectedItem.lead?.phone).iso ? (
+                      <img
+                        src={`https://flagcdn.com/w20/${getPhoneInfo(selectedItem.lead?.phone).iso.toLowerCase()}.png`}
+                        alt=""
+                        className="w-5 h-3.5 object-cover rounded-sm shrink-0 mr-2"
+                      />
+                    ) : (
+                      <Phone className="h-4 w-4 text-muted-foreground shrink-0 mr-2" />
+                    )}
+                    <span className="font-medium text-foreground">{getPhoneInfo(selectedItem.lead?.phone).number || '—'}</span>
+                  </div>
+                </div>
               </div>
               {!selectedItem.isLeadRow && (
                 <>
@@ -1144,20 +1201,20 @@ export default function Telecalling() {
                       <div className="pt-1"><StatusBadge status={selectedItem.callStatus} /></div>
                     </div>
                     <div className="space-y-1.5">
-  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Duration</label>
-  <Input
-    defaultValue={(() => {
-      if (selectedItem.duration && selectedItem.duration > 0) {
-        const mins = Math.floor(selectedItem.duration / 60);
-        const secs = selectedItem.duration % 60;
-        return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-      }
-      const rec = extractRecording(selectedItem.notes);
-      if (rec) return 'See recording (duration not stored)';
-      return 'N/A';
-    })()}
-    readOnly className="bg-muted" />
-</div>
+                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Duration</label>
+                      <Input
+                        defaultValue={(() => {
+                          if (selectedItem.duration && selectedItem.duration > 0) {
+                            const mins = Math.floor(selectedItem.duration / 60);
+                            const secs = selectedItem.duration % 60;
+                            return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+                          }
+                          const rec = extractRecording(selectedItem.notes);
+                          if (rec) return 'See recording (duration not stored)';
+                          return 'N/A';
+                        })()}
+                        readOnly className="bg-muted" />
+                    </div>
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Direction</label>
@@ -1279,27 +1336,27 @@ export default function Telecalling() {
       </Dialog>
 
       <Dialog open={isFollowUpOpen} onOpenChange={setIsFollowUpOpen}>
-  <DialogContent className="sm:max-w-sm">
-    <DialogHeader>
-      <DialogTitle className="flex items-center gap-2"><Clock className="h-5 w-5 text-amber-600" /> Schedule Follow Up</DialogTitle>
-    </DialogHeader>
-    <div className="space-y-4 py-4">
-      <div className="space-y-2">
-        <label className="text-sm font-medium">Select Date & Time</label>
-        <Input
-          type="datetime-local"
-          value={followUpDate}
-          onChange={(e) => setFollowUpDate(e.target.value)}
-          autoFocus
-        />
-      </div>
-    </div>
-    <DialogFooter>
-      <Button variant="ghost" onClick={() => setIsFollowUpOpen(false)}>Cancel</Button>
-      <Button onClick={handleScheduleFollowUp}>Schedule</Button>
-    </DialogFooter>
-  </DialogContent>
-</Dialog>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Clock className="h-5 w-5 text-amber-600" /> Schedule Follow Up</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Select Date & Time</label>
+              <Input
+                type="datetime-local"
+                value={followUpDate}
+                onChange={(e) => setFollowUpDate(e.target.value)}
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setIsFollowUpOpen(false)}>Cancel</Button>
+            <Button onClick={handleScheduleFollowUp}>Schedule</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
     </DashboardLayout>
   );
@@ -1535,7 +1592,7 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
             </Button>
           </div>
         </div>
-{/* ─── KPI STAT CARDS ─── */}
+        {/* ─── KPI STAT CARDS ─── */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           <KpiCard title="Total Calls" value={stats.totalCalls} icon={Phone} color="blue" subtitle={`${stats.connectRate}% connect rate`} />
           <KpiCard title="Qualified" value={stats.positive} icon={ThumbsUp} color="green"
@@ -1543,7 +1600,7 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
           <KpiCard title="Missed Calls" value={stats.notAnswered} icon={PhoneMissed} color="red"
             subtitle={stats.totalCalls > 0 ? `${Math.round((stats.notAnswered / stats.totalCalls) * 100)}% miss rate` : '—'} trend="down" />
           <KpiCard title="Callbacks" value={stats.callback || 0} icon={Clock} color="amber" subtitle="Awaiting follow-up" />
-          
+
           {/* 👈 Added Admin Report Card */}
           <Card className="bg-purple-50 border-purple-200 text-purple-700 shadow-sm col-span-2 lg:col-span-1">
             <CardContent className="p-5">
