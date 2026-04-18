@@ -43,6 +43,7 @@ export interface Lead {
   assignedToId: string | null;
   createdAt: string;
   nextFollowupAt: string | null;
+  agentNextFollowupAt: string | null;  // ✅ ADD THIS LINE
   lastContactedAt?: string | null;
   assignedTo?: {
     id: string;
@@ -65,6 +66,7 @@ export default function Leads() {
   const { user, token } = useAuth();
   const { canAssignLeads } = usePermissions();
   const { toast } = useToast();
+  
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -146,43 +148,39 @@ export default function Leads() {
   const CACHE_TIME_KEY = 'crm_leads_timestamp';
   const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes — fresh enough, fast enough
 
-  const fetchData = useCallback(async (isBackgroundRefresh = false) => {
-    console.log(`[Leads Manager] 🔍 Fetching from server... (background: ${isBackgroundRefresh})`);
+const fetchData = useCallback(async (isBackgroundRefresh = false) => {
+  console.log(`[Leads Manager] 🔍 Fetching from server... (background: ${isBackgroundRefresh})`);
 
-    // Only show spinner on full loads, NOT on background silent refreshes
-    if (!isBackgroundRefresh) setLoading(true);
+  // Only show spinner on full loads, NOT on background silent refreshes
+  if (!isBackgroundRefresh) setLoading(true);
 
-    try {
-      const params = new URLSearchParams();
-      if (assignedAdminFilter !== 'all') {
-        params.append('assignedBy', assignedAdminFilter);
+  try {
+    // ✅ FIX: Removed assignedAdminFilter from server params.
+    // All leads are fetched and admin filter is applied client-side only.
+    // This prevents stale/partial cache when toggling admin filter back to "all".
+    const res = await fetch(`${API_URL}/leads`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await res.json();
+
+    if (Array.isArray(data)) {
+      setLeads(data);
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+        localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
+      } catch (e) {
+        console.warn('[Leads] Cache save failed (storage full), skipping.');
       }
-
-      const res = await fetch(`${API_URL}/leads?${params.toString()}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-
-      if (Array.isArray(data)) {
-        setLeads(data);
-        // Save fresh data into cache with current timestamp
-        try {
-          localStorage.setItem(CACHE_KEY, JSON.stringify(data));
-          localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
-        } catch (e) {
-          console.warn('[Leads] Cache save failed (storage full), skipping.');
-        }
-      }
-    } catch (error) {
-      console.error('[Leads Manager] 🚨 Fetch failed:', error);
-      if (!isBackgroundRefresh) {
-        toast({ title: 'Error', description: 'Failed to fetch leads', variant: 'destructive' });
-      }
-    } finally {
-      if (!isBackgroundRefresh) setLoading(false);
     }
-  }, [token, assignedAdminFilter]);
-
+  } catch (error) {
+    console.error('[Leads Manager] 🚨 Fetch failed:', error);
+    if (!isBackgroundRefresh) {
+      toast({ title: 'Error', description: 'Failed to fetch leads', variant: 'destructive' });
+    }
+  } finally {
+    if (!isBackgroundRefresh) setLoading(false);
+  }
+}, [token]); // ✅ FIX: removed assignedAdminFilter from deps — no longer needed here
   useEffect(() => {
     if (!token) return;
 
@@ -369,114 +367,131 @@ export default function Leads() {
     }
   }
 
-  const filteredLeads = leads
-    .filter(lead => {
-      // Always hide unverified leads
-      if (lead.stage === 'unverified') return false;
+// IN: Leads.tsx
+// FIND this entire filteredLeads block (lines 372–478) and REPLACE with:
 
-      const trimmedSearch = searchQuery.trim();
-      const matchesSearch = !trimmedSearch
-        ? true
-        : lead.name.toLowerCase().includes(trimmedSearch.toLowerCase()) ||
-          lead.phone.includes(trimmedSearch) ||
-          (lead.email && lead.email.toLowerCase().includes(trimmedSearch.toLowerCase())) ||
-          lead.id.toUpperCase().includes(trimmedSearch.toUpperCase());
+const filteredLeads = leads
+  .filter(lead => {
+    // Always hide unverified leads
+    if (lead.stage === 'unverified') return false;
 
-      // 🔑 KEY FIX: When actively searching, bypass ALL other filters
-      // so ANY matching lead (any stage, any agent, any date) is shown.
-      if (trimmedSearch) {
-        return matchesSearch;
-      }
+    const trimmedSearch = searchQuery.trim();
+    const matchesSearch = !trimmedSearch
+      ? true
+      : lead.name.toLowerCase().includes(trimmedSearch.toLowerCase()) ||
+        lead.phone.includes(trimmedSearch) ||
+        (lead.email && lead.email.toLowerCase().includes(trimmedSearch.toLowerCase())) ||
+        lead.id.toUpperCase().includes(trimmedSearch.toUpperCase());
 
-      // ---- Normal filter logic (only applies when NOT searching) ----
-      let matchesStage = true;
-      if (stageFilter === 'active_open') {
-        matchesStage = !['closed', 'lost', 'completed', 'unverified'].includes(lead.stage);
-      } else if (stageFilter !== 'all') {
-        matchesStage = lead.stage === stageFilter;
-      }
-      
-      const matchesSource = sourceFilter === 'all' ? true : lead.source === sourceFilter;
-      const matchesTemperature = temperatureFilter === 'all' ? true : lead.temperature === temperatureFilter;
+    // When actively searching, bypass ALL other filters
+    if (trimmedSearch) {
+      return matchesSearch;
+    }
 
-      let matchesAgent = true;
-      if (assignedAgentFilter === 'unassigned') matchesAgent = !lead.assignedToId;
-      else if (assignedAgentFilter !== 'all') matchesAgent = lead.assignedToId === assignedAgentFilter;
+    // ---- Normal filter logic (only applies when NOT searching) ----
+    let matchesStage = true;
+    if (stageFilter === 'active_open') {
+      matchesStage = !['closed', 'lost', 'completed', 'unverified'].includes(lead.stage);
+    } else if (stageFilter !== 'all') {
+      matchesStage = lead.stage === stageFilter;
+    }
 
-      let matchesAdmin = true;
-      if (assignedAdminFilter !== 'all') matchesAdmin = lead.assignedBy?.id === assignedAdminFilter;
+    const matchesSource = sourceFilter === 'all' ? true : lead.source === sourceFilter;
+    const matchesTemperature = temperatureFilter === 'all' ? true : lead.temperature === temperatureFilter;
 
-      let matchesDate = true;
-      if (dateFilter !== 'all') {
-        const leadDate = new Date(lead.createdAt);
-        const now = new Date();
-        if (dateFilter === 'today') {
-          matchesDate = leadDate.toDateString() === now.toDateString();
-        } else if (dateFilter === 'yesterday') {
-          const yesterday = new Date();
-          yesterday.setDate(now.getDate() - 1);
-          matchesDate = leadDate.toDateString() === yesterday.toDateString();
-        } else if (dateFilter === 'last_7_days') {
-          const msInWeek = 7 * 24 * 60 * 60 * 1000;
-          matchesDate = (now.getTime() - leadDate.getTime()) <= msInWeek;
-        } else if (dateFilter === 'last_30_days') {
-          const msIn30Days = 30 * 24 * 60 * 60 * 1000;
-          matchesDate = (now.getTime() - leadDate.getTime()) <= msIn30Days;
-        } else if (dateFilter === 'this_month') {
-          matchesDate = leadDate.getMonth() === now.getMonth() && leadDate.getFullYear() === now.getFullYear();
-        } else if (dateFilter === 'custom') {
-          if (startDate) {
-            const start = new Date(startDate);
-            start.setHours(0, 0, 0, 0);
-            matchesDate = matchesDate && leadDate >= start;
-          }
-          if (endDate) {
-            const end = new Date(endDate);
-            end.setHours(23, 59, 59, 999);
-            matchesDate = matchesDate && leadDate <= end;
-          }
+    let matchesAgent = true;
+    if (assignedAgentFilter === 'unassigned') matchesAgent = !lead.assignedToId;
+    else if (assignedAgentFilter !== 'all') matchesAgent = lead.assignedToId === assignedAgentFilter;
+
+    // ✅ Client-side admin filter (works correctly now that fetchData always fetches all leads)
+    let matchesAdmin = true;
+    if (assignedAdminFilter !== 'all') matchesAdmin = lead.assignedBy?.id === assignedAdminFilter;
+
+    let matchesDate = true;
+    if (dateFilter !== 'all') {
+      const leadDate = new Date(lead.createdAt);
+      const now = new Date();
+      if (dateFilter === 'today') {
+        matchesDate = leadDate.toDateString() === now.toDateString();
+      } else if (dateFilter === 'yesterday') {
+        const yesterday = new Date();
+        yesterday.setDate(now.getDate() - 1);
+        matchesDate = leadDate.toDateString() === yesterday.toDateString();
+      } else if (dateFilter === 'last_7_days') {
+        const msInWeek = 7 * 24 * 60 * 60 * 1000;
+        matchesDate = (now.getTime() - leadDate.getTime()) <= msInWeek;
+      } else if (dateFilter === 'last_30_days') {
+        const msIn30Days = 30 * 24 * 60 * 60 * 1000;
+        matchesDate = (now.getTime() - leadDate.getTime()) <= msIn30Days;
+      } else if (dateFilter === 'this_month') {
+        matchesDate = leadDate.getMonth() === now.getMonth() && leadDate.getFullYear() === now.getFullYear();
+      } else if (dateFilter === 'custom') {
+        // ✅ FIX 3: Use local-time Date constructor (not string parse) to avoid UTC midnight offset bug
+        if (startDate) {
+          const [sy, sm, sd] = startDate.split('-').map(Number);
+          const start = new Date(sy, sm - 1, sd, 0, 0, 0, 0);
+          matchesDate = matchesDate && leadDate >= start;
+        }
+        if (endDate) {
+          const [ey, em, ed] = endDate.split('-').map(Number);
+          const end = new Date(ey, em - 1, ed, 23, 59, 59, 999);
+          matchesDate = matchesDate && leadDate <= end;
         }
       }
+    }
+// ✅ KEY FIX: Sales agents see agentNextFollowupAt in the card,
+// so the filter must also use agentNextFollowupAt for agents.
+// Admins/superadmins use nextFollowupAt. Match the same field LeadCard uses.
+const followUpFieldValue = !canAssignLeads
+  ? lead.agentNextFollowupAt
+  : lead.nextFollowupAt;
 
-      let matchesFollowUp = true;
-      if (followUpFilter === 'needs_followup') {
-        if (!lead.nextFollowupAt) {
-          matchesFollowUp = false;
-        } else {
-          matchesFollowUp = new Date(lead.nextFollowupAt) <= new Date();
-        }
-      } else if (followUpFilter === 'upcoming') {
-        if (!lead.nextFollowupAt) {
-          matchesFollowUp = false;
-        } else {
-          matchesFollowUp = new Date(lead.nextFollowupAt) > new Date();
-        }
-      } else if (followUpFilter === 'no_followup') {
-        matchesFollowUp = !lead.nextFollowupAt;
-      } else if (followUpFilter === 'specific_date') {
-        if (!lead.nextFollowupAt || !followUpDate) {
-          matchesFollowUp = false;
-        } else {
-          const lDate = new Date(lead.nextFollowupAt);
-          const fDate = new Date(followUpDate);
-          matchesFollowUp = lDate.toDateString() === fDate.toDateString();
-        }
-      }
-
-      return matchesStage && matchesSource && matchesTemperature && matchesAgent && matchesAdmin && matchesDate && matchesFollowUp;
-    })
-    .sort((a, b) => {
-      // If filtering by follow-ups, sort by follow up date
-      if (followUpFilter !== 'all') {
-         if (!a.nextFollowupAt) return 1;
-         if (!b.nextFollowupAt) return -1;
-         return new Date(a.nextFollowupAt).getTime() - new Date(b.nextFollowupAt).getTime();
-      }
-      if (a.isPriority && !b.isPriority) return -1;
-      if (!a.isPriority && b.isPriority) return 1;
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
-
+let matchesFollowUp = true;
+if (followUpFilter === 'needs_followup') {
+  if (!followUpFieldValue) {
+    matchesFollowUp = false;
+  } else {
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+    matchesFollowUp = new Date(followUpFieldValue) <= endOfToday;
+  }
+} else if (followUpFilter === 'upcoming') {
+  if (!followUpFieldValue) {
+    matchesFollowUp = false;
+  } else {
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+    matchesFollowUp = new Date(followUpFieldValue) > endOfToday;
+  }
+} else if (followUpFilter === 'no_followup') {
+  matchesFollowUp = !followUpFieldValue;
+} else if (followUpFilter === 'specific_date') {
+  if (!followUpFieldValue || !followUpDate) {
+    matchesFollowUp = false;
+  } else {
+    const lDate = new Date(followUpFieldValue);
+    const [fYear, fMonth, fDay] = followUpDate.split('-').map(Number);
+    matchesFollowUp =
+      lDate.getFullYear() === fYear &&
+      lDate.getMonth() + 1 === fMonth &&
+      lDate.getDate() === fDay;
+  }
+}
+    return matchesStage && matchesSource && matchesTemperature && matchesAgent && matchesAdmin && matchesDate && matchesFollowUp;
+  })
+  .sort((a, b) => {
+  if (followUpFilter !== 'all') {
+    // ✅ Same role-based field logic as the filter above
+    const aFollowUp = !canAssignLeads ? a.agentNextFollowupAt : a.nextFollowupAt;
+    const bFollowUp = !canAssignLeads ? b.agentNextFollowupAt : b.nextFollowupAt;
+    if (!aFollowUp) return 1;
+    if (!bFollowUp) return -1;
+    return new Date(aFollowUp).getTime() - new Date(bFollowUp).getTime();
+  }
+  if (a.isPriority && !b.isPriority) return -1;
+  if (!a.isPriority && b.isPriority) return 1;
+  return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+});
     // 1. Reset visible count back to 50 whenever you type a search or change a filter
   useEffect(() => {
     setVisibleCount(50);
