@@ -583,9 +583,14 @@ if (followUpFilter === 'needs_followup') {
                             <SelectItem value="active_open">Active (Open)</SelectItem>
                             <SelectItem value="all">All Leads</SelectItem>
                             <SelectItem value="new">New</SelectItem>
+                            <SelectItem value="not_connected">Not connected</SelectItem>
+                            <SelectItem value="call_back_required">Call back required</SelectItem>
                             <SelectItem value="contacted">Contacted</SelectItem>
                             <SelectItem value="site_visit">Site Visit</SelectItem>
+                            <SelectItem value="site_visit_done">Site visit done</SelectItem>
                             <SelectItem value="negotiation">Negotiation</SelectItem>
+                            <SelectItem value="re_visit">Re visit</SelectItem>
+                            <SelectItem value="re_visit_done">Re visit done</SelectItem>
                             <SelectItem value="token">Token</SelectItem>
                             <SelectItem value="closed" className="text-red-600">Closed</SelectItem>
                             <SelectItem value="lost" className="text-slate-500">Lost</SelectItem>

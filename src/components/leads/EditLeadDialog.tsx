@@ -223,8 +223,13 @@ export function EditLeadDialog({ lead, open, onOpenChange, onSuccess }: any) {
                       <SelectTrigger className="border-blue-200 bg-blue-50/50"><SelectValue /></SelectTrigger>
                       <SelectContent>
                           <SelectItem value="new">New</SelectItem>
+                          <SelectItem value="not_connected">Not connected</SelectItem>
+                          <SelectItem value="call_back_required">Call back required</SelectItem>
                           <SelectItem value="contacted">Contacted</SelectItem>
                           <SelectItem value="site_visit">Site Visit</SelectItem>
+                          <SelectItem value="site_visit_done">Site visit done</SelectItem>
+                          <SelectItem value="re_visit">Re visit</SelectItem>
+                          <SelectItem value="re_visit_done">Re visit done</SelectItem>
                           <SelectItem value="negotiation">Negotiation</SelectItem>
                           <SelectItem value="token">Token Received</SelectItem>
                           <SelectItem value="closed">Closed</SelectItem>

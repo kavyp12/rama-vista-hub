@@ -320,8 +320,13 @@ const openWhatsApp = (e: React.MouseEvent) => {
                       </SelectTrigger>
                       <SelectContent>
                           <SelectItem value="new">New</SelectItem>
+                          <SelectItem value="not_connected">Not connected</SelectItem>
+                          <SelectItem value="call_back_required">Call back required</SelectItem>
                           <SelectItem value="contacted">Contacted</SelectItem>
                           <SelectItem value="site_visit">Site Visit</SelectItem>
+                          <SelectItem value="site_visit_done">Site visit done</SelectItem>
+                          <SelectItem value="re_visit">Re visit</SelectItem>
+                          <SelectItem value="re_visit_done">Re visit done</SelectItem>
                           <SelectItem value="negotiation">Negotiation</SelectItem>
                           <SelectItem value="token">Token</SelectItem>
                           <SelectItem value="completed">Completed</SelectItem>
