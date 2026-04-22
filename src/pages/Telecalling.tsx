@@ -55,7 +55,7 @@ import {
   ChevronUp,   // 👈 ADD THIS
   Edit, // 👈 ADD THIS RIGHT HERE
 } from 'lucide-react';
-import { format, parseISO, subDays, startOfWeek, endOfWeek } from 'date-fns';
+import { format, parseISO, subDays, startOfWeek, endOfWeek, eachDayOfInterval, startOfMonth, endOfMonth } from 'date-fns';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1453,54 +1453,103 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
       if (filters.dateTo) query.append('dateTo', filters.dateTo);
       if (filters.agentId !== 'all') query.append('agentId', filters.agentId);
       if (filters.direction !== 'all') query.append('direction', filters.direction);
-      // Include admin/IVR calls for complete report data
       query.append('includeAdmin', 'true');
 
-      const res = await fetch(`${API_URL}/call-logs?${query}&take=1000`, {
+      const res = await fetch(`${API_URL}/call-logs?${query}&take=2000`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) return;
       const logs: any[] = await res.json();
 
-      // ─── Build 7-day trend (total, inbound, outbound) ───
-      const last7: Record<string, { date: string; total: number; connected: number; missed: number; inbound: number; outbound: number }> = {};
-      for (let i = 6; i >= 0; i--) {
-        const d = format(subDays(new Date(), i), 'MMM dd');
-        last7[format(subDays(new Date(), i), 'yyyy-MM-dd')] = { date: d, total: 0, connected: 0, missed: 0, inbound: 0, outbound: 0 };
-      }
-      logs.forEach(log => {
-        const day = log.callDate?.split('T')[0];
-        if (last7[day]) {
-          last7[day].total++;
-          if (['connected_positive', 'connected_callback'].includes(log.callStatus)) last7[day].connected++;
-          if (log.callStatus === 'not_connected') last7[day].missed++;
-          const notes = (log.notes || '').toLowerCase();
-          if (notes.includes('inbound')) last7[day].inbound++;
-          else if (notes.includes('outbound')) last7[day].outbound++;
+      // ─── Build dynamic date-range trend ───
+      // Use the selected date range if available, otherwise default to last 7 days
+      let trendDays: Date[] = [];
+      if (filters.dateFrom && filters.dateTo) {
+        const from = new Date(filters.dateFrom);
+        const to = new Date(filters.dateTo);
+        const diffMs = to.getTime() - from.getTime();
+        const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24)) + 1;
+        if (diffDays <= 60) {
+          // Show each day
+          trendDays = eachDayOfInterval({ start: from, end: to });
+        } else {
+          // Bucket by week — show weekly aggregates
+          trendDays = []; // handled below as weekly buckets
         }
-      });
-      setTrend(Object.values(last7));
+      } else {
+        // Default: last 7 days
+        for (let i = 6; i >= 0; i--) trendDays.push(subDays(new Date(), i));
+      }
 
-      // ─── Direction trend (7-day) ───
-      setDirectionTrend(Object.values(last7));
+      const trendMap: Record<string, { date: string; total: number; connected: number; missed: number; inbound: number; outbound: number }> = {};
+
+      if (trendDays.length > 0) {
+        trendDays.forEach(d => {
+          const key = format(d, 'yyyy-MM-dd');
+          const label = trendDays.length > 14 ? format(d, 'MMM dd') : format(d, 'EEE dd');
+          trendMap[key] = { date: label, total: 0, connected: 0, missed: 0, inbound: 0, outbound: 0 };
+        });
+        logs.forEach(log => {
+          const day = (log.callDate || '').split('T')[0];
+          if (trendMap[day]) {
+            trendMap[day].total++;
+            if (['connected_positive', 'connected_callback'].includes(log.callStatus)) trendMap[day].connected++;
+            if (log.callStatus === 'not_connected') trendMap[day].missed++;
+            const notes = (log.notes || '').toLowerCase();
+            if (notes.includes('inbound')) trendMap[day].inbound++;
+            else if (notes.includes('outbound')) trendMap[day].outbound++;
+          }
+        });
+        setTrend(Object.values(trendMap));
+      } else {
+        // Weekly bucketing for long ranges
+        const weekMap: Record<string, { date: string; total: number; connected: number; missed: number; inbound: number; outbound: number }> = {};
+        logs.forEach(log => {
+          const d = new Date((log.callDate || '').split('T')[0]);
+          const weekStart = format(startOfWeek(d, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+          if (!weekMap[weekStart]) {
+            weekMap[weekStart] = { date: format(d, 'MMM dd'), total: 0, connected: 0, missed: 0, inbound: 0, outbound: 0 };
+          }
+          weekMap[weekStart].total++;
+          if (['connected_positive', 'connected_callback'].includes(log.callStatus)) weekMap[weekStart].connected++;
+          if (log.callStatus === 'not_connected') weekMap[weekStart].missed++;
+          const notes = (log.notes || '').toLowerCase();
+          if (notes.includes('inbound')) weekMap[weekStart].inbound++;
+          else if (notes.includes('outbound')) weekMap[weekStart].outbound++;
+        });
+        setTrend(Object.values(weekMap).sort((a, b) => a.date.localeCompare(b.date)));
+      }
+      setDirectionTrend(Object.values(trendMap));
 
       // ─── Build agent performance ───
-      const agentMap: Record<string, { name: string; total: number; connected: number; missed: number; qualified: number; inbound: number; outbound: number }> = {};
+      // Label IVR/unassigned calls under 'Admin (IVR)'
+      const agentMap: Record<string, { name: string; role: string; total: number; connected: number; missed: number; qualified: number; inbound: number; outbound: number }> = {};
       logs.forEach(log => {
-        const name = log.agent?.fullName || 'Unassigned';
-        if (!agentMap[name]) agentMap[name] = { name, total: 0, connected: 0, missed: 0, qualified: 0, inbound: 0, outbound: 0 };
-        agentMap[name].total++;
-        if (['connected_positive', 'connected_callback'].includes(log.callStatus)) agentMap[name].connected++;
-        if (log.callStatus === 'not_connected') agentMap[name].missed++;
-        if (log.callStatus === 'connected_positive') agentMap[name].qualified++;
+        // Determine agent display name
+        let agentName: string;
+        let agentRole = 'agent';
+        if (log.agent) {
+          agentName = log.agent.fullName || 'Unknown';
+          // Mark admins clearly so IVR calls stand out
+          const isAdminAgent = !log.agent.role || log.agent.role === 'admin';
+          if (isAdminAgent) { agentName = `${log.agent.fullName} (Admin)`; agentRole = 'admin'; }
+        } else {
+          agentName = 'Admin IVR';
+          agentRole = 'admin';
+        }
+        if (!agentMap[agentName]) agentMap[agentName] = { name: agentName, role: agentRole, total: 0, connected: 0, missed: 0, qualified: 0, inbound: 0, outbound: 0 };
+        agentMap[agentName].total++;
+        if (['connected_positive', 'connected_callback'].includes(log.callStatus)) agentMap[agentName].connected++;
+        if (log.callStatus === 'not_connected') agentMap[agentName].missed++;
+        if (log.callStatus === 'connected_positive') agentMap[agentName].qualified++;
         const notes = (log.notes || '').toLowerCase();
-        if (notes.includes('inbound')) agentMap[name].inbound++;
-        else if (notes.includes('outbound')) agentMap[name].outbound++;
+        if (notes.includes('inbound')) agentMap[agentName].inbound++;
+        else if (notes.includes('outbound')) agentMap[agentName].outbound++;
       });
       const perf = Object.values(agentMap)
         .map(a => ({ ...a, rate: a.total > 0 ? Math.round((a.connected / a.total) * 100) : 0 }))
         .sort((a, b) => b.total - a.total)
-        .slice(0, 8);
+        .slice(0, 10);
       setAgentPerf(perf);
     } catch { }
     finally { setIsLoadingReports(false); }
@@ -1559,12 +1608,35 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
               <Input type="date" className="h-7 w-fit text-xs border-none shadow-none px-0 py-0 bg-transparent focus-visible:ring-0"
                 value={filters.dateTo} onChange={e => setFilters(p => ({ ...p, dateTo: e.target.value }))} min={filters.dateFrom} />
             </div>
-            {[{ label: 'Today', days: 0 }, { label: 'This Week', days: 7 }, { label: 'This Month', days: 30 }].map(p => (
+            {[
+              {
+                label: 'Today',
+                getRange: () => { const t = new Date(); return { from: format(t, 'yyyy-MM-dd'), to: format(t, 'yyyy-MM-dd') }; }
+              },
+              {
+                label: 'This Week',
+                getRange: () => {
+                  const now = new Date();
+                  const start = startOfWeek(now, { weekStartsOn: 1 }); // Monday
+                  return { from: format(start, 'yyyy-MM-dd'), to: format(now, 'yyyy-MM-dd') };
+                }
+              },
+              {
+                label: 'This Month',
+                getRange: () => {
+                  const now = new Date();
+                  return { from: format(startOfMonth(now), 'yyyy-MM-dd'), to: format(now, 'yyyy-MM-dd') };
+                }
+              },
+              {
+                label: 'Last 30 Days',
+                getRange: () => { const t = new Date(); return { from: format(subDays(t, 29), 'yyyy-MM-dd'), to: format(t, 'yyyy-MM-dd') }; }
+              },
+            ].map(p => (
               <Button key={p.label} variant="outline" size="sm" className="h-8 text-xs"
                 onClick={() => {
-                  const today = format(new Date(), 'yyyy-MM-dd');
-                  const from = format(subDays(new Date(), p.days), 'yyyy-MM-dd');
-                  setFilters(prev => ({ ...prev, dateFrom: from, dateTo: today }));
+                  const { from, to } = p.getRange();
+                  setFilters(prev => ({ ...prev, dateFrom: from, dateTo: to }));
                 }}>
                 {p.label}
               </Button>
@@ -1742,14 +1814,18 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
 
         {/* ─── CHARTS ROW 1: Trend + Direction Ratio ─── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* 7-Day Trend with inbound/outbound */}
+          {/* Date-Range Trend with inbound/outbound */}
           <Card className="lg:col-span-2">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-base font-semibold">7-Day Call Trend</CardTitle>
+                <CardTitle className="text-base font-semibold">
+                  {filters.dateFrom && filters.dateTo
+                    ? `Call Trend: ${format(new Date(filters.dateFrom), 'MMM dd')} – ${format(new Date(filters.dateTo), 'MMM dd')}`
+                    : '7-Day Call Trend'}
+                </CardTitle>
                 {isLoadingReports && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
               </div>
-              <p className="text-xs text-muted-foreground">Total, incoming & outgoing volume over last 7 days</p>
+              <p className="text-xs text-muted-foreground">Incoming & outgoing volume for selected date range</p>
             </CardHeader>
             <CardContent>
               {trend.length > 0 ? (
@@ -1883,7 +1959,7 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-base font-semibold">Agent Performance Breakdown</CardTitle>
-                  <p className="text-xs text-muted-foreground mt-0.5">Calls handled per agent with incoming/outgoing split</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Calls handled per agent with incoming/outgoing split · Admin rows show IVR calls</p>
                 </div>
                 {isLoadingReports && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
               </div>
@@ -1892,13 +1968,23 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
               {agentPerf.length > 0 ? (
                 <div className="space-y-2">
                   {agentPerf.map((agent, idx) => (
-                    <div key={agent.name} className="flex items-center gap-3 py-2.5 px-3 rounded-lg hover:bg-muted/50 transition-colors">
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${idx === 0 ? 'bg-yellow-100 text-yellow-700' : idx === 1 ? 'bg-gray-100 text-gray-600' : idx === 2 ? 'bg-orange-100 text-orange-600' : 'bg-muted text-muted-foreground'}`}>
-                        {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1}
+                    <div key={agent.name} className={`flex items-center gap-3 py-2.5 px-3 rounded-lg hover:bg-muted/50 transition-colors border-l-2 ${
+                      agent.role === 'admin' ? 'border-l-purple-400 bg-purple-50/30' : 'border-l-transparent'
+                    }`}>
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                        agent.role === 'admin' ? 'bg-purple-100 text-purple-700' :
+                        idx === 0 ? 'bg-yellow-100 text-yellow-700' : idx === 1 ? 'bg-gray-100 text-gray-600' : idx === 2 ? 'bg-orange-100 text-orange-600' : 'bg-muted text-muted-foreground'
+                      }`}>
+                        {agent.role === 'admin' ? '👑' : idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-medium truncate">{agent.name}</span>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-sm font-medium truncate">{agent.name}</span>
+                            {agent.role === 'admin' && (
+                              <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">IVR</span>
+                            )}
+                          </div>
                           <div className="flex items-center gap-3 text-xs flex-shrink-0">
                             <span className="flex items-center gap-1 text-green-600 font-semibold">
                               <ArrowDownLeft className="h-3 w-3" />{agent.inbound}
@@ -1906,11 +1992,10 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
                             <span className="flex items-center gap-1 text-indigo-600 font-semibold">
                               <ArrowUpRight className="h-3 w-3" />{agent.outbound}
                             </span>
-                            <span className="text-muted-foreground">{agent.total} total</span>
+                            <span className="text-muted-foreground font-medium">{agent.total} total</span>
                           </div>
                         </div>
                         <div className="flex items-center gap-2 mt-1.5">
-                          {/* Inbound/Outbound stacked mini bar */}
                           {agent.total > 0 && (
                             <div className="flex rounded-full overflow-hidden h-1.5 flex-1">
                               <div className="bg-green-400 transition-all" style={{ width: `${Math.round((agent.inbound / agent.total) * 100)}%` }} title={`Incoming: ${agent.inbound}`} />
@@ -1919,7 +2004,7 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
                             </div>
                           )}
                           <span className={`text-xs font-semibold flex-shrink-0 ${agent.rate >= 60 ? 'text-green-600' : agent.rate >= 40 ? 'text-amber-600' : 'text-red-600'}`}>
-                            {agent.rate}%
+                            {agent.rate}% connect
                           </span>
                         </div>
                       </div>
@@ -2014,10 +2099,9 @@ function AnalyticsView({ token, filters, setFilters, agents, onRefresh, isRefres
       if (filters.dateTo) query.append('dateTo', filters.dateTo);
       if (filters.agentId !== 'all') query.append('agentId', filters.agentId);
       if (filters.direction !== 'all') query.append('direction', filters.direction);
-      // Include admin/IVR calls for complete analytics
       query.append('includeAdmin', 'true');
 
-      const res = await fetch(`${API_URL}/call-logs?${query}&take=1000`, {
+      const res = await fetch(`${API_URL}/call-logs?${query}&take=2000`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) return;
@@ -2177,12 +2261,35 @@ function AnalyticsView({ token, filters, setFilters, agents, onRefresh, isRefres
               <Input type="date" className="h-7 w-fit text-xs border-none shadow-none px-0 py-0 bg-transparent focus-visible:ring-0"
                 value={filters.dateTo} onChange={e => setFilters(p => ({ ...p, dateTo: e.target.value }))} min={filters.dateFrom} />
             </div>
-            {[{ label: 'Today', days: 0 }, { label: 'This Week', days: 7 }, { label: 'This Month', days: 30 }].map(p => (
+            {[
+              {
+                label: 'Today',
+                getRange: () => { const t = new Date(); return { from: format(t, 'yyyy-MM-dd'), to: format(t, 'yyyy-MM-dd') }; }
+              },
+              {
+                label: 'This Week',
+                getRange: () => {
+                  const now = new Date();
+                  const start = startOfWeek(now, { weekStartsOn: 1 });
+                  return { from: format(start, 'yyyy-MM-dd'), to: format(now, 'yyyy-MM-dd') };
+                }
+              },
+              {
+                label: 'This Month',
+                getRange: () => {
+                  const now = new Date();
+                  return { from: format(startOfMonth(now), 'yyyy-MM-dd'), to: format(now, 'yyyy-MM-dd') };
+                }
+              },
+              {
+                label: 'Last 30 Days',
+                getRange: () => { const t = new Date(); return { from: format(subDays(t, 29), 'yyyy-MM-dd'), to: format(t, 'yyyy-MM-dd') }; }
+              },
+            ].map(p => (
               <Button key={p.label} variant="outline" size="sm" className="h-8 text-xs"
                 onClick={() => {
-                  const today = format(new Date(), 'yyyy-MM-dd');
-                  const from = format(subDays(new Date(), p.days), 'yyyy-MM-dd');
-                  setFilters(prev => ({ ...prev, dateFrom: from, dateTo: today }));
+                  const { from, to } = p.getRange();
+                  setFilters(prev => ({ ...prev, dateFrom: from, dateTo: to }));
                 }}>
                 {p.label}
               </Button>

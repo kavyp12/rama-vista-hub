@@ -695,7 +695,7 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
       where,
       include: {
         lead: { select: { id: true, name: true, phone: true, temperature: true, stage: true } },
-        agent: { select: { id: true, fullName: true } }
+        agent: { select: { id: true, fullName: true, role: true } }
       },
       // 👇 CHANGED: Sort by Follow-up date if in Follow Ups view
       orderBy: view === 'follow_ups' ? { callbackScheduledAt: 'asc' } : { callDate: 'desc' },
