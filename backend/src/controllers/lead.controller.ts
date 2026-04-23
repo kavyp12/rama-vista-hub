@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middlewares/auth.middleware';
+import { getIO } from '../utils/socket';
 
 // --- VALIDATION SCHEMAS ---
 
@@ -9,7 +10,7 @@ const createLeadSchema = z.object({
   name: z.string().min(2),
   email: z.string().email().optional().nullable(),
   // Replace the old phone line with this:
-phone: z.string().min(7, "Phone number is too short").max(20, "Phone number is too long").regex(/^\+?[0-9\s\-]+$/, "Invalid phone format"),
+  phone: z.string().min(7, "Phone number is too short").max(20, "Phone number is too long").regex(/^\+?[0-9\s\-]+$/, "Invalid phone format"),
   source: z.string(),
   temperature: z.enum(['hot', 'warm', 'cold']).default('warm'),
   budgetMin: z.number().optional().nullable(),
@@ -150,7 +151,7 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
     }
 
     const updateData: any = { ...data };
-    
+
     if (data.assignedToId && !isAgent) {
       if (!existingLead.assignedById) updateData.assignedById = req.user!.userId;
       if (data.assignedToId !== existingLead.assignedToId) {
@@ -169,34 +170,48 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
       include: { assignedTo: true, assignedBy: { select: { id: true, fullName: true, role: true } } }
     });
 
+    // 🔔 Notify agent when admin assigns/reassigns a lead
+    if (data.assignedToId && data.assignedToId !== existingLead.assignedToId && !isAgent) {
+      try {
+        getIO().to(`user:${data.assignedToId}`).emit('lead_assigned', {
+          leadId: lead.id,
+          leadName: lead.name,
+          assignedByName: lead.assignedBy?.fullName || 'Admin',
+          message: `You have been assigned a new lead: ${lead.name}`
+        });
+      } catch (e) {
+        console.error('[Socket] updateLead emit failed:', e);
+      }
+    }
+
     // ── 1. ADMIN HISTORY SAVING (Visible to Admin Only) ──
     const newAdminDate = data.nextFollowupAt ? new Date(data.nextFollowupAt).getTime() : null;
     const oldAdminDate = existingLead.nextFollowupAt ? existingLead.nextFollowupAt.getTime() : null;
     const adminDateChanged = newAdminDate !== oldAdminDate && newAdminDate !== null;
-    
+
     // 👇 FIX: Admin now uses `data.notes` independently, never touching the Agent's note
     const adminNotesChanged = data.notes && data.notes !== existingLead.notes;
 
     if (!isAgent && (adminDateChanged || adminNotesChanged)) {
       const agentIdToAssign = existingLead.assignedToId || req.user!.userId;
       let callStatusToLog = 'connected_positive';
-      
+
       // 👇 FIX: Uses the Admin's box for the history message
       let msg = data.notes || 'Admin updated lead details';
 
       if (adminDateChanged) {
         callStatusToLog = 'connected_callback';
-        
-        const formattedDate = new Date(data.nextFollowupAt!).toLocaleString('en-IN', { 
-          day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' 
+
+        const formattedDate = new Date(data.nextFollowupAt!).toLocaleString('en-IN', {
+          day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
         });
-        
+
         const baseLabel = `Admin Follow-up set for ${formattedDate}`;
         msg = data.notes ? `${baseLabel}: ${data.notes}` : baseLabel;
 
         await prisma.callLog.updateMany({
           where: { leadId: id, callStatus: 'connected_callback' },
-          data: { callStatus: 'connected_positive' } 
+          data: { callStatus: 'connected_positive' }
         });
         await prisma.followUpTask.updateMany({
           where: { leadId: id, status: 'pending' },
@@ -213,9 +228,9 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
 
       await prisma.callLog.create({
         data: {
-          leadId: id, 
-          agentId: req.user!.userId, 
-          callStatus: callStatusToLog as any, 
+          leadId: id,
+          agentId: req.user!.userId,
+          callStatus: callStatusToLog as any,
           callDate: new Date(),
           ...(adminDateChanged ? { callbackScheduledAt: new Date(data.nextFollowupAt!) } : {}),
           notes: msg // 👈 Uses the private note
@@ -237,8 +252,8 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
         callStatusToLog = 'connected_callback';
 
         // 👈 NEW: Format the date to show in the history log
-        const formattedDate = new Date(data.agentNextFollowupAt!).toLocaleString('en-IN', { 
-          day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' 
+        const formattedDate = new Date(data.agentNextFollowupAt!).toLocaleString('en-IN', {
+          day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
         });
 
         const baseLabel = `Agent Follow-up set for ${formattedDate}`;
@@ -332,20 +347,20 @@ export const createLead = async (req: AuthRequest, res: Response) => {
     // --- SMARTER STRICT DUPLICATE CHECK ---
     // 1. Remove all spaces, plus signs, and hyphens from the incoming number
     const cleanPhone = data.phone.replace(/\D/g, '');
-    
+
     // 2. Grab only the last 10 digits (ignores whether +91 was included or not)
     const basePhone = cleanPhone.length >= 10 ? cleanPhone.slice(-10) : cleanPhone;
 
     // 3. Search the database for any phone number that CONTAINS those 10 digits
     const existingLead = await prisma.lead.findFirst({
-      where: { 
-        phone: { contains: basePhone } 
+      where: {
+        phone: { contains: basePhone }
       }
     });
 
     if (existingLead) {
-      return res.status(400).json({ 
-        error: `A lead with this phone number already exists (${existingLead.name}).` 
+      return res.status(400).json({
+        error: `A lead with this phone number already exists (${existingLead.name}).`
       });
     }
     // ----------------------------------
@@ -360,6 +375,20 @@ export const createLead = async (req: AuthRequest, res: Response) => {
         assignedBy: { select: { id: true, fullName: true, role: true } }
       }
     });
+
+    // 🔔 Notify agent if lead was directly assigned on creation
+if (lead.assignedToId) {
+  try {
+    getIO().to(`user:${lead.assignedToId}`).emit('lead_assigned', {
+      leadId: lead.id,
+      leadName: lead.name,
+      assignedByName: lead.assignedBy?.fullName || 'Admin',
+      message: `A new lead has been assigned to you: ${lead.name}`
+    });
+  } catch (e) {
+    console.error('[Socket] createLead emit failed:', e);
+  }
+}
 
     await prisma.activityLog.create({
       data: {
@@ -508,6 +537,18 @@ export const bulkAssign = async (req: AuthRequest, res: Response) => {
       where: { id: { in: leadIds } },
       data: { assignedToId: agentId, assignedById: req.user!.userId }
     });
+
+    // 🔔 Notify the agent of bulk assignment
+    try {
+      getIO().to(`user:${agentId}`).emit('lead_assigned', {
+        leadId: null,
+        leadName: `${leadIds.length} leads`,
+        assignedByName: 'Admin',
+        message: `${leadIds.length} leads have been assigned to you`
+      });
+    } catch (e) {
+      console.error('[Socket] bulkAssign emit failed:', e);
+    }
 
     return res.json({ success: true, count: leadIds.length });
   } catch (error) {

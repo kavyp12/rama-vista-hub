@@ -1,11 +1,15 @@
+// backend/src/index.ts
 import express, { Application } from 'express';
 import cors from 'cors';
 import * as dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
 import path from 'path';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
 import routes from './routes';
 import { errorHandler } from './middlewares/error.middleware';
 import { prisma } from './utils/prisma';
+import { initIO } from './utils/socket';
 
 dotenv.config();
 
@@ -21,8 +25,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// ✅ FIX G1: Serve uploaded files. Files are stored in backend/uplodall/ but
-// URLs returned by upload routes use /uploads/ prefix — this bridges the gap.
+// Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, '../uplodall')));
 
 // Health check
@@ -36,10 +39,40 @@ app.use('/api', routes);
 // Error Handler
 app.use(errorHandler);
 
-// Start server
-const server = app.listen(PORT, () => {
+// ─── Socket.io Setup ───────────────────────────────────────────────────────
+const httpServer = createServer(app);
+
+const io = new Server(httpServer, {
+  cors: {
+    origin: process.env.FRONTEND_URL || 'http://localhost:8080',
+    credentials: true
+  }
+});
+
+// Each agent joins a private room named "user:<their-userId>"
+// Frontend emits 'join' with userId right after connecting
+io.on('connection', (socket) => {
+  console.log(`[Socket] Client connected: ${socket.id}`);
+
+  socket.on('join', (userId: string) => {
+    socket.join(`user:${userId}`);
+    console.log(`[Socket] User ${userId} joined room user:${userId}`);
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`[Socket] Client disconnected: ${socket.id}`);
+  });
+});
+
+// Share the io instance with the rest of the app (controllers use it)
+initIO(io);
+// ───────────────────────────────────────────────────────────────────────────
+
+// Start server (httpServer instead of app.listen — wraps socket.io)
+const server = httpServer.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔌 Socket.io ready`);
 });
 
 // Graceful shutdown
@@ -55,7 +88,6 @@ const gracefulShutdown = async () => {
     process.exit(0);
   });
 
-  // Force shutdown after 10s
   setTimeout(() => {
     console.error('⌛ Forced shutdown');
     process.exit(1);

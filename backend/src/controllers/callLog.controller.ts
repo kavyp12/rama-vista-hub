@@ -416,7 +416,7 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
     const role = req.user!.role;
 
     const whereClause: any = {
-      callStatus: { in: ['not_connected', 'missed', 'Missed'] },
+      callStatus: 'not_connected', 
       deletedAt: null,
     };
 
@@ -554,7 +554,7 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
         andConditions.push({ callStatus: 'connected_callback' }); 
         break;
       case 'missed':
-        andConditions.push({ callStatus: { in: ['not_connected', 'missed', 'Missed'] } });
+        andConditions.push({ callStatus: 'not_connected' });
         break;
       case 'attended': 
         andConditions.push({ callStatus: { in: ['connected_positive', 'connected_callback', 'not_interested'] } }); 

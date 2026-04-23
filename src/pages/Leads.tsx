@@ -18,6 +18,8 @@ import { CountryCodeSelect } from '@/components/ui/CountryCodeSelect';
 // Add this import near your other @/components/ui imports:
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
+import { useLeadAssignmentSocket } from '../lib/socket';
+
 // Add CheckCircle2 to your existing lucide-react import:
 
 
@@ -117,6 +119,11 @@ export default function Leads() {
   const [addAgentSearch, setAddAgentSearch] = useState('');
   const [isAddAgentOpen, setIsAddAgentOpen] = useState(false);
 
+  const [assignedDateFilter, setAssignedDateFilter] = useState(savedFilters.assignedDateFilter ?? 'all');
+  const [assignedSpecificDate, setAssignedSpecificDate] = useState(savedFilters.assignedSpecificDate ?? '');
+
+
+
 
   const [budgetUnit, setBudgetUnit] = useState<'L' | 'Cr' | 'K'>('L');
   const [visibleCount, setVisibleCount] = useState(50);
@@ -125,6 +132,20 @@ export default function Leads() {
     name: '', phone: '', email: '', source: 'Website',
     temperature: 'warm', budgetMin: '', budgetMax: '',
     preferredLocation: '', notes: '', assignedToId: ''
+  });
+
+  // 🔔 Real-time lead assignment notifications
+  useLeadAssignmentSocket({
+    userId: user?.id,
+    token,
+    onAssigned: (data) => {
+      toast({
+        title: '📋 New Lead Assigned',
+        description: data.message,
+        duration: 7000
+      });
+      fetchData(true); // silent background refresh
+    }
   });
 
   // Calculate active filters to show on the badge
@@ -370,17 +391,16 @@ export default function Leads() {
       fetchData();
     } catch (error: any) {
       // --- DISPLAY THE SPECIFIC ERROR HERE ---
-      toast({ 
-        title: 'Duplicate Found', 
-        description: error.message || 'Failed to create lead', 
-        variant: 'destructive' 
+      toast({
+        title: 'Duplicate Found',
+        description: error.message || 'Failed to create lead',
+        variant: 'destructive'
       });
     }
   }
 
   // IN: Leads.tsx
   // FIND this entire filteredLeads block (lines 372–478) and REPLACE with:
-
   const filteredLeads = leads
     .filter(lead => {
       // Always hide unverified leads
@@ -399,7 +419,7 @@ export default function Leads() {
         return matchesSearch;
       }
 
-      // ---- Normal filter logic (only applies when NOT searching) ----
+      // ---- Normal filter logic ----
       let matchesStage = true;
       if (stageFilter === 'active_open') {
         matchesStage = !['closed', 'lost', 'completed', 'unverified'].includes(lead.stage);
@@ -414,7 +434,6 @@ export default function Leads() {
       if (assignedAgentFilter === 'unassigned') matchesAgent = !lead.assignedToId;
       else if (assignedAgentFilter !== 'all') matchesAgent = lead.assignedToId === assignedAgentFilter;
 
-      // ✅ Client-side admin filter (works correctly now that fetchData always fetches all leads)
       let matchesAdmin = true;
       if (assignedAdminFilter !== 'all') matchesAdmin = lead.assignedBy?.id === assignedAdminFilter;
 
@@ -437,7 +456,6 @@ export default function Leads() {
         } else if (dateFilter === 'this_month') {
           matchesDate = leadDate.getMonth() === now.getMonth() && leadDate.getFullYear() === now.getFullYear();
         } else if (dateFilter === 'custom') {
-          // ✅ FIX 3: Use local-time Date constructor (not string parse) to avoid UTC midnight offset bug
           if (startDate) {
             const [sy, sm, sd] = startDate.split('-').map(Number);
             const start = new Date(sy, sm - 1, sd, 0, 0, 0, 0);
@@ -450,13 +468,34 @@ export default function Leads() {
           }
         }
       }
-      // ✅ KEY FIX: Sales agents see agentNextFollowupAt in the card,
-      // so the filter must also use agentNextFollowupAt for agents.
-      // Admins/superadmins use nextFollowupAt. Match the same field LeadCard uses.
-      const followUpFieldValue = !canAssignLeads
-        ? lead.agentNextFollowupAt
-        : lead.nextFollowupAt;
 
+      // ✅ NEW: Agent Assigned Date Filter
+      // (Uses updatedAt if available to track reassignment, otherwise falls back to createdAt)
+      let matchesAssignedDate = true;
+      if (assignedDateFilter !== 'all') {
+        const assignedDate = new Date((lead as any).updatedAt || lead.createdAt);
+        const now = new Date();
+
+        if (assignedDateFilter === 'today') {
+          matchesAssignedDate = assignedDate.toDateString() === now.toDateString();
+        } else if (assignedDateFilter === 'yesterday') {
+          const yesterday = new Date();
+          yesterday.setDate(now.getDate() - 1);
+          matchesAssignedDate = assignedDate.toDateString() === yesterday.toDateString();
+        } else if (assignedDateFilter === 'specific_date') {
+          if (!assignedSpecificDate) {
+            matchesAssignedDate = false;
+          } else {
+            const [fYear, fMonth, fDay] = assignedSpecificDate.split('-').map(Number);
+            matchesAssignedDate =
+              assignedDate.getFullYear() === fYear &&
+              assignedDate.getMonth() + 1 === fMonth &&
+              assignedDate.getDate() === fDay;
+          }
+        }
+      }
+
+      const followUpFieldValue = !canAssignLeads ? lead.agentNextFollowupAt : lead.nextFollowupAt;
       let matchesFollowUp = true;
       if (followUpFilter === 'needs_followup') {
         if (!followUpFieldValue) {
@@ -488,29 +527,24 @@ export default function Leads() {
             lDate.getDate() === fDay;
         }
       }
-      return matchesStage && matchesSource && matchesTemperature && matchesAgent && matchesAdmin && matchesDate && matchesFollowUp;
+
+      return matchesStage && matchesSource && matchesTemperature && matchesAgent && matchesAdmin && matchesDate && matchesAssignedDate && matchesFollowUp;
     })
     .sort((a, b) => {
-      // 1. Pinned Priority leads always stay at the very top
       if (a.isPriority && !b.isPriority) return -1;
       if (!a.isPriority && b.isPriority) return 1;
 
-      // 2. Automatically sort by the nearest follow-up date for both agents and admins
       const aFollowUp = !canAssignLeads ? a.agentNextFollowupAt : a.nextFollowupAt;
       const bFollowUp = !canAssignLeads ? b.agentNextFollowupAt : b.nextFollowupAt;
 
       if (aFollowUp && bFollowUp) {
-        // Sorts by closest date (Missed/Past due show up first, then today, then future)
         return new Date(aFollowUp).getTime() - new Date(bFollowUp).getTime();
       }
-
-      // 3. Push leads WITH any follow-up above leads WITHOUT follow-ups
       if (aFollowUp) return -1;
       if (bFollowUp) return 1;
 
-      // 4. Fallback: Newest created leads first
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });// 1. Reset visible count back to 50 whenever you type a search or change a filter
+    });
 
   useEffect(() => {
     setVisibleCount(50);
@@ -569,21 +603,21 @@ export default function Leads() {
                 {isFilterOpen && (
                   <>
                     {/* Dark Background Overlay - MOBILE ONLY */}
-                    <div 
-                      className="fixed inset-0 bg-black/20 z-40 backdrop-blur-sm sm:hidden" 
-                      onClick={() => setIsFilterOpen(false)} 
+                    <div
+                      className="fixed inset-0 bg-black/20 z-40 backdrop-blur-sm sm:hidden"
+                      onClick={() => setIsFilterOpen(false)}
                     />
-                    
+
                     {/* Filter Container: Centered on Mobile, Dropdown on Desktop */}
                     <div className="fixed sm:absolute top-1/2 sm:top-full left-1/2 sm:left-auto sm:right-0 -translate-x-1/2 sm:translate-x-0 -translate-y-1/2 sm:translate-y-0 mt-0 sm:mt-2 w-[90vw] sm:w-[320px] max-h-[85vh] sm:max-h-none overflow-y-auto sm:overflow-visible bg-white border border-slate-200 rounded-xl sm:rounded-lg shadow-2xl sm:shadow-xl p-5 sm:p-4 z-50 flex flex-col gap-4 animate-in fade-in zoom-in-95 sm:zoom-in-100 sm:slide-in-from-top-2">
-                      
+
                       {/* Header Area */}
                       <div className="flex justify-between items-center mb-1 sticky top-0 sm:static bg-white z-10 pb-2 sm:pb-0 border-b sm:border-transparent border-slate-100">
                         <h4 className="font-semibold text-sm">Filter Leads</h4>
                         {activeFiltersCount > 0 && (
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => {
                               setStageFilter('active_open');
                               setSourceFilter('all');
@@ -595,7 +629,7 @@ export default function Leads() {
                               setFollowUpDate('');
                               setStartDate('');
                               setEndDate('');
-                            }} 
+                            }}
                             className="h-8 px-2 text-xs text-muted-foreground hover:text-red-600"
                           >
                             <X className="h-3 w-3 mr-1" /> Clear All
@@ -604,6 +638,35 @@ export default function Leads() {
                       </div>
 
                       <div className="space-y-3">
+
+                        {!canAssignLeads && (
+                          <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+                            <div className="space-y-1.5">
+                              <Label className="text-xs text-muted-foreground">New Leads Assigned</Label>
+                              <Select value={assignedDateFilter} onValueChange={setAssignedDateFilter}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All Time</SelectItem>
+                                  <SelectItem value="today">Assigned Today</SelectItem>
+                                  <SelectItem value="yesterday">Assigned Yesterday</SelectItem>
+                                  <SelectItem value="specific_date">Specific Date</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            {assignedDateFilter === 'specific_date' && (
+                              <div className="space-y-1.5">
+                                <Label className="text-xs text-muted-foreground">Select Date</Label>
+                                <Input
+                                  type="date"
+                                  value={assignedSpecificDate}
+                                  onChange={(e) => setAssignedSpecificDate(e.target.value)}
+                                  className="h-8 text-xs"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {/* THE REST OF YOUR FILTER DROPDOWN CONTENT GOES HERE */}
                         <div className="space-y-1.5">
                           <Label className="text-xs text-muted-foreground">Status</Label>
