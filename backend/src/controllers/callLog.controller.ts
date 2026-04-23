@@ -416,43 +416,35 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
     const role = req.user!.role;
 
     const whereClause: any = {
-      callStatus: 'not_connected',
+      callStatus: { in: ['not_connected', 'missed', 'Missed'] },
       deletedAt: null,
     };
 
+    // Agent visibility: See own calls OR calls from leads assigned to them
     if (role === 'sales_agent') {
-      // Agents see their own missed calls OR missed calls for their assigned leads
       whereClause.OR = [
         { agentId: agentId },
         { lead: { assignedToId: agentId } }
       ];
-    } else {
-      whereClause.agentId = agentId;
     }
 
     const missedCallLogs = await prisma.callLog.findMany({
       where: whereClause,
       include: {
-        lead: {
-          select: {
-            id: true,
-            name: true,
-            phone: true,
-            temperature: true,
-            stage: true,
-            nextFollowupAt: true,
-            notes: true, 
-          }
-        }
+        lead: true // Includes entire lead to prevent missing field crashes
       },
       orderBy: { callDate: 'desc' },
     });
 
+    // Extract lead IDs to find tasks regardless of WHO created the task (Admin or Agent)
+    const leadIds = missedCallLogs.map(l => l.leadId).filter(Boolean) as string[];
+
     const pendingTasks = await prisma.followUpTask.findMany({
       where: {
-        agentId,
+        leadId: { in: leadIds },
         taskType: 'callback',
         status: 'pending',
+        // Removed `agentId: agentId` here so Admin-created tasks don't hide the call!
       },
       select: { id: true, leadId: true, status: true },
     });
@@ -475,8 +467,8 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
           leadId: log.lead!.id,
           leadName: log.lead!.name,
           leadPhone: log.lead!.phone,
-          temperature: log.lead!.temperature,
-          stage: log.lead!.stage,
+          temperature: log.lead!.temperature || 'cold',
+          stage: log.lead!.stage || 'new',
           calledAt: log.callDate.toISOString(),
           notes: log.notes,
           type: callType,
@@ -486,8 +478,6 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
           leadNotes: (log.lead as any).notes ?? null, 
         };
       });
-
-    results.sort((a, b) => new Date(b.calledAt).getTime() - new Date(a.calledAt).getTime());
 
     return res.json(results);
   } catch (error) {
@@ -500,92 +490,106 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
   try {
     const { leadId, view, search, date, dateFrom, dateTo, callStatus, agentId, minDuration, direction, take } = req.query;
 
-    const where: any = { deletedAt: null };
-    if (leadId) where.leadId = leadId;
+    // Use an array of AND conditions to prevent Prisma object overrides
+    const andConditions: any[] = [{ deletedAt: null }];
+
+    if (leadId) andConditions.push({ leadId });
 
     if (search) {
-      where.OR = [
-        { lead: { name: { contains: search as string, mode: 'insensitive' } } },
-        { lead: { phone: { contains: search as string } } },
-        { id: { endsWith: search as string, mode: 'insensitive' } }, 
-        { leadId: { endsWith: search as string, mode: 'insensitive' } } 
-      ];
+      andConditions.push({
+        OR: [
+          { lead: { name: { contains: search as string, mode: 'insensitive' } } },
+          { lead: { phone: { contains: search as string } } },
+          { id: { endsWith: search as string, mode: 'insensitive' } }, 
+          { leadId: { endsWith: search as string, mode: 'insensitive' } } 
+        ]
+      });
     }
 
     const targetDateField = view === 'follow_ups' ? 'callbackScheduledAt' : 'callDate';
 
     if (dateFrom || dateTo) {
-      where[targetDateField] = {};
+      const dateFilter: any = {};
       if (dateFrom) {
         const start = new Date(dateFrom as string);
         start.setHours(0, 0, 0, 0);
-        where[targetDateField].gte = start;
+        dateFilter.gte = start;
       }
       if (dateTo) {
         const end = new Date(dateTo as string);
         end.setHours(23, 59, 59, 999);
-        where[targetDateField].lte = end;
+        dateFilter.lte = end;
       }
+      andConditions.push({ [targetDateField]: dateFilter });
     } else if (date) {
       const start = new Date(date as string);
       start.setHours(0, 0, 0, 0);
       const end = new Date(start);
       end.setHours(23, 59, 59, 999);
-      where[targetDateField] = { gte: start, lte: end };
+      andConditions.push({ [targetDateField]: { gte: start, lte: end } });
     }
 
-    if (callStatus && callStatus !== 'all') where.callStatus = callStatus as string;
+    if (callStatus && callStatus !== 'all') {
+      andConditions.push({ callStatus: callStatus as string });
+    }
     
-    // 👇 Fixed logic for Agent Visibility 👇
+    // 👇 Bulletproof Agent Visibility for Telecalling List 👇
     if (req.user!.role === 'sales_agent') {
-      where.AND = [
-        ...(where.AND || []),
-        {
-          OR: [
-            { agentId: req.user!.userId },
-            { lead: { assignedToId: req.user!.userId } }
-          ]
-        }
-      ];
+      andConditions.push({
+        OR: [
+          { agentId: req.user!.userId },
+          { lead: { assignedToId: req.user!.userId } }
+        ]
+      });
     } else if (agentId && agentId !== 'all') {
-      where.agentId = agentId as string;
+      andConditions.push({ agentId: agentId as string });
     }
 
     if (minDuration && minDuration !== 'all') {
-      where.callDuration = { gte: parseInt(minDuration as string, 10) };
+      andConditions.push({ callDuration: { gte: parseInt(minDuration as string, 10) } });
     }
 
     switch (view) {
       case 'follow_ups':
-        where.callStatus = 'connected_callback'; 
+        andConditions.push({ callStatus: 'connected_callback' }); 
         break;
       case 'missed':
-        where.callStatus = 'not_connected';
+        andConditions.push({ callStatus: { in: ['not_connected', 'missed', 'Missed'] } });
         break;
-      case 'attended': where.callStatus = { in: ['connected_positive', 'connected_callback', 'not_interested'] }; break;
-      case 'qualified': where.callStatus = 'connected_positive'; break;
-      case 'unqualified': where.callStatus = 'not_interested'; break;
-      case 'archive': where.isArchived = true; break;
-      case 'inbound': where.notes = { contains: 'Inbound', mode: 'insensitive' }; break;
-      case 'outbound': where.notes = { contains: 'Outbound', mode: 'insensitive' }; break;
+      case 'attended': 
+        andConditions.push({ callStatus: { in: ['connected_positive', 'connected_callback', 'not_interested'] } }); 
+        break;
+      case 'qualified': 
+        andConditions.push({ callStatus: 'connected_positive' }); 
+        break;
+      case 'unqualified': 
+        andConditions.push({ callStatus: 'not_interested' }); 
+        break;
+      case 'archive': 
+        andConditions.push({ isArchived: true }); 
+        break;
+      case 'inbound': 
+        andConditions.push({ notes: { contains: 'Inbound', mode: 'insensitive' } }); 
+        break;
+      case 'outbound': 
+        andConditions.push({ notes: { contains: 'Outbound', mode: 'insensitive' } }); 
+        break;
       case 'active': {
         if (!date && !dateFrom) {
           const startOfDay = new Date();
           startOfDay.setHours(0, 0, 0, 0);
-          where.callDate = { gte: startOfDay };
+          andConditions.push({ callDate: { gte: startOfDay } });
         }
         break;
       }
-      case 'deleted':
-        delete where.deletedAt;
-        where.deletedAt = { not: null };
-        break;
       default: break;
     }
 
     if (direction && direction !== 'all' && !['inbound', 'outbound', 'missed', 'follow_ups'].includes(view as string)) {
-      where.notes = { contains: direction === 'inbound' ? 'Inbound' : 'Outbound', mode: 'insensitive' };
+      andConditions.push({ notes: { contains: direction === 'inbound' ? 'Inbound' : 'Outbound', mode: 'insensitive' } });
     }
+
+    const where = { AND: andConditions };
 
     const callLogs = await prisma.callLog.findMany({
       where,
@@ -602,6 +606,7 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
     return res.status(500).json({ error: 'Failed to fetch call logs' });
   }
 };
+
 
 export const getCallStats = async (req: AuthRequest, res: Response) => {
   try {
