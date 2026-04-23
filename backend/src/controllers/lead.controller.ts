@@ -329,6 +329,27 @@ export const createLead = async (req: AuthRequest, res: Response) => {
     const currentUserId = req.user!.userId;
     const assignedToId = data.assignedToId || null;
 
+    // --- SMARTER STRICT DUPLICATE CHECK ---
+    // 1. Remove all spaces, plus signs, and hyphens from the incoming number
+    const cleanPhone = data.phone.replace(/\D/g, '');
+    
+    // 2. Grab only the last 10 digits (ignores whether +91 was included or not)
+    const basePhone = cleanPhone.length >= 10 ? cleanPhone.slice(-10) : cleanPhone;
+
+    // 3. Search the database for any phone number that CONTAINS those 10 digits
+    const existingLead = await prisma.lead.findFirst({
+      where: { 
+        phone: { contains: basePhone } 
+      }
+    });
+
+    if (existingLead) {
+      return res.status(400).json({ 
+        error: `A lead with this phone number already exists (${existingLead.name}).` 
+      });
+    }
+    // ----------------------------------
+
     // Track who assigned this lead
     const assignedById = data.assignedToId ? currentUserId : null;
 
@@ -356,7 +377,6 @@ export const createLead = async (req: AuthRequest, res: Response) => {
     return res.status(500).json({ error: 'Failed to create lead' });
   }
 };
-
 
 export const deleteLead = async (req: AuthRequest, res: Response) => {
   try {

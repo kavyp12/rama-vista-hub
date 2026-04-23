@@ -66,13 +66,13 @@ export default function Leads() {
   const { user, token } = useAuth();
   const { canAssignLeads } = usePermissions();
   const { toast } = useToast();
-  
+
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [admins, setAdmins] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
-// Load saved filters from memory on initial load
+  // Load saved filters from memory on initial load
   const [savedFilters] = useState(() => {
     try {
       const item = localStorage.getItem('crm_leads_filters');
@@ -117,7 +117,7 @@ export default function Leads() {
   const [addAgentSearch, setAddAgentSearch] = useState('');
   const [isAddAgentOpen, setIsAddAgentOpen] = useState(false);
 
-  
+
   const [budgetUnit, setBudgetUnit] = useState<'L' | 'Cr' | 'K'>('L');
   const [visibleCount, setVisibleCount] = useState(50);
   const observerTarget = useRef<HTMLDivElement>(null);
@@ -148,39 +148,39 @@ export default function Leads() {
   const CACHE_TIME_KEY = 'crm_leads_timestamp';
   const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes — fresh enough, fast enough
 
-const fetchData = useCallback(async (isBackgroundRefresh = false) => {
-  console.log(`[Leads Manager] 🔍 Fetching from server... (background: ${isBackgroundRefresh})`);
+  const fetchData = useCallback(async (isBackgroundRefresh = false) => {
+    console.log(`[Leads Manager] 🔍 Fetching from server... (background: ${isBackgroundRefresh})`);
 
-  // Only show spinner on full loads, NOT on background silent refreshes
-  if (!isBackgroundRefresh) setLoading(true);
+    // Only show spinner on full loads, NOT on background silent refreshes
+    if (!isBackgroundRefresh) setLoading(true);
 
-  try {
-    // ✅ FIX: Removed assignedAdminFilter from server params.
-    // All leads are fetched and admin filter is applied client-side only.
-    // This prevents stale/partial cache when toggling admin filter back to "all".
-    const res = await fetch(`${API_URL}/leads`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const data = await res.json();
+    try {
+      // ✅ FIX: Removed assignedAdminFilter from server params.
+      // All leads are fetched and admin filter is applied client-side only.
+      // This prevents stale/partial cache when toggling admin filter back to "all".
+      const res = await fetch(`${API_URL}/leads`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
 
-    if (Array.isArray(data)) {
-      setLeads(data);
-      try {
-        localStorage.setItem(CACHE_KEY, JSON.stringify(data));
-        localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
-      } catch (e) {
-        console.warn('[Leads] Cache save failed (storage full), skipping.');
+      if (Array.isArray(data)) {
+        setLeads(data);
+        try {
+          localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+          localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
+        } catch (e) {
+          console.warn('[Leads] Cache save failed (storage full), skipping.');
+        }
       }
+    } catch (error) {
+      console.error('[Leads Manager] 🚨 Fetch failed:', error);
+      if (!isBackgroundRefresh) {
+        toast({ title: 'Error', description: 'Failed to fetch leads', variant: 'destructive' });
+      }
+    } finally {
+      if (!isBackgroundRefresh) setLoading(false);
     }
-  } catch (error) {
-    console.error('[Leads Manager] 🚨 Fetch failed:', error);
-    if (!isBackgroundRefresh) {
-      toast({ title: 'Error', description: 'Failed to fetch leads', variant: 'destructive' });
-    }
-  } finally {
-    if (!isBackgroundRefresh) setLoading(false);
-  }
-}, [token]); // ✅ FIX: removed assignedAdminFilter from deps — no longer needed here
+  }, [token]); // ✅ FIX: removed assignedAdminFilter from deps — no longer needed here
   useEffect(() => {
     if (!token) return;
 
@@ -210,11 +210,11 @@ const fetchData = useCallback(async (isBackgroundRefresh = false) => {
 
     if (canAssignLeads) fetchAgents();
   }, [token, canAssignLeads, fetchData]);
-  
+
   async function fetchAgents() {
     let salesAgents: Agent[] = [];
     let adminUsers: Agent[] = [];
-    
+
     try {
       const res = await fetch(`${API_URL}/users?role=sales_agent`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -222,7 +222,7 @@ const fetchData = useCallback(async (isBackgroundRefresh = false) => {
       const data = await res.json();
       if (Array.isArray(data)) salesAgents = data;
     } catch (error) { console.error("Failed to load agents"); }
-    
+
     // Also fetch admins for the 'Assigned By' filter
     try {
       const res = await fetch(`${API_URL}/users?role=admin`, {
@@ -234,7 +234,7 @@ const fetchData = useCallback(async (isBackgroundRefresh = false) => {
         setAdmins(data);
       }
     } catch (error) { console.error("Failed to load admins"); }
-    
+
     setAgents([...salesAgents, ...adminUsers]);
   }
 
@@ -352,7 +352,13 @@ const fetchData = useCallback(async (isBackgroundRefresh = false) => {
         body: JSON.stringify(payload)
       });
 
-      if (!res.ok) throw new Error('Failed to create lead');
+      // --- GRAB THE RESPONSE DATA FIRST ---
+      const responseData = await res.json();
+
+      if (!res.ok) {
+        // Throw the exact error message from the backend so the catch block gets it
+        throw new Error(responseData.error || 'Failed to create lead');
+      }
 
       toast({ title: 'Success', description: 'Lead created successfully' });
       setIsAddDialogOpen(false);
@@ -362,137 +368,150 @@ const fetchData = useCallback(async (isBackgroundRefresh = false) => {
         preferredLocation: '', notes: '', assignedToId: ''
       });
       fetchData();
-    } catch (error) {
-      toast({ title: 'Error', description: 'Failed to create lead', variant: 'destructive' });
+    } catch (error: any) {
+      // --- DISPLAY THE SPECIFIC ERROR HERE ---
+      toast({ 
+        title: 'Duplicate Found', 
+        description: error.message || 'Failed to create lead', 
+        variant: 'destructive' 
+      });
     }
   }
 
-// IN: Leads.tsx
-// FIND this entire filteredLeads block (lines 372–478) and REPLACE with:
+  // IN: Leads.tsx
+  // FIND this entire filteredLeads block (lines 372–478) and REPLACE with:
 
-const filteredLeads = leads
-  .filter(lead => {
-    // Always hide unverified leads
-    if (lead.stage === 'unverified') return false;
+  const filteredLeads = leads
+    .filter(lead => {
+      // Always hide unverified leads
+      if (lead.stage === 'unverified') return false;
 
-    const trimmedSearch = searchQuery.trim();
-    const matchesSearch = !trimmedSearch
-      ? true
-      : lead.name.toLowerCase().includes(trimmedSearch.toLowerCase()) ||
+      const trimmedSearch = searchQuery.trim();
+      const matchesSearch = !trimmedSearch
+        ? true
+        : lead.name.toLowerCase().includes(trimmedSearch.toLowerCase()) ||
         lead.phone.includes(trimmedSearch) ||
         (lead.email && lead.email.toLowerCase().includes(trimmedSearch.toLowerCase())) ||
         lead.id.toUpperCase().includes(trimmedSearch.toUpperCase());
 
-    // When actively searching, bypass ALL other filters
-    if (trimmedSearch) {
-      return matchesSearch;
-    }
+      // When actively searching, bypass ALL other filters
+      if (trimmedSearch) {
+        return matchesSearch;
+      }
 
-    // ---- Normal filter logic (only applies when NOT searching) ----
-    let matchesStage = true;
-    if (stageFilter === 'active_open') {
-      matchesStage = !['closed', 'lost', 'completed', 'unverified'].includes(lead.stage);
-    } else if (stageFilter !== 'all') {
-      matchesStage = lead.stage === stageFilter;
-    }
+      // ---- Normal filter logic (only applies when NOT searching) ----
+      let matchesStage = true;
+      if (stageFilter === 'active_open') {
+        matchesStage = !['closed', 'lost', 'completed', 'unverified'].includes(lead.stage);
+      } else if (stageFilter !== 'all') {
+        matchesStage = lead.stage === stageFilter;
+      }
 
-    const matchesSource = sourceFilter === 'all' ? true : lead.source === sourceFilter;
-    const matchesTemperature = temperatureFilter === 'all' ? true : lead.temperature === temperatureFilter;
+      const matchesSource = sourceFilter === 'all' ? true : lead.source === sourceFilter;
+      const matchesTemperature = temperatureFilter === 'all' ? true : lead.temperature === temperatureFilter;
 
-    let matchesAgent = true;
-    if (assignedAgentFilter === 'unassigned') matchesAgent = !lead.assignedToId;
-    else if (assignedAgentFilter !== 'all') matchesAgent = lead.assignedToId === assignedAgentFilter;
+      let matchesAgent = true;
+      if (assignedAgentFilter === 'unassigned') matchesAgent = !lead.assignedToId;
+      else if (assignedAgentFilter !== 'all') matchesAgent = lead.assignedToId === assignedAgentFilter;
 
-    // ✅ Client-side admin filter (works correctly now that fetchData always fetches all leads)
-    let matchesAdmin = true;
-    if (assignedAdminFilter !== 'all') matchesAdmin = lead.assignedBy?.id === assignedAdminFilter;
+      // ✅ Client-side admin filter (works correctly now that fetchData always fetches all leads)
+      let matchesAdmin = true;
+      if (assignedAdminFilter !== 'all') matchesAdmin = lead.assignedBy?.id === assignedAdminFilter;
 
-    let matchesDate = true;
-    if (dateFilter !== 'all') {
-      const leadDate = new Date(lead.createdAt);
-      const now = new Date();
-      if (dateFilter === 'today') {
-        matchesDate = leadDate.toDateString() === now.toDateString();
-      } else if (dateFilter === 'yesterday') {
-        const yesterday = new Date();
-        yesterday.setDate(now.getDate() - 1);
-        matchesDate = leadDate.toDateString() === yesterday.toDateString();
-      } else if (dateFilter === 'last_7_days') {
-        const msInWeek = 7 * 24 * 60 * 60 * 1000;
-        matchesDate = (now.getTime() - leadDate.getTime()) <= msInWeek;
-      } else if (dateFilter === 'last_30_days') {
-        const msIn30Days = 30 * 24 * 60 * 60 * 1000;
-        matchesDate = (now.getTime() - leadDate.getTime()) <= msIn30Days;
-      } else if (dateFilter === 'this_month') {
-        matchesDate = leadDate.getMonth() === now.getMonth() && leadDate.getFullYear() === now.getFullYear();
-      } else if (dateFilter === 'custom') {
-        // ✅ FIX 3: Use local-time Date constructor (not string parse) to avoid UTC midnight offset bug
-        if (startDate) {
-          const [sy, sm, sd] = startDate.split('-').map(Number);
-          const start = new Date(sy, sm - 1, sd, 0, 0, 0, 0);
-          matchesDate = matchesDate && leadDate >= start;
-        }
-        if (endDate) {
-          const [ey, em, ed] = endDate.split('-').map(Number);
-          const end = new Date(ey, em - 1, ed, 23, 59, 59, 999);
-          matchesDate = matchesDate && leadDate <= end;
+      let matchesDate = true;
+      if (dateFilter !== 'all') {
+        const leadDate = new Date(lead.createdAt);
+        const now = new Date();
+        if (dateFilter === 'today') {
+          matchesDate = leadDate.toDateString() === now.toDateString();
+        } else if (dateFilter === 'yesterday') {
+          const yesterday = new Date();
+          yesterday.setDate(now.getDate() - 1);
+          matchesDate = leadDate.toDateString() === yesterday.toDateString();
+        } else if (dateFilter === 'last_7_days') {
+          const msInWeek = 7 * 24 * 60 * 60 * 1000;
+          matchesDate = (now.getTime() - leadDate.getTime()) <= msInWeek;
+        } else if (dateFilter === 'last_30_days') {
+          const msIn30Days = 30 * 24 * 60 * 60 * 1000;
+          matchesDate = (now.getTime() - leadDate.getTime()) <= msIn30Days;
+        } else if (dateFilter === 'this_month') {
+          matchesDate = leadDate.getMonth() === now.getMonth() && leadDate.getFullYear() === now.getFullYear();
+        } else if (dateFilter === 'custom') {
+          // ✅ FIX 3: Use local-time Date constructor (not string parse) to avoid UTC midnight offset bug
+          if (startDate) {
+            const [sy, sm, sd] = startDate.split('-').map(Number);
+            const start = new Date(sy, sm - 1, sd, 0, 0, 0, 0);
+            matchesDate = matchesDate && leadDate >= start;
+          }
+          if (endDate) {
+            const [ey, em, ed] = endDate.split('-').map(Number);
+            const end = new Date(ey, em - 1, ed, 23, 59, 59, 999);
+            matchesDate = matchesDate && leadDate <= end;
+          }
         }
       }
-    }
-// ✅ KEY FIX: Sales agents see agentNextFollowupAt in the card,
-// so the filter must also use agentNextFollowupAt for agents.
-// Admins/superadmins use nextFollowupAt. Match the same field LeadCard uses.
-const followUpFieldValue = !canAssignLeads
-  ? lead.agentNextFollowupAt
-  : lead.nextFollowupAt;
+      // ✅ KEY FIX: Sales agents see agentNextFollowupAt in the card,
+      // so the filter must also use agentNextFollowupAt for agents.
+      // Admins/superadmins use nextFollowupAt. Match the same field LeadCard uses.
+      const followUpFieldValue = !canAssignLeads
+        ? lead.agentNextFollowupAt
+        : lead.nextFollowupAt;
 
-let matchesFollowUp = true;
-if (followUpFilter === 'needs_followup') {
-  if (!followUpFieldValue) {
-    matchesFollowUp = false;
-  } else {
-    const endOfToday = new Date();
-    endOfToday.setHours(23, 59, 59, 999);
-    matchesFollowUp = new Date(followUpFieldValue) <= endOfToday;
-  }
-} else if (followUpFilter === 'upcoming') {
-  if (!followUpFieldValue) {
-    matchesFollowUp = false;
-  } else {
-    const endOfToday = new Date();
-    endOfToday.setHours(23, 59, 59, 999);
-    matchesFollowUp = new Date(followUpFieldValue) > endOfToday;
-  }
-} else if (followUpFilter === 'no_followup') {
-  matchesFollowUp = !followUpFieldValue;
-} else if (followUpFilter === 'specific_date') {
-  if (!followUpFieldValue || !followUpDate) {
-    matchesFollowUp = false;
-  } else {
-    const lDate = new Date(followUpFieldValue);
-    const [fYear, fMonth, fDay] = followUpDate.split('-').map(Number);
-    matchesFollowUp =
-      lDate.getFullYear() === fYear &&
-      lDate.getMonth() + 1 === fMonth &&
-      lDate.getDate() === fDay;
-  }
-}
-    return matchesStage && matchesSource && matchesTemperature && matchesAgent && matchesAdmin && matchesDate && matchesFollowUp;
-  })
-  .sort((a, b) => {
-  if (followUpFilter !== 'all') {
-    // ✅ Same role-based field logic as the filter above
-    const aFollowUp = !canAssignLeads ? a.agentNextFollowupAt : a.nextFollowupAt;
-    const bFollowUp = !canAssignLeads ? b.agentNextFollowupAt : b.nextFollowupAt;
-    if (!aFollowUp) return 1;
-    if (!bFollowUp) return -1;
-    return new Date(aFollowUp).getTime() - new Date(bFollowUp).getTime();
-  }
-  if (a.isPriority && !b.isPriority) return -1;
-  if (!a.isPriority && b.isPriority) return 1;
-  return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-});
-    // 1. Reset visible count back to 50 whenever you type a search or change a filter
+      let matchesFollowUp = true;
+      if (followUpFilter === 'needs_followup') {
+        if (!followUpFieldValue) {
+          matchesFollowUp = false;
+        } else {
+          const endOfToday = new Date();
+          endOfToday.setHours(23, 59, 59, 999);
+          matchesFollowUp = new Date(followUpFieldValue) <= endOfToday;
+        }
+      } else if (followUpFilter === 'upcoming') {
+        if (!followUpFieldValue) {
+          matchesFollowUp = false;
+        } else {
+          const endOfToday = new Date();
+          endOfToday.setHours(23, 59, 59, 999);
+          matchesFollowUp = new Date(followUpFieldValue) > endOfToday;
+        }
+      } else if (followUpFilter === 'no_followup') {
+        matchesFollowUp = !followUpFieldValue;
+      } else if (followUpFilter === 'specific_date') {
+        if (!followUpFieldValue || !followUpDate) {
+          matchesFollowUp = false;
+        } else {
+          const lDate = new Date(followUpFieldValue);
+          const [fYear, fMonth, fDay] = followUpDate.split('-').map(Number);
+          matchesFollowUp =
+            lDate.getFullYear() === fYear &&
+            lDate.getMonth() + 1 === fMonth &&
+            lDate.getDate() === fDay;
+        }
+      }
+      return matchesStage && matchesSource && matchesTemperature && matchesAgent && matchesAdmin && matchesDate && matchesFollowUp;
+    })
+    .sort((a, b) => {
+      // 1. Pinned Priority leads always stay at the very top
+      if (a.isPriority && !b.isPriority) return -1;
+      if (!a.isPriority && b.isPriority) return 1;
+
+      // 2. Automatically sort by the nearest follow-up date for both agents and admins
+      const aFollowUp = !canAssignLeads ? a.agentNextFollowupAt : a.nextFollowupAt;
+      const bFollowUp = !canAssignLeads ? b.agentNextFollowupAt : b.nextFollowupAt;
+
+      if (aFollowUp && bFollowUp) {
+        // Sorts by closest date (Missed/Past due show up first, then today, then future)
+        return new Date(aFollowUp).getTime() - new Date(bFollowUp).getTime();
+      }
+
+      // 3. Push leads WITH any follow-up above leads WITHOUT follow-ups
+      if (aFollowUp) return -1;
+      if (bFollowUp) return 1;
+
+      // 4. Fallback: Newest created leads first
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });// 1. Reset visible count back to 50 whenever you type a search or change a filter
+
   useEffect(() => {
     setVisibleCount(50);
   }, [searchQuery, stageFilter, sourceFilter, temperatureFilter, assignedAgentFilter, assignedAdminFilter, dateFilter, startDate, endDate, followUpFilter, followUpDate]);
@@ -522,7 +541,7 @@ if (followUpFilter === 'needs_followup') {
 
         <div className="flex flex-col gap-4 shrink-0 bg-white p-4 rounded-lg border border-slate-200 shadow-sm relative z-20">
           <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
-            
+
             {/* Left Side: Search & Filter Trigger */}
             <div className="flex flex-1 items-center gap-2 w-full">
               <div className="relative flex-1 sm:max-w-md">
@@ -531,9 +550,9 @@ if (followUpFilter === 'needs_followup') {
               </div>
 
               <div className="relative">
-                <Button 
-                  variant={activeFiltersCount > 0 ? "secondary" : "outline"} 
-                  onClick={() => setIsFilterOpen(!isFilterOpen)} 
+                <Button
+                  variant={activeFiltersCount > 0 ? "secondary" : "outline"}
+                  onClick={() => setIsFilterOpen(!isFilterOpen)}
                   className="gap-2"
                 >
                   <Filter className="h-4 w-4" />
@@ -545,170 +564,182 @@ if (followUpFilter === 'needs_followup') {
                   )}
                 </Button>
 
-                {/* The Consolidated Filter Box */}
+                {/* The Consolidated Filter Box - Centered Modal */}
+                {/* The Consolidated Filter Box - Responsive Modal (Mobile) / Dropdown (Desktop) */}
                 {isFilterOpen && (
-                  <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-2 w-[calc(100vw-2rem)] sm:w-[320px] bg-white border border-slate-200 rounded-lg shadow-xl p-4 z-50 flex flex-col gap-4 animate-in fade-in slide-in-from-top-2">
+                  <>
+                    {/* Dark Background Overlay - MOBILE ONLY */}
+                    <div 
+                      className="fixed inset-0 bg-black/20 z-40 backdrop-blur-sm sm:hidden" 
+                      onClick={() => setIsFilterOpen(false)} 
+                    />
                     
-                    <div className="flex justify-between items-center mb-1">
-                      <h4 className="font-semibold text-sm">Filter Leads</h4>
-                      {activeFiltersCount > 0 && (
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          onClick={() => {
-                            setStageFilter('active_open');
-                            setSourceFilter('all');
-                            setDateFilter('all');
-                            setTemperatureFilter('all');
-                            setAssignedAgentFilter('all');
-                            setAssignedAdminFilter('all');
-                            setFollowUpFilter('all');
-                            setFollowUpDate('');
-                            setStartDate('');
-                            setEndDate('');
-                          }} 
-                          className="h-8 px-2 text-xs text-muted-foreground hover:text-red-600"
-                        >
-                          <X className="h-3 w-3 mr-1" /> Clear All
-                        </Button>
-                      )}
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs text-muted-foreground">Status</Label>
-                        <Select value={stageFilter} onValueChange={setStageFilter}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="active_open">Active (Open)</SelectItem>
-                            <SelectItem value="all">All Leads</SelectItem>
-                            <SelectItem value="new">New</SelectItem>
-                            <SelectItem value="not_connected">Not connected</SelectItem>
-                            <SelectItem value="call_back_required">Call back required</SelectItem>
-                            <SelectItem value="contacted">Contacted</SelectItem>
-                            <SelectItem value="site_visit">Site Visit</SelectItem>
-                            <SelectItem value="site_visit_done">Site visit done</SelectItem>
-                            <SelectItem value="negotiation">Negotiation</SelectItem>
-                            <SelectItem value="re_visit">Re visit</SelectItem>
-                            <SelectItem value="re_visit_done">Re visit done</SelectItem>
-                            <SelectItem value="token">Token</SelectItem>
-                            <SelectItem value="closed" className="text-red-600">Closed</SelectItem>
-                            <SelectItem value="lost" className="text-slate-500">Lost</SelectItem>
-                            <SelectItem value="completed" className="text-green-600">Completed</SelectItem>
-                            <SelectItem value="disconnected">Disconnected</SelectItem> {/* <-- ADD THIS */}
-                          </SelectContent>
-                        </Select>
+                    {/* Filter Container: Centered on Mobile, Dropdown on Desktop */}
+                    <div className="fixed sm:absolute top-1/2 sm:top-full left-1/2 sm:left-auto sm:right-0 -translate-x-1/2 sm:translate-x-0 -translate-y-1/2 sm:translate-y-0 mt-0 sm:mt-2 w-[90vw] sm:w-[320px] max-h-[85vh] sm:max-h-none overflow-y-auto sm:overflow-visible bg-white border border-slate-200 rounded-xl sm:rounded-lg shadow-2xl sm:shadow-xl p-5 sm:p-4 z-50 flex flex-col gap-4 animate-in fade-in zoom-in-95 sm:zoom-in-100 sm:slide-in-from-top-2">
+                      
+                      {/* Header Area */}
+                      <div className="flex justify-between items-center mb-1 sticky top-0 sm:static bg-white z-10 pb-2 sm:pb-0 border-b sm:border-transparent border-slate-100">
+                        <h4 className="font-semibold text-sm">Filter Leads</h4>
+                        {activeFiltersCount > 0 && (
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => {
+                              setStageFilter('active_open');
+                              setSourceFilter('all');
+                              setDateFilter('all');
+                              setTemperatureFilter('all');
+                              setAssignedAgentFilter('all');
+                              setAssignedAdminFilter('all');
+                              setFollowUpFilter('all');
+                              setFollowUpDate('');
+                              setStartDate('');
+                              setEndDate('');
+                            }} 
+                            className="h-8 px-2 text-xs text-muted-foreground hover:text-red-600"
+                          >
+                            <X className="h-3 w-3 mr-1" /> Clear All
+                          </Button>
+                        )}
                       </div>
 
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-3">
+                        {/* THE REST OF YOUR FILTER DROPDOWN CONTENT GOES HERE */}
                         <div className="space-y-1.5">
-                          <Label className="text-xs text-muted-foreground">Source</Label>
-                          <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                          <Label className="text-xs text-muted-foreground">Status</Label>
+                          <Select value={stageFilter} onValueChange={setStageFilter}>
                             <SelectTrigger><SelectValue /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="all">All Sources</SelectItem>
-                              <SelectItem value="Website">Website</SelectItem>
-                              <SelectItem value="Referral">Referral</SelectItem>
-                              <SelectItem value="Social Media">Social Media</SelectItem>
-                              <SelectItem value="Walk-in">Walk-in</SelectItem>
-                              <SelectItem value="Other">Other</SelectItem>
+                              <SelectItem value="active_open">Active (Open)</SelectItem>
+                              <SelectItem value="all">All Leads</SelectItem>
+                              <SelectItem value="new">New</SelectItem>
+                              <SelectItem value="not_connected">Not connected</SelectItem>
+                              <SelectItem value="call_back_required">Call back required</SelectItem>
+                              <SelectItem value="contacted">Contacted</SelectItem>
+                              <SelectItem value="site_visit">Site Visit</SelectItem>
+                              <SelectItem value="site_visit_done">Site visit done</SelectItem>
+                              <SelectItem value="negotiation">Negotiation</SelectItem>
+                              <SelectItem value="re_visit">Re visit</SelectItem>
+                              <SelectItem value="re_visit_done">Re visit done</SelectItem>
+                              <SelectItem value="token">Token</SelectItem>
+                              <SelectItem value="closed" className="text-red-600">Closed</SelectItem>
+                              <SelectItem value="lost" className="text-slate-500">Lost</SelectItem>
+                              <SelectItem value="completed" className="text-green-600">Completed</SelectItem>
+                              <SelectItem value="disconnected">Disconnected</SelectItem> {/* <-- ADD THIS */}
                             </SelectContent>
                           </Select>
                         </div>
-                        
-                        <div className="space-y-1.5">
-                          <Label className="text-xs text-muted-foreground">Temperature</Label>
-                          <Select value={temperatureFilter} onValueChange={setTemperatureFilter}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All Temps</SelectItem>
-                              <SelectItem value="hot">Hot</SelectItem>
-                              <SelectItem value="warm">Warm</SelectItem>
-                              <SelectItem value="cold">Cold</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
 
-                      {canAssignLeads && (
                         <div className="grid grid-cols-2 gap-3">
                           <div className="space-y-1.5">
-                            <Label className="text-xs text-muted-foreground">Assigned Agent</Label>
-                            <Select value={assignedAgentFilter} onValueChange={setAssignedAgentFilter}>
+                            <Label className="text-xs text-muted-foreground">Source</Label>
+                            <Select value={sourceFilter} onValueChange={setSourceFilter}>
                               <SelectTrigger><SelectValue /></SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="all">All Agents</SelectItem>
-                                <SelectItem value="unassigned">Unassigned</SelectItem>
-                                {agents.map(a => <SelectItem key={a.id} value={a.id}>{a.fullName}</SelectItem>)}
+                                <SelectItem value="all">All Sources</SelectItem>
+                                <SelectItem value="Website">Website</SelectItem>
+                                <SelectItem value="Referral">Referral</SelectItem>
+                                <SelectItem value="Social Media">Social Media</SelectItem>
+                                <SelectItem value="Walk-in">Walk-in</SelectItem>
+                                <SelectItem value="Other">Other</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
-                          
+
                           <div className="space-y-1.5">
-                            <Label className="text-xs text-muted-foreground">Assigned By (Admin)</Label>
-                            <Select value={assignedAdminFilter} onValueChange={setAssignedAdminFilter}>
+                            <Label className="text-xs text-muted-foreground">Temperature</Label>
+                            <Select value={temperatureFilter} onValueChange={setTemperatureFilter}>
                               <SelectTrigger><SelectValue /></SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="all">All Admins</SelectItem>
-                                {admins.map(a => <SelectItem key={a.id} value={a.id}>{a.fullName}</SelectItem>)}
+                                <SelectItem value="all">All Temps</SelectItem>
+                                <SelectItem value="hot">Hot</SelectItem>
+                                <SelectItem value="warm">Warm</SelectItem>
+                                <SelectItem value="cold">Cold</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
                         </div>
-                      )}
 
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                          <Label className="text-xs text-muted-foreground">Date Created</Label>
-                          <Select value={dateFilter} onValueChange={setDateFilter}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All Time</SelectItem>
-                              <SelectItem value="today">Today</SelectItem>
-                              <SelectItem value="yesterday">Yesterday</SelectItem>
-                              <SelectItem value="last_7_days">Last 7 Days</SelectItem>
-                              <SelectItem value="last_30_days">Last 30 Days</SelectItem>
-                              <SelectItem value="this_month">This Month</SelectItem>
-                              <SelectItem value="custom">Custom Range</SelectItem>
-                            </SelectContent>
-                          </Select>
+                        {canAssignLeads && (
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1.5">
+                              <Label className="text-xs text-muted-foreground">Assigned Agent</Label>
+                              <Select value={assignedAgentFilter} onValueChange={setAssignedAgentFilter}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All Agents</SelectItem>
+                                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                                  {agents.map(a => <SelectItem key={a.id} value={a.id}>{a.fullName}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <Label className="text-xs text-muted-foreground">Assigned By (Admin)</Label>
+                              <Select value={assignedAdminFilter} onValueChange={setAssignedAdminFilter}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All Admins</SelectItem>
+                                  {admins.map(a => <SelectItem key={a.id} value={a.id}>{a.fullName}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs text-muted-foreground">Date Created</Label>
+                            <Select value={dateFilter} onValueChange={setDateFilter}>
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All Time</SelectItem>
+                                <SelectItem value="today">Today</SelectItem>
+                                <SelectItem value="yesterday">Yesterday</SelectItem>
+                                <SelectItem value="last_7_days">Last 7 Days</SelectItem>
+                                <SelectItem value="last_30_days">Last 30 Days</SelectItem>
+                                <SelectItem value="this_month">This Month</SelectItem>
+                                <SelectItem value="custom">Custom Range</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <Label className="text-xs text-muted-foreground">Follow-ups</Label>
+                            <Select value={followUpFilter} onValueChange={setFollowUpFilter}>
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All</SelectItem>
+                                <SelectItem value="needs_followup">Missed / Due Today</SelectItem>
+                                <SelectItem value="upcoming">Upcoming</SelectItem>
+                                <SelectItem value="specific_date">Specific Date</SelectItem>
+                                <SelectItem value="no_followup">No Follow-up Set</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
                         </div>
 
-                        <div className="space-y-1.5">
-                          <Label className="text-xs text-muted-foreground">Follow-ups</Label>
-                          <Select value={followUpFilter} onValueChange={setFollowUpFilter}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All</SelectItem>
-                              <SelectItem value="needs_followup">Missed / Due Today</SelectItem>
-                              <SelectItem value="upcoming">Upcoming</SelectItem>
-                              <SelectItem value="specific_date">Specific Date</SelectItem>
-                              <SelectItem value="no_followup">No Follow-up Set</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
+                        {dateFilter === 'custom' && (
+                          <div className="flex items-center gap-2 pt-1">
+                            <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-8 text-xs" />
+                            <span className="text-xs text-muted-foreground">to</span>
+                            <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-8 text-xs" />
+                          </div>
+                        )}
 
-                      {dateFilter === 'custom' && (
-                        <div className="flex items-center gap-2 pt-1">
-                          <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-8 text-xs" />
-                          <span className="text-xs text-muted-foreground">to</span>
-                          <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-8 text-xs" />
-                        </div>
-                      )}
+                        {followUpFilter === 'specific_date' && (
+                          <div className="flex flex-col gap-1 pt-1">
+                            <Label className="text-xs text-muted-foreground">Select Follow-up Date</Label>
+                            <Input type="date" value={followUpDate} onChange={(e) => setFollowUpDate(e.target.value)} className="h-8 text-xs" />
+                          </div>
+                        )}
 
-                      {followUpFilter === 'specific_date' && (
-                        <div className="flex flex-col gap-1 pt-1">
-                          <Label className="text-xs text-muted-foreground">Select Follow-up Date</Label>
-                          <Input type="date" value={followUpDate} onChange={(e) => setFollowUpDate(e.target.value)} className="h-8 text-xs" />
+                        <div className="pt-2">
+                          <Button className="w-full" onClick={() => setIsFilterOpen(false)}>Apply Filters</Button>
                         </div>
-                      )}
-
-                      <div className="pt-2">
-                        <Button className="w-full" onClick={() => setIsFilterOpen(false)}>Apply Filters</Button>
                       </div>
                     </div>
-                  </div>
+                  </>
                 )}
               </div>
             </div>
@@ -739,30 +770,30 @@ if (followUpFilter === 'needs_followup') {
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2"><Label>Full Name *</Label><Input required value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} /></div>
                       <div className="space-y-2">
-  <Label htmlFor="phone">Phone *</Label>
-  <div className="flex">
-    <CountryCodeSelect
-      value={getPhoneInfo(formData.phone).code}
-      onChange={(newCode) => {
-        const currentNationalInfo = getPhoneInfo(formData.phone).nationalNumber;
-        setFormData({ ...formData, phone: newCode + currentNationalInfo });
-      }}
-    />
-    <Input
-      id="phone"
-      type="tel"
-      className="rounded-l-none"
-      placeholder="9876543210"
-      required
-      value={getPhoneInfo(formData.phone).nationalNumber}
-      onChange={(e) => {
-        const currentCode = getPhoneInfo(formData.phone).code;
-        const cleanNumber = e.target.value.replace(/\D/g, '');
-        setFormData({ ...formData, phone: currentCode + cleanNumber });
-      }}
-    />
-  </div>
-</div>
+                        <Label htmlFor="phone">Phone *</Label>
+                        <div className="flex">
+                          <CountryCodeSelect
+                            value={getPhoneInfo(formData.phone).code}
+                            onChange={(newCode) => {
+                              const currentNationalInfo = getPhoneInfo(formData.phone).nationalNumber;
+                              setFormData({ ...formData, phone: newCode + currentNationalInfo });
+                            }}
+                          />
+                          <Input
+                            id="phone"
+                            type="tel"
+                            className="rounded-l-none"
+                            placeholder="9876543210"
+                            required
+                            value={getPhoneInfo(formData.phone).nationalNumber}
+                            onChange={(e) => {
+                              const currentCode = getPhoneInfo(formData.phone).code;
+                              const cleanNumber = e.target.value.replace(/\D/g, '');
+                              setFormData({ ...formData, phone: currentCode + cleanNumber });
+                            }}
+                          />
+                        </div>
+                      </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2"><Label>Email</Label><Input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} /></div>
@@ -799,67 +830,67 @@ if (followUpFilter === 'needs_followup') {
                       </div>
                     </div>
                     <div className="space-y-2">
-  <Label>Assign To</Label>
-  <Popover open={isAddAgentOpen} onOpenChange={setIsAddAgentOpen}>
-    <PopoverTrigger asChild>
-      <Button 
-        variant="outline" 
-        role="combobox" 
-        className="w-full justify-between font-normal bg-white"
-      >
-        {formData.assignedToId
-          ? agents.find((agent) => agent.id === formData.assignedToId)?.fullName
-          : "Select Agent (Optional)"}
-        <span className="opacity-50 text-xs">▼</span>
-      </Button>
-    </PopoverTrigger>
-    <PopoverContent className="w-[300px] p-0" align="start">
-      <div className="p-2 border-b border-slate-100">
-        <Input
-          placeholder="Search agents..."
-          value={addAgentSearch}
-          onChange={(e) => setAddAgentSearch(e.target.value)}
-          className="h-8 text-sm"
-          autoFocus
-        />
-      </div>
-      <div className="max-h-[200px] overflow-y-auto p-1">
-        {formData.assignedToId && (
-          <div
-            className="px-2 py-2 text-sm cursor-pointer rounded-sm hover:bg-red-50 flex items-center text-red-600 font-medium mb-1"
-            onClick={() => {
-              setFormData({ ...formData, assignedToId: '' });
-              setIsAddAgentOpen(false);
-              setAddAgentSearch('');
-            }}
-          >
-            Unassign User
-          </div>
-        )}
-        {agents.filter(a => a.fullName.toLowerCase().includes(addAgentSearch.toLowerCase())).length === 0 ? (
-          <div className="text-sm text-center py-4 text-muted-foreground">No agents found</div>
-        ) : (
-          agents
-            .filter(a => a.fullName.toLowerCase().includes(addAgentSearch.toLowerCase()))
-            .map((agent) => (
-              <div
-                key={agent.id}
-                className={`px-2 py-2 text-sm cursor-pointer rounded-sm hover:bg-slate-100 flex items-center justify-between ${formData.assignedToId === agent.id ? 'bg-slate-50 font-medium' : ''}`}
-                onClick={() => {
-                  setFormData({ ...formData, assignedToId: agent.id });
-                  setIsAddAgentOpen(false);
-                  setAddAgentSearch(''); // reset search when closed
-                }}
-              >
-                {agent.fullName}
-                {formData.assignedToId === agent.id && <CheckCircle2 className="h-4 w-4 text-blue-600 shrink-0" />}
-              </div>
-            ))
-        )}
-      </div>
-    </PopoverContent>
-  </Popover>
-</div>
+                      <Label>Assign To</Label>
+                      <Popover open={isAddAgentOpen} onOpenChange={setIsAddAgentOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            role="combobox"
+                            className="w-full justify-between font-normal bg-white"
+                          >
+                            {formData.assignedToId
+                              ? agents.find((agent) => agent.id === formData.assignedToId)?.fullName
+                              : "Select Agent (Optional)"}
+                            <span className="opacity-50 text-xs">▼</span>
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[300px] p-0" align="start">
+                          <div className="p-2 border-b border-slate-100">
+                            <Input
+                              placeholder="Search agents..."
+                              value={addAgentSearch}
+                              onChange={(e) => setAddAgentSearch(e.target.value)}
+                              className="h-8 text-sm"
+                              autoFocus
+                            />
+                          </div>
+                          <div className="max-h-[200px] overflow-y-auto p-1">
+                            {formData.assignedToId && (
+                              <div
+                                className="px-2 py-2 text-sm cursor-pointer rounded-sm hover:bg-red-50 flex items-center text-red-600 font-medium mb-1"
+                                onClick={() => {
+                                  setFormData({ ...formData, assignedToId: '' });
+                                  setIsAddAgentOpen(false);
+                                  setAddAgentSearch('');
+                                }}
+                              >
+                                Unassign User
+                              </div>
+                            )}
+                            {agents.filter(a => a.fullName.toLowerCase().includes(addAgentSearch.toLowerCase())).length === 0 ? (
+                              <div className="text-sm text-center py-4 text-muted-foreground">No agents found</div>
+                            ) : (
+                              agents
+                                .filter(a => a.fullName.toLowerCase().includes(addAgentSearch.toLowerCase()))
+                                .map((agent) => (
+                                  <div
+                                    key={agent.id}
+                                    className={`px-2 py-2 text-sm cursor-pointer rounded-sm hover:bg-slate-100 flex items-center justify-between ${formData.assignedToId === agent.id ? 'bg-slate-50 font-medium' : ''}`}
+                                    onClick={() => {
+                                      setFormData({ ...formData, assignedToId: agent.id });
+                                      setIsAddAgentOpen(false);
+                                      setAddAgentSearch(''); // reset search when closed
+                                    }}
+                                  >
+                                    {agent.fullName}
+                                    {formData.assignedToId === agent.id && <CheckCircle2 className="h-4 w-4 text-blue-600 shrink-0" />}
+                                  </div>
+                                ))
+                            )}
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
                     <div className="space-y-2"><Label>Notes & Requirements</Label><Textarea placeholder="What does the agent need to know?" value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} /></div>
                     <div className="flex justify-end gap-2 pt-4">
                       <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
@@ -908,7 +939,7 @@ if (followUpFilter === 'needs_followup') {
           </div>
         )}
 
-      <div className="flex-1 overflow-y-auto pb-6 relative">
+        <div className="flex-1 overflow-y-auto pb-6 relative">
 
           {/* Search mode banner: shows when a search query bypasses all active filters */}
           {searchQuery.trim() && (
@@ -939,17 +970,17 @@ if (followUpFilter === 'needs_followup') {
                 {/* CRITICAL: We slice the array here so we only render 50 at a time */}
                 {filteredLeads.slice(0, visibleCount).map((lead) => (
                   <LeadCard
-                  key={lead.id}
-                  lead={lead}
-                  profiles={agents} /* <-- ADD THIS LINE HERE */
-                  onUpdate={fetchData} // This will trigger the silent background sync
-                  onEdit={(l) => { setLeadToEdit(l); setIsEditDialogOpen(true); }}
-                  selected={selectedLeads.has(lead.id)}
-                  onSelect={canAssignLeads ? () => toggleSelect(lead.id) : undefined}
-                />
+                    key={lead.id}
+                    lead={lead}
+                    profiles={agents} /* <-- ADD THIS LINE HERE */
+                    onUpdate={fetchData} // This will trigger the silent background sync
+                    onEdit={(l) => { setLeadToEdit(l); setIsEditDialogOpen(true); }}
+                    selected={selectedLeads.has(lead.id)}
+                    onSelect={canAssignLeads ? () => toggleSelect(lead.id) : undefined}
+                  />
                 ))}
               </div>
-              
+
               {/* Invisible div that triggers the "Load More" when scrolled into view */}
               <div ref={observerTarget} className="h-10 w-full mt-4 flex items-center justify-center">
                 {visibleCount < filteredLeads.length && (

@@ -413,13 +413,25 @@ export const mcubeWebhook = async (req: Request, res: Response) => {
 export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
   try {
     const agentId = req.user!.userId;
+    const role = req.user!.role;
+
+    const whereClause: any = {
+      callStatus: 'not_connected',
+      deletedAt: null,
+    };
+
+    if (role === 'sales_agent') {
+      // Agents see their own missed calls OR missed calls for their assigned leads
+      whereClause.OR = [
+        { agentId: agentId },
+        { lead: { assignedToId: agentId } }
+      ];
+    } else {
+      whereClause.agentId = agentId;
+    }
 
     const missedCallLogs = await prisma.callLog.findMany({
-      where: {
-        agentId,
-        callStatus: 'not_connected',
-        deletedAt: null,
-      },
+      where: whereClause,
       include: {
         lead: {
           select: {
@@ -429,7 +441,7 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
             temperature: true,
             stage: true,
             nextFollowupAt: true,
-            notes: true, // 👈 ADDED: Fetch the lead's global notes history
+            notes: true, 
           }
         }
       },
@@ -471,7 +483,7 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
           followUpStatus: taskId ? 'pending' : 'done',
           nextFollowupAt: (log.lead as any).nextFollowupAt?.toISOString?.() ?? null,
           taskId: taskId ?? null,
-          leadNotes: (log.lead as any).notes ?? null, // 👈 ADDED: Pass history to the frontend
+          leadNotes: (log.lead as any).notes ?? null, 
         };
       });
 
@@ -484,6 +496,221 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const getCallLogs = async (req: AuthRequest, res: Response) => {
+  try {
+    const { leadId, view, search, date, dateFrom, dateTo, callStatus, agentId, minDuration, direction, take } = req.query;
+
+    const where: any = { deletedAt: null };
+    if (leadId) where.leadId = leadId;
+
+    if (search) {
+      where.OR = [
+        { lead: { name: { contains: search as string, mode: 'insensitive' } } },
+        { lead: { phone: { contains: search as string } } },
+        { id: { endsWith: search as string, mode: 'insensitive' } }, 
+        { leadId: { endsWith: search as string, mode: 'insensitive' } } 
+      ];
+    }
+
+    const targetDateField = view === 'follow_ups' ? 'callbackScheduledAt' : 'callDate';
+
+    if (dateFrom || dateTo) {
+      where[targetDateField] = {};
+      if (dateFrom) {
+        const start = new Date(dateFrom as string);
+        start.setHours(0, 0, 0, 0);
+        where[targetDateField].gte = start;
+      }
+      if (dateTo) {
+        const end = new Date(dateTo as string);
+        end.setHours(23, 59, 59, 999);
+        where[targetDateField].lte = end;
+      }
+    } else if (date) {
+      const start = new Date(date as string);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setHours(23, 59, 59, 999);
+      where[targetDateField] = { gte: start, lte: end };
+    }
+
+    if (callStatus && callStatus !== 'all') where.callStatus = callStatus as string;
+    
+    // 👇 Fixed logic for Agent Visibility 👇
+    if (req.user!.role === 'sales_agent') {
+      where.AND = [
+        ...(where.AND || []),
+        {
+          OR: [
+            { agentId: req.user!.userId },
+            { lead: { assignedToId: req.user!.userId } }
+          ]
+        }
+      ];
+    } else if (agentId && agentId !== 'all') {
+      where.agentId = agentId as string;
+    }
+
+    if (minDuration && minDuration !== 'all') {
+      where.callDuration = { gte: parseInt(minDuration as string, 10) };
+    }
+
+    switch (view) {
+      case 'follow_ups':
+        where.callStatus = 'connected_callback'; 
+        break;
+      case 'missed':
+        where.callStatus = 'not_connected';
+        break;
+      case 'attended': where.callStatus = { in: ['connected_positive', 'connected_callback', 'not_interested'] }; break;
+      case 'qualified': where.callStatus = 'connected_positive'; break;
+      case 'unqualified': where.callStatus = 'not_interested'; break;
+      case 'archive': where.isArchived = true; break;
+      case 'inbound': where.notes = { contains: 'Inbound', mode: 'insensitive' }; break;
+      case 'outbound': where.notes = { contains: 'Outbound', mode: 'insensitive' }; break;
+      case 'active': {
+        if (!date && !dateFrom) {
+          const startOfDay = new Date();
+          startOfDay.setHours(0, 0, 0, 0);
+          where.callDate = { gte: startOfDay };
+        }
+        break;
+      }
+      case 'deleted':
+        delete where.deletedAt;
+        where.deletedAt = { not: null };
+        break;
+      default: break;
+    }
+
+    if (direction && direction !== 'all' && !['inbound', 'outbound', 'missed', 'follow_ups'].includes(view as string)) {
+      where.notes = { contains: direction === 'inbound' ? 'Inbound' : 'Outbound', mode: 'insensitive' };
+    }
+
+    const callLogs = await prisma.callLog.findMany({
+      where,
+      include: {
+        lead: { select: { id: true, name: true, phone: true, temperature: true, stage: true } },
+        agent: { select: { id: true, fullName: true, role: true } }
+      },
+      orderBy: view === 'follow_ups' ? { callbackScheduledAt: 'asc' } : { callDate: 'desc' },
+      take: take ? Math.min(parseInt(take as string, 10), 2000) : 500
+    });
+
+    return res.json(callLogs);
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to fetch call logs' });
+  }
+};
+
+export const getCallStats = async (req: AuthRequest, res: Response) => {
+  try {
+    const isSalesAgent = req.user!.role === 'sales_agent';
+    const currentUserId = req.user!.userId;
+    const agentId = req.query.agentId as string;
+    
+    const dateQuery = req.query.date as string;
+    const dateFrom = req.query.dateFrom as string;
+    const dateTo = req.query.dateTo as string;
+    const direction = req.query.direction as string;
+
+    const whereClause: any = { deletedAt: null };
+
+    // 👇 Fixed logic for Agent Visibility in Stats 👇
+    if (isSalesAgent) {
+      whereClause.OR = [
+        { agentId: currentUserId },
+        { lead: { assignedToId: currentUserId } }
+      ];
+    } else if (agentId && agentId !== 'all') {
+      whereClause.agentId = agentId;
+    }
+
+    if (direction && direction !== 'all') {
+      whereClause.notes = {
+        contains: direction === 'inbound' ? 'Inbound' : 'Outbound',
+        mode: 'insensitive'
+      };
+    }
+
+    if (dateFrom || dateTo) {
+      whereClause.callDate = {};
+      if (dateFrom) {
+        const start = new Date(dateFrom);
+        start.setHours(0, 0, 0, 0);
+        whereClause.callDate.gte = start;
+      }
+      if (dateTo) {
+        const end = new Date(dateTo);
+        end.setHours(23, 59, 59, 999);
+        whereClause.callDate.lte = end;
+      }
+    } else if (dateQuery) {
+      const start = new Date(dateQuery);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setHours(23, 59, 59, 999);
+      whereClause.callDate = { gte: start, lte: end };
+    }
+
+    const callsByStatus = await prisma.callLog.groupBy({
+      by: ['callStatus'],
+      where: whereClause,
+      _count: true
+    });
+
+    const totalCalls = callsByStatus.reduce((sum, item) => sum + item._count, 0);
+    const connectedCalls = callsByStatus.filter(item => item.callStatus.startsWith('connected')).reduce((sum, item) => sum + item._count, 0);
+
+    const inboundWhere = { ...whereClause, notes: { contains: 'Inbound', mode: 'insensitive' as const } };
+    const outboundWhere = { ...whereClause, notes: { contains: 'Outbound', mode: 'insensitive' as const } };
+
+    const [inboundStats, outboundStats] = await Promise.all([
+      prisma.callLog.groupBy({ by: ['callStatus'], where: inboundWhere, _count: true }),
+      prisma.callLog.groupBy({ by: ['callStatus'], where: outboundWhere, _count: true })
+    ]);
+
+    const inboundTotal = inboundStats.reduce((s, i) => s + i._count, 0);
+    const outboundTotal = outboundStats.reduce((s, i) => s + i._count, 0);
+    const inboundConnected = inboundStats.filter(i => i.callStatus.startsWith('connected')).reduce((s, i) => s + i._count, 0);
+    const outboundConnected = outboundStats.filter(i => i.callStatus.startsWith('connected')).reduce((s, i) => s + i._count, 0);
+    const inboundMissed = inboundStats.find(i => i.callStatus === 'not_connected')?._count || 0;
+    const outboundMissed = outboundStats.find(i => i.callStatus === 'not_connected')?._count || 0;
+
+    const newLeadsCount = await prisma.lead.count({ where: { stage: 'new' } });
+
+    let adminAssignedLeads = 0;
+    if (agentId && agentId !== 'all') {
+      adminAssignedLeads = await prisma.lead.count({
+        where: { assignedById: agentId } 
+      });
+    } else {
+      adminAssignedLeads = await prisma.lead.count({
+        where: { assignedById: { not: null } } 
+      });
+    }
+
+    return res.json({
+      totalCalls,
+      connectedCalls,
+      notAnswered: callsByStatus.find(i => i.callStatus === 'not_connected')?._count || 0,
+      positive: callsByStatus.find(i => i.callStatus === 'connected_positive')?._count || 0,
+      negative: callsByStatus.find(i => i.callStatus === 'not_interested')?._count || 0,
+      callback: callsByStatus.find(i => i.callStatus === 'connected_callback')?._count || 0,
+      connectRate: totalCalls > 0 ? Math.round((connectedCalls / totalCalls) * 100) : 0,
+      inboundTotal,
+      outboundTotal,
+      inboundConnected,
+      outboundConnected,
+      inboundMissed,
+      outboundMissed,
+      newLeads: newLeadsCount,
+      adminAssignedLeads 
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to fetch call stats' });
+  }
+};
 // ─────────────────────────────────────────────────────────────────────────────
 // EXISTING FUNCTIONS BELOW — NO CHANGES NEEDED
 // ─────────────────────────────────────────────────────────────────────────────
@@ -605,7 +832,7 @@ export const createCallLog = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const getCallLogs = async (req: AuthRequest, res: Response) => {
+export const getCallLogsOld = async (req: AuthRequest, res: Response) => {
   try {
     const { leadId, view, search, date, dateFrom, dateTo, callStatus, agentId, minDuration, direction, take } = req.query;
 
@@ -721,7 +948,7 @@ export const completeFollowUpTask = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const getCallStats = async (req: AuthRequest, res: Response) => {
+export const getCallStatsOld = async (req: AuthRequest, res: Response) => {
   try {
     const agentId = req.user!.role === 'sales_agent' ? req.user!.userId : (req.query.agentId as string);
     const dateQuery = req.query.date as string;

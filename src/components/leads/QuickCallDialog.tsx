@@ -39,11 +39,8 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: any) {
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
   const [isSuccessState, setIsSuccessState] = useState(false);
-
-  // ✅ FIX H1: Track explicit user initiation — do NOT auto-dial on open
   const [callInitiated, setCallInitiated] = useState(false);
 
-  // Form state
   const [callOutcome, setCallOutcome] = useState('');
   const [callDuration, setCallDuration] = useState('');
   const [notes, setNotes] = useState('');
@@ -53,7 +50,6 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: any) {
 
   const callCount = lead.callLogs?.length || 0;
 
-  // Reset all state each time the dialog opens
   useEffect(() => {
     if (open) {
       setIsSuccessState(false);
@@ -67,7 +63,6 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: any) {
     }
   }, [open]);
 
-  // ✅ FIX H1: Only dial when agent explicitly clicks "Start Call"
   async function handleStartCall() {
     try {
       toast({ title: 'Dialing...', description: 'Connecting call via MCUBE...' });
@@ -77,7 +72,6 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: any) {
         body: JSON.stringify({ leadPhone: lead.phone })
       });
       if (!res.ok) throw new Error();
-      // ✅ FIX: Tell parent to refresh so the new pending CallLog appears in the list
       onSuccess();
       toast({ title: '📞 Ringing Your Phone', description: 'Answer your phone — MCUBE will then connect you to the lead.' });
     } catch {
@@ -197,15 +191,35 @@ export function QuickCallDialog({ lead, open, onOpenChange, onSuccess }: any) {
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          {/* ✅ FIX H1: Two-phase UI — "Start Call" first, then outcome form */}
           {!callInitiated ? (
             <div className="text-center py-6 space-y-4">
               <p className="text-slate-500 text-sm">Ready to call <strong>{lead.name}</strong>?</p>
               <p className="text-xs text-muted-foreground">{lead.phone}</p>
-              <Button onClick={handleStartCall} className="bg-green-600 hover:bg-green-700 gap-2 px-8">
-                <Phone className="h-4 w-4" /> Start Call via MCUBE
-              </Button>
-              <p className="text-xs text-muted-foreground">After the call ends, log the outcome here.</p>
+              
+              <div className="flex flex-col gap-3 max-w-xs mx-auto">
+                <Button onClick={handleStartCall} className="bg-green-600 hover:bg-green-700 gap-2 w-full">
+                  <Phone className="h-4 w-4" /> Start Call via MCUBE
+                </Button>
+
+                <div className="relative my-2">
+                  <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-slate-200" /></div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-white px-2 text-muted-foreground">Or on Mobile</span>
+                  </div>
+                </div>
+
+                <a 
+                  href={`tel:${lead.phone}`} 
+                  className="w-full block" 
+                  onClick={() => setCallInitiated(true)} 
+                >
+                  <Button variant="outline" className="w-full gap-2 border-blue-200 text-blue-700 hover:bg-blue-50">
+                    <Phone className="h-4 w-4" /> Direct Call (Phone Dialer)
+                  </Button>
+                </a>
+              </div>
+
+              <p className="text-xs text-muted-foreground mt-4">After the call ends, log the outcome here.</p>
               <DialogFooter className="justify-center pt-2">
                 <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
               </DialogFooter>

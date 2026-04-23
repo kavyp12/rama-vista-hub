@@ -69,6 +69,28 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
   const isInitialLoad = useRef(true);
   const previousOverdueCount = useRef(0);
 
+  const previousMissedCallsCount = useRef(0);
+  const previousNewLeadsCount = useRef(0);
+
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  const sendNativeNotification = (title: string, body: string) => {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification(title, {
+        body,
+        icon: '/favicon.ico', 
+        vibrate: [200, 100, 200], 
+      } as NotificationOptions & { vibrate?: number[] });
+    }
+  };
+
+  
+
+  
   // Sound function for notifications
   function playNotificationSound() {
     try {
@@ -123,7 +145,6 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
       const headers = { 'Authorization': `Bearer ${token}` };
       const items: NotificationItem[] = [];
 
-      // Fetch common data for both
       const [leadsRes, visitsRes, overdueRes, statsRes, missedCallsRes] = await Promise.all([
         fetch(`${API_URL}/leads`, { headers }),
         fetch(`${API_URL}/site-visits?status=scheduled`, { headers }),
@@ -140,7 +161,6 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
       const activeStages = ['new', 'contacted', 'site_visit', 'negotiation', 'token'];
 
       if (isAgent) {
-        // ---- AGENT NOTIFICATIONS ----
         if (statsRes && statsRes.ok) {
           const data: AgentStats = await statsRes.json();
           if (data.missedCalls && data.missedCalls > 0) {
@@ -157,14 +177,12 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
           }
         }
 
-        // Fetch and store missed call details for expandable view
         if (missedCallsRes && missedCallsRes.ok) {
           const details: MissedCallDetail[] = await missedCallsRes.json();
           setMissedCallDetails(Array.isArray(details) ? details : []);
         }
 
         if (Array.isArray(leads)) {
-          // New Leads assigned today
           const newlyAssigned = leads.filter((l: any) => l.createdAt?.startsWith(today) || (l.assignedById && new Date(l.updatedAt) >= new Date(new Date().setHours(0, 0, 0, 0))));
           if (newlyAssigned.length > 0) {
             items.push({
@@ -173,7 +191,6 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
             });
           }
 
-          // Due/Overdue Follow-ups
           const dueFollowups = leads.filter((l: any) => {
             if (!l.nextFollowupAt) return false;
             return new Date(l.nextFollowupAt) <= now && activeStages.includes(l.stage);
@@ -186,7 +203,6 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
           }
         }
       } else {
-        // ---- ADMIN / MANAGER NOTIFICATIONS ----
         if (Array.isArray(leads)) {
           const sevenDaysAgo = new Date();
           sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -231,7 +247,6 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
         }
       }
 
-      // ---- COMMON NOTIFICATIONS (Site Visits & Overdue Payments) ----
       if (Array.isArray(visits)) {
         const todayVisits = visits.filter((v: any) => v.scheduledAt?.startsWith(today));
         if (todayVisits.length > 0) {
@@ -260,7 +275,6 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
         }
       }
 
-      // Sort highest count first, critical items first
       const priority: Record<string, number> = {
         missed_calls: 0,
         overdue_payments: 1,
@@ -278,18 +292,33 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
       const newTotal = items.reduce((sum, n) => sum + n.count, 0);
       setTotalCount(newTotal);
 
-      // Play sound ONLY if overdue payment count increased since last check, 
-      // and prevent it from trying to play on initial page load.
-      const overdueItem = items.find(i => i.id === 'overdue_payments');
-      const currentOverdueCount = overdueItem ? overdueItem.count : 0;
+      // 👇 NATIVE NOTIFICATION TRIGGERS 👇
+      if (!isInitialLoad.current) {
+        const overdueItem = items.find(i => i.id === 'overdue_payments');
+        const currentOverdueCount = overdueItem ? overdueItem.count : 0;
+        if (currentOverdueCount > previousOverdueCount.current) {
+          playNotificationSound();
+        }
+        previousOverdueCount.current = currentOverdueCount;
 
-      if (!isInitialLoad.current && currentOverdueCount > previousOverdueCount.current) {
-        playNotificationSound();
+        const missedItem = items.find(i => i.id === 'missed_calls');
+        const currentMissedCount = missedItem ? missedItem.count : 0;
+        if (currentMissedCount > previousMissedCallsCount.current) {
+          sendNativeNotification("Missed Call!", "A customer tried to call you but you were busy.");
+          playNotificationSound();
+        }
+        previousMissedCallsCount.current = currentMissedCount;
+
+        const assignedItem = items.find(i => i.id === 'new_assigned_leads');
+        const currentAssignedCount = assignedItem ? assignedItem.count : 0;
+        if (currentAssignedCount > previousNewLeadsCount.current) {
+          sendNativeNotification("New Lead Assigned", "Admin has assigned a new lead to your pipeline.");
+          playNotificationSound();
+        }
+        previousNewLeadsCount.current = currentAssignedCount;
       }
 
-      previousOverdueCount.current = currentOverdueCount;
       isInitialLoad.current = false;
-
       setLastFetched(new Date());
     } catch (err) {
       console.error('Notification fetch failed:', err);

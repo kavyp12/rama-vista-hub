@@ -267,17 +267,28 @@ const openWhatsApp = (e: React.MouseEvent) => {
             );
           })()}
 
-          {/* Notes Section */}
-          {lead.notes && (
-             <div className="bg-amber-50 rounded-md p-2 border border-amber-100 mt-1">
-               <div className="flex items-start gap-2">
-                 <FileText className="h-3 w-3 text-amber-600 mt-0.5 shrink-0" />
-                 <p className="text-[10px] text-amber-800 line-clamp-2 leading-tight" title={lead.notes}>
-                   {lead.notes}
-                 </p>
-               </div>
-             </div>
-          )}
+         {/* Last Message / Notes Section */}
+          {(() => {
+            // Find the most relevant recent message
+            const latestMessage = lastCall?.notes || lead.agentNotes || lead.notes;
+            const messageLabel = lastCall?.notes ? 'Last Interaction Note' : (lead.agentNotes ? 'Agent Private Note' : 'Admin Note');
+
+            if (!latestMessage) return null;
+
+            return (
+              <div className="bg-slate-50 rounded-md p-2 border border-slate-200 mt-1">
+                <div className="flex items-start gap-2">
+                  <MessageCircle className="h-3 w-3 text-blue-500 mt-0.5 shrink-0" />
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">{messageLabel}</span>
+                    <p className="text-[10px] text-slate-700 line-clamp-2 leading-tight mt-0.5" title={latestMessage}>
+                      {latestMessage}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
           
           <div className="flex items-center gap-1.5 text-xs text-slate-500">
             <Phone className="h-3 w-3 shrink-0" />
