@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { getIO } from '../utils/socket';
+import { sendPushToUser } from '../utils/webpush';
 
 // --- VALIDATION SCHEMAS ---
 
@@ -178,6 +179,13 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
           leadName: lead.name,
           assignedByName: lead.assignedBy?.fullName || 'Admin',
           message: `You have been assigned a new lead: ${lead.name}`
+        });
+        // 🔔 Also send a real Web Push so agent gets notified even with tab closed
+        await sendPushToUser(data.assignedToId, {
+          title: '📋 New Lead Assigned',
+          body: `You have been assigned a new lead: ${lead.name}`,
+          url: `/leads?highlight=${lead.id}`,
+          tag: `lead-${lead.id}`
         });
       } catch (e) {
         console.error('[Socket] updateLead emit failed:', e);
@@ -385,6 +393,13 @@ if (lead.assignedToId) {
       assignedByName: lead.assignedBy?.fullName || 'Admin',
       message: `A new lead has been assigned to you: ${lead.name}`
     });
+    // 🔔 Also send a real Web Push so agent gets notified even with tab closed
+    await sendPushToUser(lead.assignedToId, {
+      title: '📋 New Lead Assigned',
+      body: `A new lead has been assigned to you: ${lead.name}`,
+      url: `/leads?highlight=${lead.id}`,
+      tag: `lead-${lead.id}`
+    });
   } catch (e) {
     console.error('[Socket] createLead emit failed:', e);
   }
@@ -545,6 +560,13 @@ export const bulkAssign = async (req: AuthRequest, res: Response) => {
         leadName: `${leadIds.length} leads`,
         assignedByName: 'Admin',
         message: `${leadIds.length} leads have been assigned to you`
+      });
+      // 🔔 Also send a real Web Push so agent gets notified even with tab closed
+      await sendPushToUser(agentId, {
+        title: '📋 Leads Assigned',
+        body: `${leadIds.length} leads have been assigned to you`,
+        url: '/leads',
+        tag: 'bulk-lead-assign'
       });
     } catch (e) {
       console.error('[Socket] bulkAssign emit failed:', e);

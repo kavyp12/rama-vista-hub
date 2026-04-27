@@ -6,6 +6,10 @@ import { AppSidebar } from './AppSidebar';
 import { Separator } from '@/components/ui/separator';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
+
+import { useGlobalSocket } from '@/lib/socket';
+import { usePushSubscription } from '@/lib/usePushSubscription';
+
 import {
   Bell, X, AlertTriangle, Calendar, Users,
   Clock, TrendingDown, UserX, ChevronRight, RefreshCw, PhoneMissed,
@@ -52,6 +56,8 @@ interface DashboardLayoutProps {
 
 export function DashboardLayout({ children, title, description }: DashboardLayoutProps) {
   const { user, token, loading } = useAuth();
+  useGlobalSocket(user?.id, token);
+  usePushSubscription(token); // ← registers this device for Web Push (mobile background notifications)
   const { isAgent } = usePermissions();
   const navigate = useNavigate();
 
@@ -64,10 +70,14 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
   const [missedCallsExpanded, setMissedCallsExpanded] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+
+  
+
   const isInitialLoad = useRef(true);
   const previousOverdueCount = useRef(0);
   const previousMissedCallsCount = useRef(0);
   const previousNewLeadsCount = useRef(0);
+  const previousFollowupsCount = useRef(0);
 
   function playNotificationSound() {
     try {
@@ -89,13 +99,21 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
     }
   }
 
-  const sendNativeNotification = (title: string, body: string) => {
+  const sendNativeNotification = (title: string, body: string, url?: string) => {
     if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification(title, {
+      const notification = new Notification(title, {
         body,
         icon: '/favicon.ico',
         vibrate: [200, 100, 200],
       } as any);
+
+      if (url) {
+        notification.onclick = () => {
+          window.focus();
+          navigate(url);
+          notification.close();
+        };
+      }
     }
   };
 
@@ -291,19 +309,33 @@ export function DashboardLayout({ children, title, description }: DashboardLayou
 
         const missedItem = items.find(i => i.id === 'missed_calls');
         const currentMissedCount = missedItem ? missedItem.count : 0;
-        if (currentMissedCount > previousMissedCallsCount.current) {
-          sendNativeNotification("Missed Call!", "A customer tried to call you but you were busy.");
+        
+        // Prevent repeating by storing the count in sessionStorage
+        const savedMissedCount = parseInt(sessionStorage.getItem('last_missed_count') || '0', 10);
+        
+        if (currentMissedCount > savedMissedCount) {
+          sendNativeNotification("Missed Call!", "A customer tried to call you but you were busy.", "/missed-calls");
           playNotificationSound();
         }
-        previousMissedCallsCount.current = currentMissedCount;
+        
+        // Only update saved count if it was successfully fetched and valid
+        if (missedItem || currentMissedCount === 0) {
+           sessionStorage.setItem('last_missed_count', currentMissedCount.toString());
+        }
 
         const assignedItem = items.find(i => i.id === 'new_assigned_leads');
         const currentAssignedCount = assignedItem ? assignedItem.count : 0;
         if (currentAssignedCount > previousNewLeadsCount.current) {
-          sendNativeNotification("New Lead Assigned", "Admin has assigned a new lead to your pipeline.");
           playNotificationSound();
         }
         previousNewLeadsCount.current = currentAssignedCount;
+
+        const followUpItem = items.find(i => i.id === 'overdue_followup');
+        const currentFollowupCount = followUpItem ? followUpItem.count : 0;
+        if (currentFollowupCount > previousFollowupsCount.current) {
+          playNotificationSound();
+        }
+        previousFollowupsCount.current = currentFollowupCount;
       }
 
       isInitialLoad.current = false;

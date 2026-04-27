@@ -25,6 +25,8 @@ import {
   PieChart, Pie, Cell, Legend, RadialBarChart, RadialBar
 } from 'recharts';
 
+import { useNavigate } from 'react-router-dom';
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 // --- TYPES ---
@@ -160,6 +162,23 @@ export default function AgentDashboard() {
   const [callDuration, setCallDuration] = useState('');
   const [loggingCall, setLoggingCall] = useState(false);
 
+  const navigate = useNavigate();
+
+  const [doneTaskIds, setDoneTaskIds] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem('crm_completed_tasks');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Reset the cache if it's a new day
+        if (parsed.date === new Date().toDateString()) {
+          return parsed.ids;
+        }
+      }
+    } catch (e) { }
+    return [];
+  });
+
+  // 1. Keep your existing tasks state
   useEffect(() => {
     if (token && user?.id) fetchAllData();
   }, [token, user]);
@@ -205,13 +224,14 @@ export default function AgentDashboard() {
             title: `Site visit with ${v.lead.name}`,
             type: 'visit' as const,
             dueAt: v.scheduledAt,
-            done: false,
+            // 👉 Changed here:
+            done: doneTaskIds.includes(`visit-${v.id}`),
             leadName: v.lead.name,
             priority: 'high' as const,
           })),
         ...(Array.isArray(followUpsData) ? followUpsData : [])
           .filter((l: FollowUpLead) => {
-            if (!l.nextFollowupAt) return false; // Skip if no date
+            if (!l.nextFollowupAt) return false;
             const d = parseISO(l.nextFollowupAt);
             return isToday(d) || isPast(d);
           })
@@ -220,7 +240,8 @@ export default function AgentDashboard() {
             title: `Follow up with ${l.name}`,
             type: 'followup' as const,
             dueAt: l.nextFollowupAt,
-            done: false,
+            // 👉 Changed here:
+            done: doneTaskIds.includes(`followup-${l.id}`),
             leadName: l.name,
             priority: l.nextFollowupAt && isPast(parseISO(l.nextFollowupAt)) && !isToday(parseISO(l.nextFollowupAt))
               ? ('high' as const)
@@ -228,6 +249,10 @@ export default function AgentDashboard() {
           })),
       ];
       setTasks(generatedTasks);
+
+
+    
+
     } catch (error) {
       console.error(error);
       toast({ title: 'Error', description: 'Failed to load dashboard data', variant: 'destructive' });
@@ -295,11 +320,30 @@ export default function AgentDashboard() {
     setNewStage(lead.stage || '');
     setStageUpdateDialog(true);
   }
+  
 
+  
+  
+// --- PASTE HERE ---
   function toggleTask(taskId: string) {
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, done: !t.done } : t));
+    setDoneTaskIds(prev => {
+      const newIds = prev.includes(taskId) ? prev.filter(id => id !== taskId) : [...prev, taskId];
+      localStorage.setItem('crm_completed_tasks', JSON.stringify({
+        date: new Date().toDateString(),
+        ids: newIds
+      }));
+      return newIds;
+    });
   }
 
+  const navigateToLeads = (filters: any) => {
+    const currentFilters = JSON.parse(localStorage.getItem('crm_leads_filters') || '{}');
+    localStorage.setItem('crm_leads_filters', JSON.stringify({ ...currentFilters, ...filters }));
+    navigate('/leads');
+  };
+
+  
   // Derived Data (Added null checks so it doesn't crash on undefined dates)
   const todayVisits = visits.filter(v => v.scheduledAt && isToday(parseISO(v.scheduledAt)));
   const upcomingVisits = visits.filter(v => v.scheduledAt && !isToday(parseISO(v.scheduledAt)) && !isPast(parseISO(v.scheduledAt)));
@@ -387,7 +431,14 @@ export default function AgentDashboard() {
         {/* === DAILY SUMMARY BANNER === */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {stats?.missedCalls !== undefined && stats.missedCalls > 0 && (
-            <div className="bg-rose-50 border border-rose-100 rounded-xl p-4 flex items-center gap-3">
+            <div
+              onClick={() => {
+                // Switch to the missed calls tab on the dashboard
+                const missedTab = document.querySelector('[value="missed"]') as HTMLElement;
+                missedTab?.click();
+              }}
+              className="bg-rose-50 border border-rose-100 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:shadow-md hover:bg-rose-100/50 transition-all"
+            >
               <div className="h-10 w-10 bg-rose-100 rounded-full flex items-center justify-center shrink-0">
                 <PhoneMissed className="h-5 w-5 text-rose-600" />
               </div>
@@ -399,7 +450,10 @@ export default function AgentDashboard() {
             </div>
           )}
 
-          <div className="bg-red-50 border border-red-100 rounded-xl p-4 flex items-center gap-3">
+          <div
+            onClick={() => navigateToLeads({ followUpFilter: 'needs_followup', stageFilter: 'active_open' })}
+            className="bg-red-50 border border-red-100 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:shadow-md hover:bg-red-100/50 transition-all"
+          >
             <div className="h-10 w-10 bg-red-100 rounded-full flex items-center justify-center shrink-0">
               <AlertTriangle className="h-5 w-5 text-red-600" />
             </div>
@@ -410,7 +464,10 @@ export default function AgentDashboard() {
             </div>
           </div>
 
-          <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 flex items-center gap-3">
+          <div
+            onClick={() => navigateToLeads({ followUpFilter: 'needs_followup', stageFilter: 'active_open' })}
+            className="bg-amber-50 border border-amber-100 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:shadow-md hover:bg-amber-100/50 transition-all"
+          >
             <div className="h-10 w-10 bg-amber-100 rounded-full flex items-center justify-center shrink-0">
               <Clock className="h-5 w-5 text-amber-600" />
             </div>
@@ -421,7 +478,10 @@ export default function AgentDashboard() {
             </div>
           </div>
 
-          <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 flex items-center gap-3">
+          <div
+            onClick={() => navigate('/site-visits')} // Assuming you have a route for this
+            className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:shadow-md hover:bg-indigo-100/50 transition-all"
+          >
             <div className="h-10 w-10 bg-indigo-100 rounded-full flex items-center justify-center shrink-0">
               <Calendar className="h-5 w-5 text-indigo-600" />
             </div>
@@ -432,7 +492,13 @@ export default function AgentDashboard() {
             </div>
           </div>
 
-          <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 flex items-center gap-3">
+          <div
+            onClick={() => {
+              const taskTab = document.querySelector('[value="tasks"]') as HTMLElement;
+              taskTab?.click();
+            }}
+            className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:shadow-md hover:bg-emerald-100/50 transition-all"
+          >
             <div className="h-10 w-10 bg-emerald-100 rounded-full flex items-center justify-center shrink-0">
               <CheckSquare className="h-5 w-5 text-emerald-600" />
             </div>
@@ -771,9 +837,8 @@ export default function AgentDashboard() {
                         className="flex items-start gap-4 p-4 rounded-xl border border-rose-100 bg-rose-50/40 hover:bg-rose-50/80 transition-all group"
                       >
                         {/* Call type icon */}
-                        <div className={`h-11 w-11 rounded-full flex items-center justify-center shrink-0 ${
-                          call.type === 'inbound_missed' ? 'bg-rose-100' : 'bg-orange-100'
-                        }`}>
+                        <div className={`h-11 w-11 rounded-full flex items-center justify-center shrink-0 ${call.type === 'inbound_missed' ? 'bg-rose-100' : 'bg-orange-100'
+                          }`}>
                           {call.type === 'inbound_missed'
                             ? <PhoneMissed className="h-5 w-5 text-rose-600" />
                             : <PhoneOff className="h-5 w-5 text-orange-500" />
@@ -816,11 +881,10 @@ export default function AgentDashboard() {
                           </div>
 
                           <div className="flex items-center gap-1.5">
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
-                              call.type === 'inbound_missed'
-                                ? 'text-rose-700 bg-rose-100'
-                                : 'text-orange-700 bg-orange-100'
-                            }`}>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${call.type === 'inbound_missed'
+                              ? 'text-rose-700 bg-rose-100'
+                              : 'text-orange-700 bg-orange-100'
+                              }`}>
                               {call.type === 'inbound_missed' ? '↙ They Called You' : '↗ You Called, No Answer'}
                             </span>
                           </div>

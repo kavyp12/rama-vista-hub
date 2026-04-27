@@ -62,8 +62,23 @@ model User {
   recommendationsSent   PropertyRecommendation[] @relation("RecommendedBy")
   siteVisitsConducted   SiteVisit[]              @relation("ConductedBy")
   paymentStageHistories PaymentStageHistory[]
+  pushSubscriptions     PushSubscription[]
 
   @@map("users")
+}
+
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  endpoint  String   @unique          // browser push endpoint — unique per browser/device
+  p256dh    String   @map("p256dh")   // encryption key
+  auth      String                    // auth secret
+  createdAt DateTime @default(now())  @map("created_at")
+  updatedAt DateTime @updatedAt       @map("updated_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
 
 model Lead {

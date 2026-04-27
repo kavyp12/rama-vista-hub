@@ -9,7 +9,8 @@ import { Server } from 'socket.io';
 import routes from './routes';
 import { errorHandler } from './middlewares/error.middleware';
 import { prisma } from './utils/prisma';
-import { initIO } from './utils/socket';
+import { initIO, getIO } from './utils/socket';
+import { sendPushToUser } from './utils/webpush';
 
 dotenv.config();
 
@@ -66,6 +67,66 @@ io.on('connection', (socket) => {
 
 // Share the io instance with the rest of the app (controllers use it)
 initIO(io);
+// ───────────────────────────────────────────────────────────────────────────
+
+// ─── Cron Jobs (Simple Polling) ────────────────────────────────────────────
+const notifiedTasks = new Set<string>();
+
+const startCronJobs = () => {
+  // Check every 5 minutes
+  const checkFollowUps = async () => {
+    try {
+      const now = new Date();
+      const pendingTasks = await prisma.followUpTask.findMany({
+        where: {
+          status: 'pending',
+          scheduledAt: { lte: now }
+        },
+        include: { lead: true }
+      });
+      
+      for (const task of pendingTasks) {
+        if (!notifiedTasks.has(task.id)) {
+          // Send Web Push (Background PWA Notification)
+          await sendPushToUser(task.agentId, {
+            title: '⏰ Follow-up Reminder',
+            body: `Time to follow up with ${task.lead.name}.`,
+            url: `/leads?highlight=${task.leadId}`,
+            tag: `followup-${task.id}`
+          });
+          
+          // Send Socket Notification (If tab is open)
+          try {
+            getIO().to(`user:${task.agentId}`).emit('followup_reminder', {
+              leadId: task.leadId,
+              leadName: task.lead.name,
+              message: `Reminder: Follow up with ${task.lead.name}`
+            });
+          } catch (e) {
+            console.error('[Cron] Socket emit failed:', e);
+          }
+          
+          notifiedTasks.add(task.id);
+        }
+      }
+      
+      // Prevent memory bloat
+      if (notifiedTasks.size > 10000) notifiedTasks.clear();
+      
+    } catch (error) {
+      console.error('[Cron] Error checking follow-ups:', error);
+    }
+  };
+
+  // Run immediately on start
+  checkFollowUps();
+  
+  // Then check every 1 minute
+  setInterval(checkFollowUps, 60 * 1000);
+};
+
+// Start cron jobs
+startCronJobs();
 // ───────────────────────────────────────────────────────────────────────────
 
 // Start server (httpServer instead of app.listen — wraps socket.io)

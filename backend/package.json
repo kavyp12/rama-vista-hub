@@ -29,6 +29,7 @@
     "music-metadata": "^7.14.0",
     "pdfkit": "^0.17.2",
     "socket.io": "^4.8.3",
+    "web-push": "^3.6.7",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -40,6 +41,7 @@
     "@types/multer": "^2.0.0",
     "@types/node": "^20.19.30",
     "@types/pdfkit": "^0.17.4",
+    "@types/web-push": "^3.6.4",
     "nodemon": "^3.1.11",
     "prisma": "^5.22.0",
     "ts-node": "^10.9.2",

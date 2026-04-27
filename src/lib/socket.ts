@@ -1,6 +1,7 @@
 // src/lib/socket.ts
 import { useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { useToast } from '@/hooks/use-toast';
 
 const SOCKET_URL = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000';
 
@@ -11,14 +12,9 @@ interface LeadAssignedPayload {
   message: string;
 }
 
-interface UseLeadSocketOptions {
-  userId: string | undefined;
-  token: string | undefined | null;
-  onAssigned: (data: LeadAssignedPayload) => void;
-}
-
-export function useLeadAssignmentSocket({ userId, token, onAssigned }: UseLeadSocketOptions) {
+export function useGlobalSocket(userId?: string, token?: string | null) {
   const socketRef = useRef<Socket | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!userId || !token) return;
@@ -32,7 +28,6 @@ export function useLeadAssignmentSocket({ userId, token, onAssigned }: UseLeadSo
       reconnectionAttempts: 5,
       reconnectionDelay: 2000
     });
-
     socketRef.current = socket;
 
     socket.on('connect', () => {
@@ -40,34 +35,24 @@ export function useLeadAssignmentSocket({ userId, token, onAssigned }: UseLeadSo
       console.log('[Socket] Connected → joined room user:', userId);
     });
 
-    socket.on('connect_error', (err) => {
-      console.warn('[Socket] Connection error:', err.message);
+    socket.on('lead_assigned', async (data: LeadAssignedPayload) => {
+      // 1. Show in-app toast
+      toast({ title: '📋 New Lead Assigned', description: data.message, duration: 7000 });
+      
+      // 2. Fire global event so Leads.tsx can silently refresh if it's currently open
+      window.dispatchEvent(new CustomEvent('lead_assigned_refresh'));
+      // Note: PWA Desktop Notification is handled by the Service Worker via Web Push
     });
 
-    socket.on('lead_assigned', (data: LeadAssignedPayload) => {
-      onAssigned(data);
-
-      if ('Notification' in window && Notification.permission === 'granted') {
-        const notif = new Notification('📋 New Lead Assigned', {
-          body: data.message,
-          icon: '/rama_R_logo.png',
-          badge: '/rama_R_logo.png',
-          tag: `lead-${data.leadId || Date.now()}`,
-          data: { leadId: data.leadId }
-        });
-
-        notif.onclick = () => {
-          window.focus();
-          window.location.href = data.leadId
-            ? `/leads?highlight=${data.leadId}`
-            : '/leads';
-        };
-      }
+    socket.on('followup_reminder', async (data: any) => {
+      toast({ title: '⏰ Follow-up Reminder', description: data.message, duration: 7000 });
+      window.dispatchEvent(new CustomEvent('lead_assigned_refresh')); // Refresh leads list
+      // Note: PWA Desktop Notification is handled by the Service Worker via Web Push
     });
 
     return () => {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [userId, token]);
+  }, [userId, token, toast]);
 }

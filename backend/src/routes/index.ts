@@ -15,6 +15,7 @@ import userRoutes from './user.routes'; // ✅ ADD THIS
 import brokerRoutes from './broker.routes';
 import uploadRoutes from './upload.routes'; 
 import incentiveRoutes from './incentive.routes';
+import pushRoutes from './push.routes';
 
 const router = Router();
 
@@ -36,5 +37,6 @@ router.use('/documents', documentRoutes);
 router.use('/campaigns', campaignRoutes);
 router.use('/activities', activityRoutes);
 router.use('/incentives', incentiveRoutes);
+router.use('/push', pushRoutes);
 
 export default router;

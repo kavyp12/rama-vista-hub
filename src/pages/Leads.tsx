@@ -18,7 +18,7 @@ import { CountryCodeSelect } from '@/components/ui/CountryCodeSelect';
 // Add this import near your other @/components/ui imports:
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
-import { useLeadAssignmentSocket } from '../lib/socket';
+
 
 // Add CheckCircle2 to your existing lucide-react import:
 
@@ -134,19 +134,6 @@ export default function Leads() {
     preferredLocation: '', notes: '', assignedToId: ''
   });
 
-  // 🔔 Real-time lead assignment notifications
-  useLeadAssignmentSocket({
-    userId: user?.id,
-    token,
-    onAssigned: (data) => {
-      toast({
-        title: '📋 New Lead Assigned',
-        description: data.message,
-        duration: 7000
-      });
-      fetchData(true); // silent background refresh
-    }
-  });
 
   // Calculate active filters to show on the badge
   const activeFiltersCount = [
@@ -202,6 +189,13 @@ export default function Leads() {
       if (!isBackgroundRefresh) setLoading(false);
     }
   }, [token]); // ✅ FIX: removed assignedAdminFilter from deps — no longer needed here
+
+  useEffect(() => {
+    const handleRefresh = () => fetchData(true);
+    window.addEventListener('lead_assigned_refresh', handleRefresh);
+    return () => window.removeEventListener('lead_assigned_refresh', handleRefresh);
+  }, [fetchData]);
+
   useEffect(() => {
     if (!token) return;
 
@@ -772,9 +766,10 @@ export default function Leads() {
                             <Select value={followUpFilter} onValueChange={setFollowUpFilter}>
                               <SelectTrigger><SelectValue /></SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="all">All</SelectItem>
-                                <SelectItem value="needs_followup">Missed / Due Today</SelectItem>
-                                <SelectItem value="upcoming">Upcoming</SelectItem>
+                                <SelectItem value="all">All Follow-ups</SelectItem>
+                                {/* 👉 Highlighted the Due filter to stand out immediately */}
+                                <SelectItem value="needs_followup" className="font-semibold text-red-600">🔴 Due Today & Overdue</SelectItem>
+                                <SelectItem value="upcoming">📅 Upcoming</SelectItem>
                                 <SelectItem value="specific_date">Specific Date</SelectItem>
                                 <SelectItem value="no_followup">No Follow-up Set</SelectItem>
                               </SelectContent>
