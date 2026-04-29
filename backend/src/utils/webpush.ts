@@ -85,16 +85,20 @@ export async function sendPushToUser(
     )
   );
 
-  // Clean up stale subscriptions (410 Gone = user unsubscribed from browser)
+  // Clean up stale subscriptions:
+  //   410 Gone  → user explicitly unsubscribed in browser
+  //   404       → endpoint no longer exists
+  //   400/401   → invalid/expired subscription ("Received unexpected response code")
   const staleEndpoints: string[] = [];
   results.forEach((result, i) => {
     if (result.status === 'rejected') {
       const err = result.reason as any;
       const statusCode = err?.statusCode;
-      if (statusCode === 410 || statusCode === 404) {
+      console.warn(`[WebPush] Push failed for user ${userId} (HTTP ${statusCode ?? 'unknown'}):`, err?.message || err);
+      if (statusCode === 410 || statusCode === 404 || statusCode === 400 || statusCode === 401) {
         staleEndpoints.push(rows[i].endpoint);
+        console.log(`[WebPush] Marking endpoint as stale (${statusCode}) — will delete from DB`);
       }
-      console.warn(`[WebPush] Push failed for user ${userId}:`, err?.message || err);
     }
   });
 
