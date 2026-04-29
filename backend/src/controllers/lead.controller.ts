@@ -647,3 +647,61 @@ export const getAgentDashboardStats = async (req: AuthRequest, res: Response) =>
     return res.status(500).json({ error: 'Failed to fetch agent stats' });
   }
 };
+
+// ── Complete Follow-up ───────────────────────────────────────────────────────
+// Marks a lead's follow-up as done:
+//   - Clears the relevant follow-up date field (agent or admin)
+//   - Marks all pending followUpTask records for that lead as completed
+//   - Updates connected_callback call logs to connected_positive (removes from telecalling Follow Ups)
+// This stops repeated push notifications and removes the badge from the lead card.
+export const completeFollowUp = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const isAgent = req.user!.role === 'sales_agent';
+
+    const existingLead = await prisma.lead.findUnique({ where: { id } });
+    if (!existingLead) return res.status(404).json({ error: 'Lead not found' });
+
+    if (isAgent && existingLead.assignedToId !== req.user!.userId) {
+      return res.status(403).json({ error: 'You can only update your own leads.' });
+    }
+
+    // Clear the appropriate follow-up date field based on role
+    const clearField = isAgent
+      ? { agentNextFollowupAt: null }
+      : { nextFollowupAt: null };
+
+    // Also mark all pending followUpTask records for this agent+lead as completed
+    const agentIdFilter = isAgent ? req.user!.userId : undefined;
+
+    await prisma.$transaction([
+      prisma.lead.update({
+        where: { id },
+        data: clearField,
+      }),
+      prisma.followUpTask.updateMany({
+        where: {
+          leadId: id,
+          status: 'pending',
+          ...(agentIdFilter ? { agentId: agentIdFilter } : {}),
+        },
+        data: { status: 'completed', completedAt: new Date() },
+      }),
+      // Move connected_callback call logs to connected_positive so they disappear from
+      // the telecalling Follow Ups view (which only shows connected_callback status)
+      prisma.callLog.updateMany({
+        where: {
+          leadId: id,
+          callStatus: 'connected_callback',
+          ...(agentIdFilter ? { agentId: agentIdFilter } : {}),
+        },
+        data: { callStatus: 'connected_positive' },
+      }),
+    ]);
+
+    return res.json({ success: true, message: 'Follow-up marked as complete' });
+  } catch (error) {
+    console.error('completeFollowUp Error:', error);
+    return res.status(500).json({ error: 'Failed to complete follow-up' });
+  }
+};

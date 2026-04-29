@@ -416,7 +416,7 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
     const role = req.user!.role;
 
     const whereClause: any = {
-      callStatus: 'not_connected', 
+      callStatus: 'not_connected',
       deletedAt: null,
     };
 
@@ -475,7 +475,7 @@ export const getMissedCallsDetail = async (req: AuthRequest, res: Response) => {
           followUpStatus: taskId ? 'pending' : 'done',
           nextFollowupAt: (log.lead as any).nextFollowupAt?.toISOString?.() ?? null,
           taskId: taskId ?? null,
-          leadNotes: (log.lead as any).notes ?? null, 
+          leadNotes: (log.lead as any).notes ?? null,
         };
       });
 
@@ -500,8 +500,8 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
         OR: [
           { lead: { name: { contains: search as string, mode: 'insensitive' } } },
           { lead: { phone: { contains: search as string } } },
-          { id: { endsWith: search as string, mode: 'insensitive' } }, 
-          { leadId: { endsWith: search as string, mode: 'insensitive' } } 
+          { id: { endsWith: search as string, mode: 'insensitive' } },
+          { leadId: { endsWith: search as string, mode: 'insensitive' } }
         ]
       });
     }
@@ -532,7 +532,7 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
     if (callStatus && callStatus !== 'all') {
       andConditions.push({ callStatus: callStatus as string });
     }
-    
+
     // 👇 Bulletproof Agent Visibility for Telecalling List 👇
     if (req.user!.role === 'sales_agent') {
       andConditions.push({
@@ -551,28 +551,28 @@ export const getCallLogs = async (req: AuthRequest, res: Response) => {
 
     switch (view) {
       case 'follow_ups':
-        andConditions.push({ callStatus: 'connected_callback' }); 
+        andConditions.push({ callStatus: 'connected_callback' });
         break;
       case 'missed':
         andConditions.push({ callStatus: 'not_connected' });
         break;
-      case 'attended': 
-        andConditions.push({ callStatus: { in: ['connected_positive', 'connected_callback', 'not_interested'] } }); 
+      case 'attended':
+        andConditions.push({ callStatus: { in: ['connected_positive', 'connected_callback', 'not_interested'] } });
         break;
-      case 'qualified': 
-        andConditions.push({ callStatus: 'connected_positive' }); 
+      case 'qualified':
+        andConditions.push({ callStatus: 'connected_positive' });
         break;
-      case 'unqualified': 
-        andConditions.push({ callStatus: 'not_interested' }); 
+      case 'unqualified':
+        andConditions.push({ callStatus: 'not_interested' });
         break;
-      case 'archive': 
-        andConditions.push({ isArchived: true }); 
+      case 'archive':
+        andConditions.push({ isArchived: true });
         break;
-      case 'inbound': 
-        andConditions.push({ notes: { contains: 'Inbound', mode: 'insensitive' } }); 
+      case 'inbound':
+        andConditions.push({ notes: { contains: 'Inbound', mode: 'insensitive' } });
         break;
-      case 'outbound': 
-        andConditions.push({ notes: { contains: 'Outbound', mode: 'insensitive' } }); 
+      case 'outbound':
+        andConditions.push({ notes: { contains: 'Outbound', mode: 'insensitive' } });
         break;
       case 'active': {
         if (!date && !dateFrom) {
@@ -613,7 +613,7 @@ export const getCallStats = async (req: AuthRequest, res: Response) => {
     const isSalesAgent = req.user!.role === 'sales_agent';
     const currentUserId = req.user!.userId;
     const agentId = req.query.agentId as string;
-    
+
     const dateQuery = req.query.date as string;
     const dateFrom = req.query.dateFrom as string;
     const dateTo = req.query.dateTo as string;
@@ -687,11 +687,11 @@ export const getCallStats = async (req: AuthRequest, res: Response) => {
     let adminAssignedLeads = 0;
     if (agentId && agentId !== 'all') {
       adminAssignedLeads = await prisma.lead.count({
-        where: { assignedById: agentId } 
+        where: { assignedById: agentId }
       });
     } else {
       adminAssignedLeads = await prisma.lead.count({
-        where: { assignedById: { not: null } } 
+        where: { assignedById: { not: null } }
       });
     }
 
@@ -710,7 +710,7 @@ export const getCallStats = async (req: AuthRequest, res: Response) => {
       inboundMissed,
       outboundMissed,
       newLeads: newLeadsCount,
-      adminAssignedLeads 
+      adminAssignedLeads
     });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to fetch call stats' });

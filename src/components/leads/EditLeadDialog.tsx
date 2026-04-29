@@ -138,6 +138,25 @@ export function EditLeadDialog({ lead, open, onOpenChange, onSuccess }: any) {
     } catch (e) { toast({ title: 'Error', variant: 'destructive' }); }
     finally { setSubmitting(false); }
   }
+
+  async function handleCompleteFollowUp(field: 'admin' | 'agent') {
+    if (!lead || !token) return;
+    try {
+      const res = await fetch(`${API_URL}/leads/${lead.id}/complete-followup`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Failed');
+      // Clear the field in form state immediately
+      if (field === 'admin') setFormData(f => ({ ...f, nextFollowupAt: '' }));
+      else setFormData(f => ({ ...f, agentNextFollowupAt: '' }));
+      toast({ title: '✅ Follow-up cleared', description: 'Marked as done and removed.' });
+      onSuccess();
+    } catch {
+      toast({ title: 'Error', description: 'Could not complete follow-up.', variant: 'destructive' });
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[700px] max-h-[90vh] flex flex-col p-0">
@@ -259,7 +278,14 @@ export function EditLeadDialog({ lead, open, onOpenChange, onSuccess }: any) {
                     {canAssignLeads ? (
                       <>
                         <div className="space-y-2">
-                          <Label>Admin / Telecaller Follow-up</Label>
+                          <Label className="flex items-center justify-between">
+                            <span>Admin / Telecaller Follow-up</span>
+                            {formData.nextFollowupAt && (
+                              <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-green-700 hover:bg-green-50" onClick={() => handleCompleteFollowUp('admin')}>
+                                <CheckCircle2 className="h-3 w-3 mr-1" /> Mark Done
+                              </Button>
+                            )}
+                          </Label>
                           <div className="relative">
                             <Calendar className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                             <Input type="datetime-local" className="pl-9 bg-white" value={formData.nextFollowupAt} onChange={e => setFormData({...formData, nextFollowupAt: e.target.value})} />
@@ -275,7 +301,14 @@ export function EditLeadDialog({ lead, open, onOpenChange, onSuccess }: any) {
                       </>
                     ) : (
                       <div className="space-y-2 sm:col-span-2">
-                        <Label className="text-blue-700 font-semibold">Your Personal Follow-up</Label>
+                        <Label className="flex items-center justify-between">
+                          <span className="text-blue-700 font-semibold">Your Personal Follow-up</span>
+                          {formData.agentNextFollowupAt && (
+                            <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-green-700 hover:bg-green-50" onClick={() => handleCompleteFollowUp('agent')}>
+                              <CheckCircle2 className="h-3 w-3 mr-1" /> Mark Done
+                            </Button>
+                          )}
+                        </Label>
                         <p className="text-[10px] text-blue-600 mb-1">This is your private schedule, separate from the main telecalling pipeline.</p>
                         <div className="relative max-w-[50%]">
                           <Calendar className="absolute left-3 top-2.5 h-4 w-4 text-blue-600" />

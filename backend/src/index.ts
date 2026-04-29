@@ -70,58 +70,57 @@ initIO(io);
 // ───────────────────────────────────────────────────────────────────────────
 
 // ─── Cron Jobs (Simple Polling) ────────────────────────────────────────────
-const notifiedTasks = new Set<string>();
 
 const startCronJobs = () => {
-  // Check every 5 minutes
   const checkFollowUps = async () => {
     try {
       const now = new Date();
+      // Only fetch tasks that are pending AND haven't been notified yet
+      // We use lastNotifiedAt=null as the "not yet notified" flag so restarts don't re-fire
       const pendingTasks = await prisma.followUpTask.findMany({
         where: {
           status: 'pending',
-          scheduledAt: { lte: now }
+          scheduledAt: { lte: now },
+          lastNotifiedAt: null   // ← only send once per task
         },
         include: { lead: true }
       });
-      
+
       for (const task of pendingTasks) {
-        if (!notifiedTasks.has(task.id)) {
-          // Send Web Push (Background PWA Notification)
-          await sendPushToUser(task.agentId, {
-            title: '⏰ Follow-up Reminder',
-            body: `Time to follow up with ${task.lead.name}.`,
-            url: `/leads?highlight=${task.leadId}`,
-            tag: `followup-${task.id}`
+        // Mark as notified in DB FIRST so a crash mid-loop doesn't double-send
+        await prisma.followUpTask.update({
+          where: { id: task.id },
+          data: { lastNotifiedAt: new Date() }
+        });
+
+        // Send Web Push (Background PWA Notification)
+        await sendPushToUser(task.agentId, {
+          title: '⏰ Follow-up Reminder',
+          body: `Time to follow up with ${task.lead.name}.`,
+          url: `/leads?highlight=${task.leadId}`,
+          tag: `followup-${task.id}`
+        });
+
+        // Send Socket Notification (If tab is open)
+        try {
+          getIO().to(`user:${task.agentId}`).emit('followup_reminder', {
+            leadId: task.leadId,
+            leadName: task.lead.name,
+            message: `Reminder: Follow up with ${task.lead.name}`
           });
-          
-          // Send Socket Notification (If tab is open)
-          try {
-            getIO().to(`user:${task.agentId}`).emit('followup_reminder', {
-              leadId: task.leadId,
-              leadName: task.lead.name,
-              message: `Reminder: Follow up with ${task.lead.name}`
-            });
-          } catch (e) {
-            console.error('[Cron] Socket emit failed:', e);
-          }
-          
-          notifiedTasks.add(task.id);
+        } catch (e) {
+          console.error('[Cron] Socket emit failed:', e);
         }
+
+        console.log(`[Cron] 🔔 Notified agent ${task.agentId} for task ${task.id}`);
       }
-      
-      // Prevent memory bloat
-      if (notifiedTasks.size > 10000) notifiedTasks.clear();
-      
     } catch (error) {
       console.error('[Cron] Error checking follow-ups:', error);
     }
   };
 
-  // Run immediately on start
+  // Run immediately on start, then every 1 minute
   checkFollowUps();
-  
-  // Then check every 1 minute
   setInterval(checkFollowUps, 60 * 1000);
 };
 

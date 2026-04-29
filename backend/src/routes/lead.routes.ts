@@ -3,7 +3,7 @@ import { Router } from 'express';
 import {
   getLeads, getLead, createLead, updateLead, deleteLead,
   recommendProperties, logCall, getAgentDashboardStats,
-  togglePriority, bulkAssign, importLeads
+  togglePriority, bulkAssign, importLeads, completeFollowUp
 } from '../controllers/lead.controller';
 import { authenticate } from '../middlewares/auth.middleware';
 
@@ -25,6 +25,7 @@ router.delete('/:id', deleteLead);
 
 // Sub-resource routes on /:id
 router.patch('/:id/priority', togglePriority);
+router.patch('/:id/complete-followup', completeFollowUp);
 router.post('/:id/recommendations', recommendProperties);
 router.post('/:id/call-logs', logCall);
 

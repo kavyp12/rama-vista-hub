@@ -348,18 +348,19 @@ model CallLog {
 }
 
 model FollowUpTask {
-  id          String     @id @default(uuid())
-  leadId      String     @map("lead_id")
-  agentId     String     @map("agent_id")
-  taskType    String     @map("task_type")
-  scheduledAt DateTime   @map("scheduled_at")
-  status      TaskStatus @default(pending)
-  notes       String?
-  completedAt DateTime?  @map("completed_at")
-  createdAt   DateTime   @default(now()) @map("created_at")
-  updatedAt   DateTime   @updatedAt @map("updated_at")
-  agent       User       @relation(fields: [agentId], references: [id])
-  lead        Lead       @relation(fields: [leadId], references: [id])
+  id               String     @id @default(uuid())
+  leadId           String     @map("lead_id")
+  agentId          String     @map("agent_id")
+  taskType         String     @map("task_type")
+  scheduledAt      DateTime   @map("scheduled_at")
+  status           TaskStatus @default(pending)
+  notes            String?
+  completedAt      DateTime?  @map("completed_at")
+  lastNotifiedAt   DateTime?  @map("last_notified_at") // prevents re-sending on server restart
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+  agent            User       @relation(fields: [agentId], references: [id])
+  lead             Lead       @relation(fields: [leadId], references: [id])
 
   @@map("follow_up_tasks")
 }

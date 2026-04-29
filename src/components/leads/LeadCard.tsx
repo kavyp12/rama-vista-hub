@@ -13,7 +13,7 @@ import { useToast } from '@/hooks/use-toast';
 import { 
   Phone, Flame, Thermometer, Snowflake, 
   Home, CalendarPlus, UserCheck, MapPin, Calendar, Building2, Pencil, Wallet, FileText,
-  CheckCircle2, MessageCircle, Pin, PinOff, Trash2, UserPlus
+  CheckCircle2, MessageCircle, Pin, PinOff, Trash2, UserPlus, XCircle
 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { PropertyMatchModal } from './PropertyMatchModal';
@@ -161,6 +161,21 @@ const openWhatsApp = (e: React.MouseEvent) => {
     setShowWhatsAppDialog(true);
   };
 
+  const handleCompleteFollowUp = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`${API_URL}/leads/${lead.id}/complete-followup`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Failed');
+      toast({ title: '✅ Follow-up completed', description: 'Removed from your follow-up list.' });
+      onUpdate();
+    } catch {
+      toast({ title: 'Error', description: 'Could not complete follow-up.', variant: 'destructive' });
+    }
+  };
+
   const createdDate = lead.createdAt ? new Date(lead.createdAt) : new Date();
   const daysOld = Math.floor((Date.now() - createdDate.getTime()) / (1000 * 3600 * 24));
   const nextVisit = lead.siteVisits && lead.siteVisits.length > 0 ? lead.siteVisits[0] : null;
@@ -260,9 +275,18 @@ const openWhatsApp = (e: React.MouseEvent) => {
             return (
              <div className={`rounded-md p-2 border flex items-center gap-2 mt-1 ${isPast ? 'bg-red-50 border-red-100' : 'bg-purple-50 border-purple-100'}`}>
                  <Calendar className={`h-3 w-3 shrink-0 ${isPast ? 'text-red-600' : 'text-purple-600'}`} />
-                 <span className={`text-xs font-medium truncate ${isPast ? 'text-red-700' : 'text-purple-700'}`}>
+                 <span className={`text-xs font-medium truncate flex-1 ${isPast ? 'text-red-700' : 'text-purple-700'}`}>
                     Follow-up: {format(new Date(activeFollowUp), 'MMM d, h:mm a')}
                  </span>
+                 <Button
+                   variant="ghost"
+                   size="icon"
+                   className={`h-5 w-5 shrink-0 rounded-full hover:bg-green-100 hover:text-green-700 ${isPast ? 'text-red-400' : 'text-purple-400'}`}
+                   onClick={handleCompleteFollowUp}
+                   title="Mark follow-up as done"
+                 >
+                   <CheckCircle2 className="h-3.5 w-3.5" />
+                 </Button>
              </div>
             );
           })()}
