@@ -156,10 +156,10 @@ export default function Telecalling() {
   const { toast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [activeView, setActiveView] = useState(
+const [activeView, setActiveView] = useState(
     searchParams.get('view') || localStorage.getItem('crm_telecalling_view') || 'reports'
   );
-
+  
   const [filters, setFilters] = useState<FilterState>(() => {
     try {
       const saved = localStorage.getItem('crm_telecalling_filters');
@@ -246,7 +246,7 @@ export default function Telecalling() {
     }
   };
 
-  const handleMarkConnected = async (id: string, leadId?: string) => {
+  const handleMarkConnected = async (id: string) => {
     try {
       const res = await fetch(`${API_URL}/call-logs/${id}`, {
         method: 'PATCH',
@@ -254,13 +254,6 @@ export default function Telecalling() {
         body: JSON.stringify({ callStatus: 'connected_positive' }),
       });
       if (!res.ok) throw new Error();
-      // Also clear the follow-up from the lead side so it disappears from the lead's follow-up field
-      if (leadId) {
-        await fetch(`${API_URL}/leads/${leadId}/complete-followup`, {
-          method: 'PATCH',
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      }
       toast({ title: 'Updated', description: 'Missed call marked as Connected.' });
       fetchData();
       fetchStats();
@@ -288,7 +281,7 @@ export default function Telecalling() {
   };
 
   // Sync state to URL
-  // Sync view state to URL & LocalStorage
+// Sync view state to URL & LocalStorage
   useEffect(() => {
     setSearchParams({ view: activeView });
     localStorage.setItem('crm_telecalling_view', activeView);
@@ -975,8 +968,8 @@ export default function Telecalling() {
                                   key={row.id}
                                   // 👇 CHANGE 1: Distinct background, inner shadow, and primary border for sub-rows
                                   className={`transition-colors group ${isSubRow
-                                    ? 'bg-muted/60 border-l-4 border-l-primary border-t-0 shadow-[inset_0_4px_6px_-4px_rgba(0,0,0,0.05)]'
-                                    : 'hover:bg-muted/50 border-b'
+                                      ? 'bg-muted/60 border-l-4 border-l-primary border-t-0 shadow-[inset_0_4px_6px_-4px_rgba(0,0,0,0.05)]'
+                                      : 'hover:bg-muted/50 border-b'
                                     }`}
                                 >
                                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
@@ -1097,7 +1090,7 @@ export default function Telecalling() {
                                         </DropdownMenuItem>
 
                                         {!row.isLeadRow && (row.callStatus === 'not_connected' || row.callStatus === 'connected_callback') && (
-                                          <DropdownMenuItem onClick={() => handleMarkConnected(row.id, row.leadId)} className="text-green-600 focus:text-green-700 font-medium">
+                                          <DropdownMenuItem onClick={() => handleMarkConnected(row.id)} className="text-green-600 focus:text-green-700 font-medium">
                                             <CheckCircle2 className="h-3.5 w-3.5 mr-2" /> Mark as Connected
                                           </DropdownMenuItem>
                                         )}
@@ -1975,11 +1968,13 @@ function ReportsView({ stats, token, filters, setFilters, agents, onRefresh, isR
               {agentPerf.length > 0 ? (
                 <div className="space-y-2">
                   {agentPerf.map((agent, idx) => (
-                    <div key={agent.name} className={`flex items-center gap-3 py-2.5 px-3 rounded-lg hover:bg-muted/50 transition-colors border-l-2 ${agent.role === 'admin' ? 'border-l-purple-400 bg-purple-50/30' : 'border-l-transparent'
+                    <div key={agent.name} className={`flex items-center gap-3 py-2.5 px-3 rounded-lg hover:bg-muted/50 transition-colors border-l-2 ${
+                      agent.role === 'admin' ? 'border-l-purple-400 bg-purple-50/30' : 'border-l-transparent'
+                    }`}>
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                        agent.role === 'admin' ? 'bg-purple-100 text-purple-700' :
+                        idx === 0 ? 'bg-yellow-100 text-yellow-700' : idx === 1 ? 'bg-gray-100 text-gray-600' : idx === 2 ? 'bg-orange-100 text-orange-600' : 'bg-muted text-muted-foreground'
                       }`}>
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${agent.role === 'admin' ? 'bg-purple-100 text-purple-700' :
-                          idx === 0 ? 'bg-yellow-100 text-yellow-700' : idx === 1 ? 'bg-gray-100 text-gray-600' : idx === 2 ? 'bg-orange-100 text-orange-600' : 'bg-muted text-muted-foreground'
-                        }`}>
                         {agent.role === 'admin' ? '👑' : idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1}
                       </div>
                       <div className="flex-1 min-w-0">
