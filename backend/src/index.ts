@@ -69,25 +69,27 @@ io.on('connection', (socket) => {
 initIO(io);
 // ───────────────────────────────────────────────────────────────────────────
 
-// ─── Cron Jobs (Simple Polling) ────────────────────────────────────────────
+// ─── Cron Jobs (DB-backed, survives restarts) ──────────────────────────────
+
 
 const startCronJobs = () => {
+
   const checkFollowUps = async () => {
     try {
       const now = new Date();
-      // Only fetch tasks that are pending AND haven't been notified yet
-      // We use lastNotifiedAt=null as the "not yet notified" flag so restarts don't re-fire
+      // Only fetch tasks that haven't been notified yet (lastNotifiedAt: null)
+      // This guard survives server restarts — no in-memory state needed
       const pendingTasks = await prisma.followUpTask.findMany({
         where: {
           status: 'pending',
           scheduledAt: { lte: now },
-          lastNotifiedAt: null   // ← only send once per task
+          lastNotifiedAt: null   // ← DB-backed: only notify once per task
         },
         include: { lead: true }
       });
 
       for (const task of pendingTasks) {
-        // Mark as notified in DB FIRST so a crash mid-loop doesn't double-send
+        // Mark as notified in DB FIRST — crash-safe, prevents double-send
         await prisma.followUpTask.update({
           where: { id: task.id },
           data: { lastNotifiedAt: new Date() }
@@ -110,10 +112,25 @@ const startCronJobs = () => {
           });
         } catch (e) {
           console.error('[Cron] Socket emit failed:', e);
+
+
+
+
+
+
+
+
+
+
+
         }
 
         console.log(`[Cron] 🔔 Notified agent ${task.agentId} for task ${task.id}`);
       }
+
+
+
+
     } catch (error) {
       console.error('[Cron] Error checking follow-ups:', error);
     }
@@ -121,6 +138,8 @@ const startCronJobs = () => {
 
   // Run immediately on start, then every 1 minute
   checkFollowUps();
+
+
   setInterval(checkFollowUps, 60 * 1000);
 };
 
@@ -156,5 +175,3 @@ const gracefulShutdown = async () => {
 
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
-
-export default app;
