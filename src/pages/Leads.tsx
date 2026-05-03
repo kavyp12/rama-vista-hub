@@ -84,7 +84,7 @@ export default function Leads() {
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState(savedFilters.searchQuery ?? '');
-  const [stageFilter, setStageFilter] = useState(savedFilters.stageFilter ?? 'active_open');
+  const [stageFilter, setStageFilter] = useState(savedFilters.stageFilter ?? 'new');
   const [sourceFilter, setSourceFilter] = useState(savedFilters.sourceFilter ?? 'all');
   const [temperatureFilter, setTemperatureFilter] = useState(savedFilters.temperatureFilter ?? 'all');
   const [assignedAgentFilter, setAssignedAgentFilter] = useState(savedFilters.assignedAgentFilter ?? 'all');
@@ -527,15 +527,6 @@ export default function Leads() {
     .sort((a, b) => {
       if (a.isPriority && !b.isPriority) return -1;
       if (!a.isPriority && b.isPriority) return 1;
-
-      const aFollowUp = !canAssignLeads ? a.agentNextFollowupAt : a.nextFollowupAt;
-      const bFollowUp = !canAssignLeads ? b.agentNextFollowupAt : b.nextFollowupAt;
-
-      if (aFollowUp && bFollowUp) {
-        return new Date(aFollowUp).getTime() - new Date(bFollowUp).getTime();
-      }
-      if (aFollowUp) return -1;
-      if (bFollowUp) return 1;
 
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
